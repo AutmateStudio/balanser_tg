@@ -1,0 +1,253 @@
+    <!-- Вставка: скопируйте всё отсюда до конца комментария в <root> вашей диаграммы (draw.io → Правка → Редактировать диаграмму). -->
+    <mxCell id="tgDisc-title" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;Детализация: Telegram Discovery API (standalone_discovery / vps-108)&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="900" x="1050" y="1860" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-lane-discover" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=8;fontStyle=1;fillColor=#E8F4FC;strokeColor=#6c8ebf;" value="POST /discovery-api/discover&amp;nbsp;&lt;br&gt;(поиск каналов)" vertex="1">
+      <mxGeometry height="720" width="520" x="1050" y="1900" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-lane-groups" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;spacingTop=8;fontStyle=1;fillColor=#F0E6FF;strokeColor=#9673a6;" value="POST /discovery-api/discover-groups&amp;nbsp;&lt;br&gt;(поиск групп)" vertex="1">
+      <mxGeometry height="720" width="520" x="1600" y="1900" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="n8n / клиент&lt;div&gt;query, session_name&lt;/div&gt;&lt;div&gt;first_pass_limit, similarity_depth&lt;/div&gt;&lt;div&gt;include_global_search, include_groups&lt;/div&gt;" vertex="1">
+      <mxGeometry height="70" width="200" x="1080" y="1940" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="session_registry&lt;div&gt;get_session_string&lt;/div&gt;" vertex="1">
+      <mxGeometry height="50" width="200" x="1080" y="2030" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="discover_channels → _discover()&lt;div&gt;Telethon + VPN&lt;/div&gt;" vertex="1">
+      <mxGeometry height="50" width="200" x="1080" y="2100" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;" value="Глубина 0&lt;div&gt;contacts.SearchRequest&lt;/div&gt;&lt;div&gt;&lt;b&gt;source: search&lt;/b&gt;&lt;/div&gt;&lt;div&gt;название / username / about&lt;/div&gt;" vertex="1">
+      <mxGeometry height="80" width="180" x="1090" y="2170" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d5" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;" value="include_global_search?" vertex="1">
+      <mxGeometry height="60" width="120" x="1310" y="2180" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;" value="messages.SearchGlobalRequest&lt;div&gt;&lt;b&gt;source: global_search&lt;/b&gt;&lt;/div&gt;&lt;div&gt;запрос в постах / обсуждениях&lt;/div&gt;" vertex="1">
+      <mxGeometry height="70" width="180" x="1310" y="2270" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d7" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Дедуп peer_id&lt;div&gt;(дубль → побеждает search)&lt;/div&gt;&lt;div&gt;broadcast; + группы если include_groups&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="200" x="1080" y="2280" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d8" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="collect_lidgen_signals&lt;div&gt;+ score_channel_for_lidgen&lt;/div&gt;&lt;div&gt;(семафор LIDGEN_DISCOVERY_CONCURRENCY)&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="200" x="1080" y="2360" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d9" parent="1" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#dae8fc;" value="depth 1..similarity_depth&lt;div&gt;очередь BFS&lt;/div&gt;" vertex="1">
+      <mxGeometry height="70" width="160" x="1100" y="2440" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d10" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;" value="GetChannelRecommendations&lt;div&gt;&lt;b&gt;source: recommendation&lt;/b&gt;&lt;/div&gt;&lt;div&gt;sleep(delay)&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="200" x="1080" y="2530" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-d11" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Фильтр score_total ≥ LIDGEN_MIN_SCORE_TOTAL&lt;div&gt;Сортировка → channels[]&lt;/div&gt;" vertex="1">
+      <mxGeometry height="50" width="200" x="1080" y="2610" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="n8n / клиент&lt;div&gt;word, session_name&lt;/div&gt;&lt;div&gt;limit, depth&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="200" x="1630" y="1940" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="session_registry&lt;div&gt;get_session_string&lt;/div&gt;" vertex="1">
+      <mxGeometry height="50" width="200" x="1630" y="2020" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="discover_groups → _discover_groups()&lt;div&gt;max_runtime_sec = 90с&lt;/div&gt;" vertex="1">
+      <mxGeometry height="50" width="200" x="1630" y="2090" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;" value="_generate_group_seeds(word)&lt;div&gt;word, word чат, word группа,&lt;/div&gt;&lt;div&gt;community, group, forum...&lt;/div&gt;" vertex="1">
+      <mxGeometry height="70" width="200" x="1630" y="2160" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g5" parent="1" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#e1d5e7;" value="Для каждого seed" vertex="1">
+      <mxGeometry height="60" width="140" x="1660" y="2250" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;" value="contacts.Search&lt;div&gt;&lt;b&gt;source: contacts_search&lt;/b&gt;&lt;/div&gt;&lt;div&gt;только _is_group_entity&lt;/div&gt;" vertex="1">
+      <mxGeometry height="70" width="180" x="1630" y="2330" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g7" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;" value="messages.SearchGlobal&lt;div&gt;&lt;b&gt;source: global_search&lt;/b&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="180" x="1830" y="2330" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g8" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="add_group depth=0&lt;div&gt;score_group_for_lidgen&lt;/div&gt;&lt;div&gt;matched_seed = seed&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="200" x="1630" y="2410" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g9" parent="1" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#dae8fc;" value="depth 1..depth&lt;div&gt;очередь групп&lt;/div&gt;" vertex="1">
+      <mxGeometry height="70" width="160" x="1650" y="2490" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g10" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;" value="GetChannelRecommendations&lt;div&gt;(только Channel-супергруппы)&lt;/div&gt;&lt;div&gt;&lt;b&gt;source: recommendation&lt;/b&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="200" x="1630" y="2580" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-g11" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Сортировка → groups[]&lt;div&gt;+ seeds[], errors[]&lt;/div&gt;" vertex="1">
+      <mxGeometry height="50" width="200" x="1630" y="2660" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-api" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" value="HTTPS vps-108.web.oboyma.ai&lt;div&gt;nginx :80 → Docker :8100&lt;/div&gt;&lt;div&gt;X-API-Key на /discovery-api/*&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="280" x="1280" y="2720" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-merge" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;dashed=1;" value="Совмещение в n8n (2 запроса)&lt;div&gt;discover → channels[]&lt;/div&gt;&lt;div&gt;discover-groups → groups[]&lt;/div&gt;&lt;div&gt;дедуп по peer_id у клиента&lt;/div&gt;" vertex="1">
+      <mxGeometry height="70" width="280" x="1280" y="2800" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-d1" edge="1" parent="1" source="tgDisc-d1" target="tgDisc-d2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-d2" edge="1" parent="1" source="tgDisc-d2" target="tgDisc-d3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-d3" edge="1" parent="1" source="tgDisc-d3" target="tgDisc-d4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-d4" edge="1" parent="1" source="tgDisc-d4" target="tgDisc-d5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-d5y" edge="1" parent="1" source="tgDisc-d5" target="tgDisc-d6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;" value="да">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-d6" edge="1" parent="1" source="tgDisc-d6" target="tgDisc-d7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1400" y="2340" />
+          <mxPoint x="1180" y="2340" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-d5n" edge="1" parent="1" source="tgDisc-d5" target="tgDisc-d7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;" value="нет">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1180" y="2210" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-d7" edge="1" parent="1" source="tgDisc-d7" target="tgDisc-d8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-d8" edge="1" parent="1" source="tgDisc-d8" target="tgDisc-d9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-d9" edge="1" parent="1" source="tgDisc-d9" target="tgDisc-d10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-d10" edge="1" parent="1" source="tgDisc-d10" target="tgDisc-d9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;" value="ещё уровни">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1300" y="2560" />
+          <mxPoint x="1300" y="2475" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-d11" edge="1" parent="1" source="tgDisc-d10" target="tgDisc-d11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;" value="готово">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1050" y="2560" />
+          <mxPoint x="1050" y="2635" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-g1" edge="1" parent="1" source="tgDisc-g1" target="tgDisc-g2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-g2" edge="1" parent="1" source="tgDisc-g2" target="tgDisc-g3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-g3" edge="1" parent="1" source="tgDisc-g3" target="tgDisc-g4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-g4" edge="1" parent="1" source="tgDisc-g4" target="tgDisc-g5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-g5" edge="1" parent="1" source="tgDisc-g5" target="tgDisc-g6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-g6" edge="1" parent="1" source="tgDisc-g6" target="tgDisc-g8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-g7" edge="1" parent="1" source="tgDisc-g7" target="tgDisc-g8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1920" y="2380" />
+          <mxPoint x="1730" y="2380" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-g6g7" edge="1" parent="1" source="tgDisc-g5" target="tgDisc-g7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-g8" edge="1" parent="1" source="tgDisc-g8" target="tgDisc-g9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-g9" edge="1" parent="1" source="tgDisc-g9" target="tgDisc-g10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="tgDisc-e-g10" edge="1" parent="1" source="tgDisc-g10" target="tgDisc-g9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;" value="ещё уровни">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1850" y="2610" />
+          <mxPoint x="1850" y="2525" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-g11" edge="1" parent="1" source="tgDisc-g10" target="tgDisc-g11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;" value="готово">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1600" y="2610" />
+          <mxPoint x="1600" y="2685" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-g5loop" edge="1" parent="1" source="tgDisc-g11" target="tgDisc-g5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;" value="след. seed">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1580" y="2685" />
+          <mxPoint x="1580" y="2280" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-out1" edge="1" parent="1" source="tgDisc-d11" target="tgDisc-merge" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeColor=#6c8ebf;" value="channels[]">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1180" y="2760" />
+          <mxPoint x="1280" y="2760" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-out2" edge="1" parent="1" source="tgDisc-g11" target="tgDisc-merge" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeColor=#9673a6;" value="groups[]">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1730" y="2760" />
+          <mxPoint x="1560" y="2760" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-api1" edge="1" parent="1" source="tgDisc-d1" target="tgDisc-api" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;strokeColor=#82b366;" value="HTTPS">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1180" y="2750" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-e-api2" edge="1" parent="1" source="tgDisc-g1" target="tgDisc-api" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;strokeColor=#82b366;" value="HTTPS">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1730" y="2750" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-link76" edge="1" parent="1" source="3aw2RFNuunG2WBMGR7fr-76" target="tgDisc-d1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;strokeColor=#999999;" value="детализация">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="980" y="1200" />
+          <mxPoint x="980" y="1975" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-link145" edge="1" parent="1" source="3aw2RFNuunG2WBMGR7fr-145" target="tgDisc-d1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;strokeColor=#999999;">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="310" y="3090" />
+          <mxPoint x="310" y="1975" />
+          <mxPoint x="1080" y="1975" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tgDisc-link143" edge="1" parent="1" source="3aw2RFNuunG2WBMGR7fr-143" target="tgDisc-g1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;strokeColor=#999999;">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="310" y="2940" />
+          <mxPoint x="310" y="1970" />
+          <mxPoint x="1630" y="1970" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <!-- конец вставки -->

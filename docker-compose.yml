@@ -1,0 +1,150 @@
+name: lidogen-telegram-balancer
+
+# Сборка образа (один раз, без гонки BuildKit):
+#   docker compose build test
+#   docker compose build --no-cache test   # если «parent snapshot does not exist»
+#   docker builder prune -f                # очистка битого кэша BuildKit
+#
+# Локальная PG (profile local):  docker compose --profile local up -d postgres
+# Миграции (любая БД):           docker compose run --rm migrate
+# Тесты все (БД из .env):        docker compose run --rm test
+#   (на Linux dev-сервере: network_mode: host + .env с vps-100; preflight + pytest)
+# Тесты все (локальная PG):      docker compose --profile local run --rm test-local
+# Миграции перед первым test:    docker compose run --rm migrate
+# Воркер очереди (Z4):           docker compose up -d queue-worker
+# На хосте Linux:                 bash scripts/run_all_tests.sh
+
+# Общий образ приложения. build: только у сервиса test — остальные переиспользуют image.
+x-balancer-image: &balancer-image
+  image: lidogen-balancer:latest
+
+services:
+  postgres:
+    profiles: [local]
+    image: postgres:16
+    container_name: balancer-pg-local
+    environment:
+      POSTGRES_USER: lead_monitor_owner
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: lead_monitor
+    ports:
+      - "${PG_LOCAL_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lead_monitor_owner -d lead_monitor"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - balancer_pgdata:/var/lib/postgresql/data
+
+  migrate:
+    <<: *balancer-image
+    # Tailscale/MagicDNS на хосте (Linux dev-сервер); иначе vps-100 из контейнера недоступен.
+    network_mode: host
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
+    command: ["bash", "scripts/migrate_queue.sh", "--mode", "${MIGRATE_MODE:-auto}"]
+
+  migrate-local:
+    <<: *balancer-image
+    profiles: [local]
+    environment:
+      QUEUE_DATABASE_URL: postgresql://lead_monitor_owner:dev_password@postgres:5432/lead_monitor
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["bash", "scripts/migrate_queue.sh", "--mode", "greenfield"]
+
+  # Z4 — процесс воркера очереди (C1: claim_next loop + graceful SIGTERM).
+  queue-worker:
+    <<: *balancer-image
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WORKER_TASK_ADAPTER: ${WORKER_TASK_ADAPTER:-mock}
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-1.0}
+      WORKER_LOCK_TTL_SECONDS: ${WORKER_LOCK_TTL_SECONDS:-300}
+      WORKER_POSTPONE_DELAY_SECONDS: ${WORKER_POSTPONE_DELAY_SECONDS:-300}
+      API_ID: ${API_ID:-}
+      API_HASH: ${API_HASH:-}
+      # Пути внутри контейнера (не путать с HOST_SESSIONS_DIR — bind mount на хосте).
+      SESSIONS_DIR: /app/sessions
+      PARSER_STORE_PATH: /app/standalone_discovery/discovery_api/data/parser_jobs.json
+    volumes:
+      # Bind mount: путь на хосте должен начинаться с ./ или / (Compose иначе считает volume name).
+      - ${HOST_SESSIONS_DIR:-./standalone_discovery/sessions}:/app/sessions
+      - ./standalone_discovery/discovery_api/data:/app/standalone_discovery/discovery_api/data
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_worker"]
+
+  queue-worker-local:
+    <<: *balancer-image
+    profiles: [local]
+    restart: unless-stopped
+    environment:
+      QUEUE_DATABASE_URL: postgresql://lead_monitor_owner:dev_password@postgres:5432/lead_monitor
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate-local:
+        condition: service_completed_successfully
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_worker"]
+
+  test:
+    <<: *balancer-image
+    build: .
+    # Доступ к vps-100 через Tailscale хоста (vps-101 и др. Linux dev-серверы).
+    network_mode: host
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
+      PYTEST_TEST_PRIORITY: ${PYTEST_TEST_PRIORITY:-2000000000}
+      DISCOVERY_BASE_URL: ${DISCOVERY_BASE_URL:-}
+      DISCOVERY_API_KEY: ${DISCOVERY_API_KEY:-}
+      PARSER_ID: ${PARSER_ID:-}
+      E2E_CHANNEL_REF: ${E2E_CHANNEL_REF:-}
+      E2E_SESSION_NAME: ${E2E_SESSION_NAME:-}
+      E2E_START_CHANNELS: ${E2E_START_CHANNELS:-}
+      E2E_WEBHOOK_URL: ${E2E_WEBHOOK_URL:-}
+      E2E_POLL_INTERVAL_SECONDS: ${E2E_POLL_INTERVAL_SECONDS:-}
+      E2E_POLL_TIMEOUT_SECONDS: ${E2E_POLL_TIMEOUT_SECONDS:-}
+      E2E_SKIP_VERIFY_PG: ${E2E_SKIP_VERIFY_PG:-}
+      E2E_VERIFY_TASK_ATTEMPTS: ${E2E_VERIFY_TASK_ATTEMPTS:-}
+      WORKER_TASK_ADAPTER: ${WORKER_TASK_ADAPTER:-}
+    # D12 — живые данные discovery с хоста (sync_accounts_to_pg видит реальный
+    # parser_jobs.json и *.session, иначе читает устаревшую копию из образа).
+    # scripts/ примонтирован, чтобы правки E2E-скриптов подхватывались без rebuild.
+    volumes:
+      - ./standalone_discovery/data:/app/standalone_discovery/data
+      - ./standalone_discovery/sessions:/app/standalone_discovery/sessions
+      - ./standalone_discovery/discovery_api/data:/app/standalone_discovery/discovery_api/data
+      - ./scripts:/app/scripts
+    command: ["bash", "scripts/run_docker_tests.sh"]
+
+  test-local:
+    <<: *balancer-image
+    profiles: [local]
+    environment:
+      QUEUE_DATABASE_URL: postgresql://lead_monitor_owner:dev_password@postgres:5432/lead_monitor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate-local:
+        condition: service_completed_successfully
+    command: ["bash", "scripts/run_docker_tests.sh"]
+
+volumes:
+  balancer_pgdata:

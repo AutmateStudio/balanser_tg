@@ -1,0 +1,3 @@
+-- Канонический seed: DB/A9_seed.sql (resource_op_types + task_types + task_type_ops).
+-- Этот файл сохранён для трассируемости в docs(plan); применять:
+--   psql $QUEUE_DATABASE_URL -f DB/BD_schema.sql -f DB/A9_seed.sql

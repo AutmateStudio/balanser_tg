@@ -1,0 +1,7 @@
+# Все текстовые файлы — LF (Linux/Docker). Иначе bash: $'\r': command not found
+* text=auto eol=lf
+
+*.sh text eol=lf
+scripts/** text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf

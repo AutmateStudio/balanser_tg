@@ -1,0 +1,74 @@
+name: standalone-discovery
+
+services:
+  # ── WireGuard VPN — общий сетевой namespace для discovery-api ──
+  vpn:
+    image: linuxserver/wireguard:latest
+    container_name: standalone-discovery-vpn
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      # SYS_MODULE можно убрать, если модуль wireguard уже загружен на хосте
+      # (судя по логам, он активен). Оставьте, если не уверены.
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=${TZ:-Europe/Moscow}
+      # СПЛИТ-ТУННЕЛЬ настраивается НЕ здесь, а в секции [Peer] файла
+      # ./vpn_telegram_gleb.conf через поле AllowedIPs.
+      # Чтобы через VPN шёл ТОЛЬКО Telegram, в .conf укажите подсети Telegram, например:
+      #   AllowedIPs = 149.154.160.0/20, 91.108.4.0/22, 91.108.8.0/22, 91.108.56.0/22
+      # Полное туннелирование (всё через VPN): AllowedIPs = 0.0.0.0/0
+      # Переменная ALLOWEDIPS у образа linuxserver/wireguard действует только в server-mode
+      # (когда контейнер сам генерирует конфиги клиентов) и в нашей схеме ИГНОРИРУЕТСЯ.
+    volumes:
+      - ./Telegram-Parser-Gleb-2.conf:/config/wg_confs/wg0.conf:ro
+    ports:
+      - "${DISCOVERY_APP_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wg show wg0 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  discovery-api:
+    build: .
+    image: standalone-discovery-api:latest
+    container_name: standalone-discovery-api
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    network_mode: "service:vpn"
+    depends_on:
+      vpn:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/discovery_api/data
+      - ./sessions:/app/sessions
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 25s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

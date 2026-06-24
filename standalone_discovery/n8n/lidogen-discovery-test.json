@@ -1,0 +1,2157 @@
+{
+  "name": "Lidogen Discovery — vps-108 (HTTPS)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "00000000-0000-0000-0000-000000000001",
+      "name": "Старт вручную",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -600,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a00000000",
+              "name": "endpoint",
+              "value": "health",
+              "type": "string"
+            },
+            {
+              "id": "a00000001",
+              "name": "baseUrl",
+              "value": "https://vps-108.web.oboyma.ai",
+              "type": "string"
+            },
+            {
+              "id": "a00000002",
+              "name": "apiKey",
+              "value": "={{ $env.LIDOGEN_DISCOVERY_API_KEY }}",
+              "type": "string"
+            },
+            {
+              "id": "a00000003",
+              "name": "sessionName",
+              "value": "Client1",
+              "type": "string"
+            },
+            {
+              "id": "a00000004",
+              "name": "newSessionName",
+              "value": "Client3",
+              "type": "string"
+            },
+            {
+              "id": "a00000005",
+              "name": "sessionList",
+              "value": "Client1,Client2",
+              "type": "string"
+            },
+            {
+              "id": "a00000006",
+              "name": "channels",
+              "value": "@telegram,@durov",
+              "type": "string"
+            },
+            {
+              "id": "a00000007",
+              "name": "webhookUrl",
+              "value": "https://webhook.site/ЗАМЕНИ-НА-СВОЙ-UUID",
+              "type": "string"
+            },
+            {
+              "id": "a00000008",
+              "name": "parserId",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "a00000009",
+              "name": "qrSessionId",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "a00000010",
+              "name": "query",
+              "value": "крипта инвестиции",
+              "type": "string"
+            },
+            {
+              "id": "a00000011",
+              "name": "link",
+              "value": "https://t.me/durov",
+              "type": "string"
+            },
+            {
+              "id": "a00000012",
+              "name": "displayName",
+              "value": "Основной аккаунт",
+              "type": "string"
+            },
+            {
+              "id": "a00000013",
+              "name": "description",
+              "value": "тестовое описание",
+              "type": "string"
+            },
+            {
+              "id": "a00000014",
+              "name": "chatId",
+              "value": 123456789,
+              "type": "number"
+            },
+            {
+              "id": "a00000015",
+              "name": "messageText",
+              "value": "Привет из n8n",
+              "type": "string"
+            },
+            {
+              "id": "a00000016",
+              "name": "maxChannels",
+              "value": 300,
+              "type": "number"
+            },
+            {
+              "id": "a00000017",
+              "name": "adminBlocked",
+              "value": "false",
+              "type": "string"
+            },
+            {
+              "id": "a00000018",
+              "name": "blockReason",
+              "value": "ручная блокировка",
+              "type": "string"
+            },
+            {
+              "id": "a00000019",
+              "name": "actionId",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "a00000020",
+              "name": "migrateOnDelete",
+              "value": "true",
+              "type": "string"
+            },
+            {
+              "id": "a00000021",
+              "name": "taskId",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "00000000-0000-0000-0000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -380,
+        600
+      ],
+      "notes": "Сервер: vps-108.web.oboyma.ai (HTTPS через nginx:80 → Docker :8100). baseUrl без :8100. apiKey: переменная окружения n8n LIDOGEN_DISCOVERY_API_KEY (= API_KEY из ~/standalone_discovery/.env на vps-108). health без ключа; остальные /discovery-api/* — X-API-Key. endpoint = ветка Switch."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-health",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "health",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "health"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-qr_create",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "qr_create",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qr_create"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-qr_status",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "qr_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qr_status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-qr_delete",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "qr_delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qr_delete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-discover",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "discover",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "discover"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-discover_groups",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "discover_groups",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "discover_groups"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-add_channel_by_link",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "add_channel_by_link",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add_channel_by_link"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-add_channel_by_link_file",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "add_channel_by_link_file",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add_channel_by_link_file"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-bot_send_message",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "bot_send_message",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "bot_send_message"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_start",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_start",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_start"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_list",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_list",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_list"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_status",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_stop",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_stop",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_stop"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_delete",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_delete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-channels_list",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "channels_list",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "channels_list"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-add_channels",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "add_channels",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add_channels"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-remove_channels",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "remove_channels",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "remove_channels"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-config_get",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "config_get",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "config_get"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-config_patch",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "config_patch",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "config_patch"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-add_session",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "add_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add_session"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-remove_session",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "remove_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "remove_session"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-accounts",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "accounts",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "accounts"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-account_detail",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "account_detail",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "account_detail"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-account_channels",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "account_channels",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "account_channels"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-account_meta",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "account_meta",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "account_meta"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-add_channels_sync",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "add_channels_sync",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add_channels_sync"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-accounts_all",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "accounts_all",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "accounts_all"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-accounts_update",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "accounts_update",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "accounts_update"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-account_block",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "account_block",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "account_block"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-account_delete",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "account_delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "account_delete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-enroll_session",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "enroll_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "enroll_session"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-actions_list",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "actions_list",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "actions_list"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-action_get",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "action_get",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "action_get"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-settings",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "settings",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "settings"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "00000000-0000-0000-0000-000000000003",
+      "name": "Switch: endpoint",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -140,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/health",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "10000000-0000-0000-0000-000000000000",
+      "name": "00 Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        -900
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/auth/qr",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.newSessionName }}\"\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000001",
+      "name": "01 QR: создать сессию",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        -770
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/auth/qr/{{ $('Config').item.json.qrSessionId }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000002",
+      "name": "02 QR: статус",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        -640
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/auth/qr/{{ $('Config').item.json.qrSessionId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000003",
+      "name": "03 QR: удалить",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        -510
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/discover",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"query\": \"{{ $('Config').item.json.query }}\",\n  \"first_pass_limit\": 5,\n  \"similarity_depth\": 1,\n  \"include_global_search\": true,\n  \"include_groups\": false\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000004",
+      "name": "04 Discover каналы",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        -380
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/discover-groups",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"word\": \"{{ $('Config').item.json.query }}\",\n  \"limit\": 20,\n  \"depth\": 2\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000005",
+      "name": "05 Discover группы",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        -250
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/add-channel-by-link",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"link\": \"{{ $('Config').item.json.link }}\"\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000006",
+      "name": "06 Канал по ссылке",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        -120
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/add-channel-by-link-session-file",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_file\": \"{{ $('Config').item.json.sessionName }}\",\n  \"link\": \"{{ $('Config').item.json.link }}\"\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000007",
+      "name": "07 Канал по ссылке (session file)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        10
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/bot/send-message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": {{ $('Config').item.json.chatId }},\n  \"text\": \"{{ $('Config').item.json.messageText }}\"\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000008",
+      "name": "08 Бот: отправить сообщение",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        140
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/start",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name_list\": {{ JSON.stringify($('Config').item.json.sessionList.split(',').map(s => s.trim())) }},\n  \"clump_name\": \"n8n-test\",\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim())) }},\n  \"webhook_url\": \"{{ $('Config').item.json.webhookUrl }}\"\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000009",
+      "name": "09 Parser: start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        270
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/list",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000010",
+      "name": "10 Parser: list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        400
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/status/{{ $('Config').item.json.parserId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000011",
+      "name": "11 Parser: status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        530
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/stop/{{ $('Config').item.json.parserId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000012",
+      "name": "12 Parser: stop",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        660
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000013",
+      "name": "13 Parser: delete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        790
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/channels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000014",
+      "name": "14 Channels: list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        920
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/add-channels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim())) }}\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000015",
+      "name": "15 Channels: add (очередь async)",
+      "notes": "POST add-channels (async=true по умолчанию). USE_PG_QUEUE: в ответе action_id + task_ids[] (по задаче на канал). Статус — ветка action_get (узел 33) по task_id из task_ids[], НЕ по action_id (его нет в SQLite при PG-очереди).",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        1050
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/remove-channels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim())) }}\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000016",
+      "name": "16 Channels: remove",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        1180
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/config",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000017",
+      "name": "17 Config: get",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        1310
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/config",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"max_channels_per_session\": 300,\n  \"max_reconnects\": 5,\n  \"flood_migrate_threshold_seconds\": 3600,\n  \"resolve_min_interval\": 1.5,\n  \"auto_migrate\": true,\n  \"add_channels_per_hour\": 0,\n  \"rebalance_enabled\": false,\n  \"rebalance_idle_start_hour\": 2,\n  \"rebalance_idle_end_hour\": 6,\n  \"rebalance_high_watermark_ratio\": 0.9,\n  \"rebalance_low_watermark_ratio\": 0.6,\n  \"rebalance_min_gap_channels\": 20,\n  \"rebalance_max_moves_per_tick\": 5,\n  \"rebalance_cooldown_hours\": 24\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000018",
+      "name": "18 Config: patch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        1440
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/add-session",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.newSessionName }}\"\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000019",
+      "name": "19 Session: add в clump",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        1570
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/remove-session",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.newSessionName }}\"\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000020",
+      "name": "20 Session: remove из clump",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        1700
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/accounts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000021",
+      "name": "21 Accounts: в clump",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        1830
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/account-detail?session_name={{ encodeURIComponent($('Config').item.json.sessionName) }}{{ $('Config').item.json.parserId ? '&parser_id=' + encodeURIComponent($('Config').item.json.parserId) : '' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000022",
+      "name": "22 Account: карточка",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        1960
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/account-channels?session_name={{ encodeURIComponent($('Config').item.json.sessionName) }}{{ $('Config').item.json.parserId ? '&parser_id=' + encodeURIComponent($('Config').item.json.parserId) : '' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000023",
+      "name": "23 Account: каналы",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        2090
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/account-meta",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"parser_id\": \"{{ $('Config').item.json.parserId }}\",\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"display_name\": \"{{ $('Config').item.json.displayName }}\",\n  \"description\": \"{{ $('Config').item.json.description }}\",\n  \"max_channels\": {{ $('Config').item.json.maxChannels }}\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000024",
+      "name": "24 Account: изменить meta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        2220
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/settings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000025",
+      "name": "25 Settings (глобальные)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        2350
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/add-channels?async=0",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim())) }}\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000026",
+      "name": "26 Channels: add sync",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        2480
+      ],
+      "continueOnFail": true,
+      "notes": "Синхронное добавление каналов (?async=0), без очереди."
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/accounts/all",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000027",
+      "name": "27 Accounts: все (.session)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        2610
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/accounts/{{ encodeURIComponent($('Config').item.json.sessionName) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"display_name\": \"{{ $('Config').item.json.displayName }}\",\n  \"description\": \"{{ $('Config').item.json.description }}\",\n  \"max_channels\": {{ $('Config').item.json.maxChannels }}\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000028",
+      "name": "28 Account: PATCH лимиты",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        2740
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/accounts/{{ encodeURIComponent($('Config').item.json.sessionName) }}/block",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"blocked\": {{ $('Config').item.json.adminBlocked === 'true' || $('Config').item.json.adminBlocked === true }},\n  \"reason\": \"{{ $('Config').item.json.blockReason }}\"\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000029",
+      "name": "29 Account: block/unblock",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        2870
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/accounts/{{ encodeURIComponent($('Config').item.json.sessionName) }}?migrate={{ $('Config').item.json.migrateOnDelete === 'true' || $('Config').item.json.migrateOnDelete === true }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000030",
+      "name": "30 Account: DELETE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        3000
+      ],
+      "continueOnFail": true,
+      "notes": "Удаляет .session и запись в store; migrate=true переносит каналы из clump."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/enroll-session",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.newSessionName }}\"\n}"
+      },
+      "id": "10000000-0000-0000-0000-000000000031",
+      "name": "31 Enroll: в clump после QR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        3130
+      ],
+      "continueOnFail": true,
+      "notes": "После успешного QR (qr_status) — подключить аккаунт к parserId."
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/actions{{ $('Config').item.json.parserId ? '?parser_id=' + encodeURIComponent($('Config').item.json.parserId) : '' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000032",
+      "name": "32 Actions: список очереди",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        3260
+      ],
+      "continueOnFail": true,
+      "notes": "Legacy SQLite action queue (GET /actions). При USE_PG_QUEUE=true async-задачи в PG и сюда НЕ попадают (список будет пустым). Для статуса PG-задач используйте узел 33 по task_id — единого list-эндпоинта для PG-очереди в роутере нет."
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/queue/tasks/{{ $('Config').item.json.taskId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-0000-0000-000000000033",
+      "name": "33 Queue task: статус (PG D10)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        3390
+      ],
+      "continueOnFail": true,
+      "notes": "USE_PG_QUEUE: статус async-задачи по task_id из ответа add-channels/remove-channels (поле task_ids[]). GET /queue/tasks/{id} (D10): status, attempt_count, last_error. Legacy SQLite-статус (action_id) — ветка action_get через /actions/{id}."
+    }
+  ],
+  "connections": {
+    "Старт вручную": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Switch: endpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: endpoint": {
+      "main": [
+        [
+          {
+            "node": "00 Health",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "01 QR: создать сессию",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "02 QR: статус",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "03 QR: удалить",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "04 Discover каналы",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "05 Discover группы",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "06 Канал по ссылке",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "07 Канал по ссылке (session file)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "08 Бот: отправить сообщение",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "09 Parser: start",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "10 Parser: list",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "11 Parser: status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "12 Parser: stop",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "13 Parser: delete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "14 Channels: list",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "15 Channels: add (очередь async)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "16 Channels: remove",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "17 Config: get",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "18 Config: patch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "19 Session: add в clump",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "20 Session: remove из clump",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "21 Accounts: в clump",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "22 Account: карточка",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "23 Account: каналы",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "24 Account: изменить meta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "26 Channels: add sync",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "27 Accounts: все (.session)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "28 Account: PATCH лимиты",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "29 Account: block/unblock",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "30 Account: DELETE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "31 Enroll: в clump после QR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "32 Actions: список очереди",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "33 Queue task: статус (PG D10)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "25 Settings (глобальные)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}

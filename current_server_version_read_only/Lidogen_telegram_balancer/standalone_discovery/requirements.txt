@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+telethon
+python-dotenv
+aiohttp>=3.9
+pyTelegramBotAPI>=4.0.0
+# TestClient (starlette.testclient) с Starlette ≥0.47 / FastAPI recent
+httpx2>=2.0.0

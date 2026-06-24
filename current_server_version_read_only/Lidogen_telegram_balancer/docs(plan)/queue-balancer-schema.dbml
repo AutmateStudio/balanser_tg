@@ -1,0 +1,209 @@
+// PG Queue Balancer — PostgreSQL (QUEUE_DATABASE_URL)
+// Лимиты: per-op RPH (resource_op_types), не один hourly_limit на аккаунт
+// Бесплатный синтаксис dbdiagram.io
+
+Project pg_queue_balancer {
+  database_type: 'PostgreSQL'
+}
+
+Enum account_status {
+  active
+  cooldown
+  disabled
+  banned
+  error
+}
+
+Enum task_status {
+  queued
+  scheduled
+  in_progress
+  retry
+  done
+  failed
+  cancelled
+  stuck
+}
+
+Enum attempt_status {
+  success
+  error
+  timeout
+}
+
+Enum task_op_account_role {
+  primary
+  source
+  target
+}
+
+// Справочник типов Telethon-операций и RPH-лимитов (вместо accounts.hourly_limit)
+Table resource_op_types {
+  id integer [pk, increment]
+  code text [not null, unique]
+  name text
+  rph_limit integer [not null]
+  reserve_percent numeric [not null, default: 10]
+  is_enabled boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table accounts {
+  id bigint [pk, increment]
+  telegram_account_id text
+  session_name text [not null, unique]
+  status account_status [not null, default: 'active']
+  is_enabled boolean [not null, default: true]
+  cooldown_until timestamptz
+  current_task_id bigint
+  last_used_at timestamptz
+  last_error text
+  last_error_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table task_types {
+  id integer [pk, increment]
+  code text [not null, unique]
+  name text [not null]
+  description text
+  is_enabled boolean [not null, default: false]
+  default_priority integer [not null]
+  min_available_resource_percent integer [not null]
+  requires_specific_account boolean [not null, default: false]
+  uses_two_accounts boolean [not null, default: false]
+  max_attempts integer [not null, default: 5]
+  retry_delay_seconds integer [not null, default: 10]
+  retry_backoff_multiplier numeric [not null, default: 2]
+  max_retry_delay_seconds integer [not null, default: 1800]
+  target_queue_size integer
+  max_postpone_count integer [not null, default: 100]
+  task_timeout_seconds integer [not null, default: 300]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// Какие op-типы расходует задача (и с какого аккаунта при move_channel)
+Table task_type_ops {
+  id integer [pk, increment]
+  task_type_id integer [not null]
+  op_type_id integer [not null]
+  units_per_execution integer [not null, default: 1]
+  account_role task_op_account_role [not null, default: 'primary']
+}
+
+Table source_channels {
+  id bigint [pk, increment]
+  channel_ref text [not null, unique]
+  assigned_account_id bigint
+  extra_data_collected boolean [not null, default: false]
+  last_updated_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table queue_channels {
+  id bigint [pk, increment]
+  channel_ref text [not null, unique]
+  assigned_account_id bigint
+  extra_data_collected boolean [not null, default: false]
+  last_updated_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table task_queue {
+  id bigint [pk, increment]
+  task_type_id integer [not null]
+  task_type_code text [not null]
+  status task_status [not null, default: 'queued']
+  priority integer [not null]
+  channel_id bigint
+  account_id bigint
+  source_account_id bigint
+  target_account_id bigint
+  payload jsonb [not null, default: '{}']
+  dedup_key text
+  run_after timestamptz [not null, default: `now()`]
+  locked_by text
+  locked_at timestamptz
+  locked_until timestamptz
+  attempt_count integer [not null, default: 0]
+  postpone_count integer [not null, default: 0]
+  max_attempts integer [not null]
+  last_error text
+  last_error_at timestamptz
+  started_at timestamptz
+  finished_at timestamptz
+  created_by text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table task_attempts {
+  id bigint [pk, increment]
+  task_id bigint [not null]
+  task_type_id integer [not null]
+  account_id bigint [not null]
+  source_account_id bigint
+  target_account_id bigint
+  attempt_number integer [not null]
+  status attempt_status [not null]
+  error_code text
+  error_message text
+  started_at timestamptz [not null]
+  finished_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// Списание по каждой op отдельно; available = effective_rph - count за час по op_type_id
+Table account_resource_usage {
+  id bigint [pk, increment]
+  account_id bigint [not null]
+  op_type_id integer [not null]
+  task_id bigint [not null]
+  task_attempt_id bigint
+  task_type_id integer [not null]
+  units integer [not null, default: 1]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Ref: resource_op_types.id < task_type_ops.op_type_id
+Ref: task_types.id < task_type_ops.task_type_id
+Ref: task_types.id < task_queue.task_type_id
+Ref: accounts.id < task_queue.account_id
+Ref: accounts.id < task_queue.source_account_id
+Ref: accounts.id < task_queue.target_account_id
+Ref: source_channels.id < task_queue.channel_id
+Ref: accounts.id < source_channels.assigned_account_id
+Ref: accounts.id < queue_channels.assigned_account_id
+Ref: task_queue.id < task_attempts.task_id
+Ref: task_types.id < task_attempts.task_type_id
+Ref: accounts.id < task_attempts.account_id
+Ref: accounts.id < task_attempts.source_account_id
+Ref: accounts.id < task_attempts.target_account_id
+Ref: accounts.id < account_resource_usage.account_id
+Ref: resource_op_types.id < account_resource_usage.op_type_id
+Ref: task_queue.id < account_resource_usage.task_id
+Ref: task_attempts.id < account_resource_usage.task_attempt_id
+Ref: task_types.id < account_resource_usage.task_type_id
+Ref: task_queue.id < accounts.current_task_id
+
+// --- SEED resource_op_types (миграция, не DBML) ---
+// code                          | rph_limit
+// contacts.Search               | 2
+// messages.SearchGlobal         | 120
+// channels.GetChannelRecommendations | 30
+// channels.GetFullChannel       | 80
+// channels.JoinChannel          | 30
+// channels.GetParticipant       | 6000
+// users.GetFullUser             | 1500
+// get_entity                    | 7
+// get_me                        | 1
+// iter_messages                 | 450
+// connect_disconnect            | 1
+// is_user_authorized            | 1
+//
+// effective_rph = rph_limit * (1 - reserve_percent / 100)
