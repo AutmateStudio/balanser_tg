@@ -545,12 +545,12 @@ async def test_dispatch_picks_second_account_with_resource(resource_check_ctx) -
         run_task = asyncio.create_task(worker.run())
         try:
             await asyncio.wait_for(
-                _wait_until(lambda: worker.processed >= 1, timeout=5.0),
-                timeout=5.0,
+                _wait_until(lambda: worker.processed >= 1, timeout=30.0),
+                timeout=30.0,
             )
         finally:
             worker.stop()
-            await asyncio.wait_for(run_task, timeout=5.0)
+            await asyncio.wait_for(run_task, timeout=30.0)
 
         async with db.acquire() as conn:
             row = await conn.fetchrow(

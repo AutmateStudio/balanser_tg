@@ -1,4 +1,18 @@
-"""Общий cleanup PG для integration-тестов (D5: account_resource_usage → task_queue FK)."""
+"""Общий cleanup PG для integration-тестов.
+
+Строгий порядок удаления (FK-safe), одна транзакция:
+  1. accounts.current_task_id → NULL (FK accounts → task_queue)
+  2. source_channels.assigned_account_id → NULL (FK source_channels → accounts)
+  3. account_resource_usage   (FK → task_queue, accounts, task_attempts)
+  4. task_attempts            (FK → task_queue, accounts)
+  5. task_queue.*_account_id → NULL, затем DELETE task_queue
+  6. accounts
+
+Очистка идёт и по dedup_key (тестовые задачи), и по session_name (тестовые
+аккаунты). На shared PG обязательна остановка queue-worker (см. guard в
+tests/conftest.py), иначе worker параллельно пересоздаёт строки и возникает
+FK-гонка даже при корректном порядке.
+"""
 from __future__ import annotations
 
 from app_balance.queue import db
@@ -10,263 +24,181 @@ async def cleanup_queue_test_data(
     session_name_like: str | None = None,
     session_name_eq: str | None = None,
 ) -> None:
-    """Удаляет тестовые строки; usage удаляется до task_queue и accounts."""
+    if not any((dedup_key_like, session_name_like, session_name_eq)):
+        return
+
     async with db.acquire() as conn:
-        if dedup_key_like:
-            await conn.execute(
-                """
-                DELETE FROM account_resource_usage aru
-                USING task_queue tq
-                WHERE aru.task_id = tq.id AND tq.dedup_key LIKE $1
-                """,
-                dedup_key_like,
-            )
-            await conn.execute(
-                """
-                DELETE FROM task_attempts ta
-                USING task_queue tq
-                WHERE ta.task_id = tq.id AND tq.dedup_key LIKE $1
-                """,
-                dedup_key_like,
-            )
-        if session_name_like:
-            await conn.execute(
-                """
-                DELETE FROM account_resource_usage
-                WHERE task_id IN (
-                    SELECT t.id FROM task_queue t
-                    JOIN accounts a ON t.account_id = a.id
-                    WHERE a.session_name LIKE $1
+        async with conn.transaction():
+            # --- 1. accounts.current_task_id → NULL --------------------------
+            if dedup_key_like:
+                await conn.execute(
+                    """
+                    UPDATE accounts
+                    SET current_task_id = NULL
+                    WHERE current_task_id IN (
+                        SELECT id FROM task_queue WHERE dedup_key LIKE $1
+                    )
+                    """,
+                    dedup_key_like,
                 )
-                   OR account_id IN (
-                    SELECT id FROM accounts WHERE session_name LIKE $1
+            if session_name_like:
+                await conn.execute(
+                    "UPDATE accounts SET current_task_id = NULL "
+                    "WHERE session_name LIKE $1",
+                    session_name_like,
                 )
-                """,
-                session_name_like,
-            )
-            await conn.execute(
-                """
-                DELETE FROM task_attempts
-                WHERE task_id IN (
-                    SELECT t.id FROM task_queue t
-                    JOIN accounts a ON t.account_id = a.id
-                    WHERE a.session_name LIKE $1
+            if session_name_eq:
+                await conn.execute(
+                    "UPDATE accounts SET current_task_id = NULL "
+                    "WHERE session_name = $1",
+                    session_name_eq,
                 )
-                   OR account_id IN (
-                    SELECT id FROM accounts WHERE session_name LIKE $1
-                )
-                """,
-                session_name_like,
-            )
-        if session_name_eq:
-            await conn.execute(
-                """
-                DELETE FROM account_resource_usage
-                WHERE account_id IN (
-                    SELECT id FROM accounts WHERE session_name = $1
-                )
-                """,
-                session_name_eq,
-            )
-            await conn.execute(
-                """
-                DELETE FROM task_attempts
-                WHERE account_id IN (
-                    SELECT id FROM accounts WHERE session_name = $1
-                )
-                """,
-                session_name_eq,
-            )
 
-        if dedup_key_like and session_name_like:
-            await conn.execute(
-                """
-                UPDATE accounts
-                SET current_task_id = NULL
-                WHERE session_name LIKE $1
-                   OR current_task_id IN (
-                       SELECT id FROM task_queue WHERE dedup_key LIKE $2
-                   )
-                """,
-                session_name_like,
-                dedup_key_like,
-            )
-        elif session_name_like:
-            await conn.execute(
-                "UPDATE accounts SET current_task_id = NULL WHERE session_name LIKE $1",
-                session_name_like,
-            )
-        elif dedup_key_like:
-            await conn.execute(
-                """
-                UPDATE accounts
-                SET current_task_id = NULL
-                WHERE current_task_id IN (
-                    SELECT id FROM task_queue WHERE dedup_key LIKE $1
+            # --- 2. source_channels.assigned_account_id → NULL ---------------
+            if session_name_like:
+                await conn.execute(
+                    """
+                    UPDATE source_channels
+                    SET assigned_account_id = NULL
+                    WHERE assigned_account_id IN (
+                        SELECT id FROM accounts WHERE session_name LIKE $1
+                    )
+                    """,
+                    session_name_like,
                 )
-                """,
-                dedup_key_like,
-            )
+            if session_name_eq:
+                await conn.execute(
+                    """
+                    UPDATE source_channels
+                    SET assigned_account_id = NULL
+                    WHERE assigned_account_id IN (
+                        SELECT id FROM accounts WHERE session_name = $1
+                    )
+                    """,
+                    session_name_eq,
+                )
 
-        if session_name_like:
-            await conn.execute(
-                """
-                UPDATE source_channels
-                SET assigned_account_id = NULL
-                WHERE assigned_account_id IN (
-                    SELECT id FROM accounts WHERE session_name LIKE $1
+            # --- 3. account_resource_usage -----------------------------------
+            if dedup_key_like:
+                await conn.execute(
+                    """
+                    DELETE FROM account_resource_usage
+                    WHERE task_id IN (
+                        SELECT id FROM task_queue WHERE dedup_key LIKE $1
+                    )
+                    """,
+                    dedup_key_like,
                 )
-                """,
-                session_name_like,
-            )
-            await conn.execute(
-                """
-                UPDATE task_queue
-                SET account_id = NULL,
-                    source_account_id = NULL,
-                    target_account_id = NULL
-                WHERE account_id IN (
-                    SELECT id FROM accounts WHERE session_name LIKE $1
+            if session_name_like:
+                await conn.execute(
+                    """
+                    DELETE FROM account_resource_usage
+                    WHERE account_id IN (
+                        SELECT id FROM accounts WHERE session_name LIKE $1
+                    )
+                       OR task_id IN (
+                        SELECT id FROM task_queue WHERE account_id IN (
+                            SELECT id FROM accounts WHERE session_name LIKE $1
+                        )
+                    )
+                    """,
+                    session_name_like,
                 )
-                   OR source_account_id IN (
-                    SELECT id FROM accounts WHERE session_name LIKE $1
+            if session_name_eq:
+                await conn.execute(
+                    """
+                    DELETE FROM account_resource_usage
+                    WHERE account_id IN (
+                        SELECT id FROM accounts WHERE session_name = $1
+                    )
+                    """,
+                    session_name_eq,
                 )
-                   OR target_account_id IN (
-                    SELECT id FROM accounts WHERE session_name LIKE $1
-                )
-                """,
-                session_name_like,
-            )
 
-        if session_name_eq:
-            await conn.execute(
-                """
-                UPDATE source_channels
-                SET assigned_account_id = NULL
-                WHERE assigned_account_id IN (
-                    SELECT id FROM accounts WHERE session_name = $1
+            # --- 4. task_attempts --------------------------------------------
+            if dedup_key_like:
+                await conn.execute(
+                    """
+                    DELETE FROM task_attempts
+                    WHERE task_id IN (
+                        SELECT id FROM task_queue WHERE dedup_key LIKE $1
+                    )
+                    """,
+                    dedup_key_like,
                 )
-                """,
-                session_name_eq,
-            )
-            await conn.execute(
-                """
-                UPDATE task_queue
-                SET account_id = NULL,
-                    source_account_id = NULL,
-                    target_account_id = NULL
-                WHERE account_id IN (SELECT id FROM accounts WHERE session_name = $1)
-                   OR source_account_id IN (SELECT id FROM accounts WHERE session_name = $1)
-                   OR target_account_id IN (SELECT id FROM accounts WHERE session_name = $1)
-                """,
-                session_name_eq,
-            )
-            await conn.execute(
-                "UPDATE accounts SET current_task_id = NULL WHERE session_name = $1",
-                session_name_eq,
-            )
+            if session_name_like:
+                await conn.execute(
+                    """
+                    DELETE FROM task_attempts
+                    WHERE account_id IN (
+                        SELECT id FROM accounts WHERE session_name LIKE $1
+                    )
+                       OR task_id IN (
+                        SELECT id FROM task_queue WHERE account_id IN (
+                            SELECT id FROM accounts WHERE session_name LIKE $1
+                        )
+                    )
+                    """,
+                    session_name_like,
+                )
+            if session_name_eq:
+                await conn.execute(
+                    """
+                    DELETE FROM task_attempts
+                    WHERE account_id IN (
+                        SELECT id FROM accounts WHERE session_name = $1
+                    )
+                    """,
+                    session_name_eq,
+                )
 
-        if dedup_key_like and session_name_like:
-            await conn.execute(
-                """
-                DELETE FROM account_resource_usage
-                WHERE task_id IN (
-                    SELECT id FROM task_queue
-                    WHERE dedup_key LIKE $1
-                       OR account_id IN (
-                           SELECT id FROM accounts WHERE session_name LIKE $2
-                       )
+            # --- 5. task_queue: снять ссылки на accounts, затем удалить -------
+            if session_name_like:
+                await conn.execute(
+                    """
+                    UPDATE task_queue
+                    SET account_id = NULL,
+                        source_account_id = NULL,
+                        target_account_id = NULL
+                    WHERE account_id IN (
+                        SELECT id FROM accounts WHERE session_name LIKE $1
+                    )
                        OR source_account_id IN (
-                           SELECT id FROM accounts WHERE session_name LIKE $2
-                       )
+                        SELECT id FROM accounts WHERE session_name LIKE $1
+                    )
                        OR target_account_id IN (
-                           SELECT id FROM accounts WHERE session_name LIKE $2
-                       )
+                        SELECT id FROM accounts WHERE session_name LIKE $1
+                    )
+                    """,
+                    session_name_like,
                 )
-                   OR account_id IN (
-                       SELECT id FROM accounts WHERE session_name LIKE $2
-                   )
-                """,
-                dedup_key_like,
-                session_name_like,
-            )
-            await conn.execute(
-                """
-                DELETE FROM task_attempts
-                WHERE task_id IN (
-                    SELECT id FROM task_queue
-                    WHERE dedup_key LIKE $1
-                       OR account_id IN (
-                           SELECT id FROM accounts WHERE session_name LIKE $2
-                       )
-                       OR source_account_id IN (
-                           SELECT id FROM accounts WHERE session_name LIKE $2
-                       )
-                       OR target_account_id IN (
-                           SELECT id FROM accounts WHERE session_name LIKE $2
-                       )
+            if session_name_eq:
+                await conn.execute(
+                    """
+                    UPDATE task_queue
+                    SET account_id = NULL,
+                        source_account_id = NULL,
+                        target_account_id = NULL
+                    WHERE account_id IN (SELECT id FROM accounts WHERE session_name = $1)
+                       OR source_account_id IN (SELECT id FROM accounts WHERE session_name = $1)
+                       OR target_account_id IN (SELECT id FROM accounts WHERE session_name = $1)
+                    """,
+                    session_name_eq,
                 )
-                   OR account_id IN (
-                       SELECT id FROM accounts WHERE session_name LIKE $2
-                   )
-                """,
-                dedup_key_like,
-                session_name_like,
-            )
+            if dedup_key_like:
+                await conn.execute(
+                    "DELETE FROM task_queue WHERE dedup_key LIKE $1",
+                    dedup_key_like,
+                )
 
-        if dedup_key_like:
-            await conn.execute(
-                """
-                UPDATE task_queue
-                SET status = 'failed',
-                    locked_by = NULL,
-                    locked_at = NULL,
-                    locked_until = NULL,
-                    run_after = now() + interval '365 days'
-                WHERE dedup_key LIKE $1
-                  AND status IN ('queued', 'scheduled', 'retry', 'in_progress')
-                """,
-                dedup_key_like,
-            )
-            await conn.execute(
-                """
-                DELETE FROM account_resource_usage
-                WHERE task_id IN (
-                    SELECT id FROM task_queue WHERE dedup_key LIKE $1
+            # --- 6. accounts -------------------------------------------------
+            if session_name_like:
+                await conn.execute(
+                    "DELETE FROM accounts WHERE session_name LIKE $1",
+                    session_name_like,
                 )
-                """,
-                dedup_key_like,
-            )
-            await conn.execute(
-                """
-                DELETE FROM task_attempts
-                WHERE task_id IN (
-                    SELECT id FROM task_queue WHERE dedup_key LIKE $1
+            if session_name_eq:
+                await conn.execute(
+                    "DELETE FROM accounts WHERE session_name = $1",
+                    session_name_eq,
                 )
-                """,
-                dedup_key_like,
-            )
-            await conn.execute(
-                """
-                UPDATE accounts
-                SET current_task_id = NULL
-                WHERE current_task_id IN (
-                    SELECT id FROM task_queue WHERE dedup_key LIKE $1
-                )
-                """,
-                dedup_key_like,
-            )
-            await conn.execute(
-                "DELETE FROM task_queue WHERE dedup_key LIKE $1",
-                dedup_key_like,
-            )
-        if session_name_like:
-            await conn.execute(
-                "DELETE FROM accounts WHERE session_name LIKE $1",
-                session_name_like,
-            )
-        if session_name_eq:
-            await conn.execute(
-                "DELETE FROM accounts WHERE session_name = $1",
-                session_name_eq,
-            )

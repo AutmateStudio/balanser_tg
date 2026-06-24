@@ -1,0 +1,27 @@
+# Секреты и локальная конфигурация (Правило Д — никогда в репозиторий)
+.env
+.env.*
+!.env.example
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Сессии Telethon и локальные данные
+*.session
+*.session-journal
+standalone_discovery/sessions/
+standalone_discovery/data/
+standalone_discovery/discovery_api/data/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store

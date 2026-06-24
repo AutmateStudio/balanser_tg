@@ -1,7 +1,10 @@
 """D7 — чтение/запись assigned_account_id в source_channels (ТЗ §5.1, A8)."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 from app_balance.queue.db import acquire
 
@@ -44,6 +47,57 @@ ORDER BY created_at ASC, id ASC
 LIMIT $1
 """
 
+_LIST_STALE_FOR_UPDATE_SQL = """
+SELECT id, assigned_account_id, last_updated_at
+FROM source_channels
+WHERE assigned_account_id IS NOT NULL
+  AND is_active = true
+  AND (last_updated_at IS NULL
+       OR last_updated_at < now() - ($1 * interval '1 second'))
+ORDER BY last_updated_at ASC NULLS FIRST
+LIMIT $2
+"""
+
+_COUNT_BY_ACCOUNTS_SQL = """
+SELECT assigned_account_id, COUNT(*) AS cnt
+FROM source_channels
+WHERE assigned_account_id = ANY($1::bigint[])
+GROUP BY assigned_account_id
+"""
+
+_LIST_FOR_ACCOUNT_SQL = """
+SELECT id, external_url, external_channel_id
+FROM source_channels
+WHERE assigned_account_id = $1
+ORDER BY created_at ASC, id ASC
+LIMIT $2
+"""
+
+_GET_COLLECT_TARGET_SQL = """
+SELECT id, external_url, external_channel_id
+FROM source_channels
+WHERE id = $1
+"""
+
+# F6: метаданные сбора → metadata.extra_data (jsonb merge) + флаг собранности.
+_SAVE_EXTRA_DATA_SQL = """
+UPDATE source_channels
+SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb,
+    extra_data_collected = true
+WHERE id = $1
+RETURNING id
+"""
+
+# F7: обновление метаданных + last_updated_at, без флага extra_data_collected.
+_SAVE_CHANNEL_UPDATE_SQL = """
+UPDATE source_channels
+SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb,
+    name = COALESCE($3, name),
+    last_updated_at = now()
+WHERE id = $1
+RETURNING id
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class PendingChannel:
@@ -51,6 +105,47 @@ class PendingChannel:
 
     channel_id: int
     account_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class StaleChannel:
+    """Канал с устаревшими метаданными — кандидат для update_channel (F5/F7, §24 ТЗ)."""
+
+    id: int
+    account_id: int
+    last_updated_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelRef:
+    """Канал для продюсера балансировки (F2): id + ссылки для payload move_channel."""
+
+    id: int
+    external_url: str | None
+    external_channel_id: str | None
+
+    def ref(self) -> str:
+        """channel_ref для payload: external_url, fallback на external_channel_id."""
+        url = (self.external_url or "").strip()
+        if url:
+            return url
+        return (self.external_channel_id or "").strip()
+
+
+@dataclass(frozen=True, slots=True)
+class CollectTarget:
+    """Канал-цель multi-op пайплайна (F6/F7): id + ссылки для resolve ref."""
+
+    id: int
+    external_url: str | None
+    external_channel_id: str | None
+
+    def ref(self) -> str:
+        """channel_ref для get_entity: external_url, fallback external_channel_id."""
+        url = (self.external_url or "").strip()
+        if url:
+            return url
+        return (self.external_channel_id or "").strip()
 
 
 class SourceChannelsRepo:
@@ -89,3 +184,90 @@ class SourceChannelsRepo:
             )
             for row in rows
         ]
+
+    async def list_stale_for_update(
+        self, limit: int, stale_after_seconds: int
+    ) -> list[StaleChannel]:
+        """F5: каналы с устаревшим last_updated_at (приоритет старым, §24 ТЗ).
+
+        Никогда не обновлявшиеся (last_updated_at IS NULL) идут первыми
+        (ORDER BY ... NULLS FIRST). Использует idx_source_channels_stale_update.
+        """
+        if limit <= 0:
+            return []
+        async with acquire() as conn:
+            rows = await conn.fetch(
+                _LIST_STALE_FOR_UPDATE_SQL, stale_after_seconds, limit
+            )
+        return [
+            StaleChannel(
+                id=int(row["id"]),
+                account_id=int(row["assigned_account_id"]),
+                last_updated_at=row["last_updated_at"],
+            )
+            for row in rows
+        ]
+
+    async def count_channels_by_accounts(
+        self, account_ids: list[int]
+    ) -> dict[int, int]:
+        """F2: число закреплённых каналов на каждый аккаунт.
+
+        Аккаунты без каналов в ответ не попадают (нули добиваются вызывающим).
+        """
+        if not account_ids:
+            return {}
+        async with acquire() as conn:
+            rows = await conn.fetch(_COUNT_BY_ACCOUNTS_SQL, account_ids)
+        return {int(row["assigned_account_id"]): int(row["cnt"]) for row in rows}
+
+    async def list_channels_for_account(
+        self, account_id: int, limit: int
+    ) -> list[ChannelRef]:
+        """F2: каналы аккаунта (для выбора кандидатов на перенос)."""
+        if limit <= 0:
+            return []
+        async with acquire() as conn:
+            rows = await conn.fetch(_LIST_FOR_ACCOUNT_SQL, account_id, limit)
+        return [
+            ChannelRef(
+                id=int(row["id"]),
+                external_url=row["external_url"],
+                external_channel_id=row["external_channel_id"],
+            )
+            for row in rows
+        ]
+
+    async def get_collect_target(self, channel_id: int) -> CollectTarget | None:
+        """F6/F7: ссылки канала для resolve ref в multi-op пайплайне."""
+        async with acquire() as conn:
+            row = await conn.fetchrow(_GET_COLLECT_TARGET_SQL, channel_id)
+        if row is None:
+            return None
+        return CollectTarget(
+            id=int(row["id"]),
+            external_url=row["external_url"],
+            external_channel_id=row["external_channel_id"],
+        )
+
+    async def save_extra_data(self, channel_id: int, signals: dict[str, Any]) -> bool:
+        """F6: merge сигналов в metadata + extra_data_collected=true."""
+        async with acquire() as conn:
+            row = await conn.fetchrow(
+                _SAVE_EXTRA_DATA_SQL, channel_id, json.dumps(signals)
+            )
+        return row is not None
+
+    async def save_channel_update(
+        self, channel_id: int, signals: dict[str, Any]
+    ) -> bool:
+        """F7: merge сигналов в metadata, синхронизация name, last_updated_at=now()."""
+        title = None
+        extra = signals.get("extra_data") if isinstance(signals, dict) else None
+        if isinstance(extra, dict):
+            title = extra.get("title")
+        async with acquire() as conn:
+            row = await conn.fetchrow(
+                _SAVE_CHANNEL_UPDATE_SQL, channel_id, json.dumps(signals), title
+            )
+        return row is not None

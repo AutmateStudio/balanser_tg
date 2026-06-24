@@ -72,7 +72,7 @@ INSERT INTO task_types (
     'update_channel',
     'Обновление метаданных + сообщения',
     'Как collect_extra_data + GetParticipants (megagroup) + полные метаданные GetFullChannel. Продюсер F5.',
-    false, 50, 90, false, 20
+    true, 50, 90, false, 20
   ),
   (
     'parser_remove_channel',

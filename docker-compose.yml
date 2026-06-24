@@ -85,6 +85,64 @@ services:
     stop_grace_period: 30s
     command: ["python", "-m", "app_balance.queue_worker"]
 
+  # F8 — планировщики продюсеров. Три job'а на одном образе через subcommands
+  # queue_scheduler: collect (F4), update (F5), balancer (F2). Интервал —
+  # PRODUCER_INTERVAL_SECONDS. balancer восстанавливает clump'ы из стора,
+  # поэтому ему нужны те же session/data-маунты, что и queue-worker.
+  producer-collect:
+    <<: *balancer-image
+    profiles: [producers]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PRODUCER_INTERVAL_SECONDS: ${PRODUCER_COLLECT_INTERVAL_SECONDS:-300}
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_scheduler", "collect"]
+
+  producer-update:
+    <<: *balancer-image
+    profiles: [producers]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PRODUCER_INTERVAL_SECONDS: ${PRODUCER_UPDATE_INTERVAL_SECONDS:-3600}
+      UPDATE_CHANNEL_STALE_AFTER_SECONDS: ${UPDATE_CHANNEL_STALE_AFTER_SECONDS:-}
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_scheduler", "update"]
+
+  producer-balancer:
+    <<: *balancer-image
+    profiles: [producers]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PRODUCER_INTERVAL_SECONDS: ${PRODUCER_BALANCER_INTERVAL_SECONDS:-300}
+      WORKER_TASK_ADAPTER: ${WORKER_TASK_ADAPTER:-mock}
+      API_ID: ${API_ID:-}
+      API_HASH: ${API_HASH:-}
+      SESSIONS_DIR: /app/sessions
+      PARSER_STORE_PATH: /app/standalone_discovery/discovery_api/data/parser_jobs.json
+    volumes:
+      - ${HOST_SESSIONS_DIR:-./standalone_discovery/sessions}:/app/sessions
+      - ./standalone_discovery/discovery_api/data:/app/standalone_discovery/discovery_api/data
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_scheduler", "balancer"]
+
   queue-worker-local:
     <<: *balancer-image
     profiles: [local]

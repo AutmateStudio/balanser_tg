@@ -22,6 +22,7 @@ from app_balance.queue.errors import (
     RetryableError,
 )
 from app_balance.queue.mock_adapter import TaskAdapter
+from app_balance.queue.ops_catalog import MULTI_OP_TASK_TYPES
 from app_balance.queue.per_op_reading import TaskType, TaskTypesRepo
 
 from app_balance.queue.resource_check import ResourceCheckResult, ResourceChecker
@@ -199,14 +200,25 @@ class TaskDispatcher:
                 target_account_id=target_account_id,
             )
 
-            await self._usage.record_for_task(
-                task_type=task_type,
-                task_id=task.id,
-                accounts_by_role=accounts_by_role,
-                task_attempt_id=attempt_id,
-            )
-
-            await self._adapter.execute(task, account=execute_account)
+            is_multi_op = task_type.code in MULTI_OP_TASK_TYPES
+            if is_multi_op:
+                # Multi-op типы (collect/update) ведут учёт пошагово в adapter
+                # (execute_multi_op_pipeline → record_op), чтобы не задвоить.
+                await self._adapter.execute(
+                    task,
+                    account=execute_account,
+                    task_type=task_type,
+                    attempt_id=attempt_id,
+                )
+            else:
+                # Single-call типы: ресурс списывается разом до RPC (D5 §7.3).
+                await self._usage.record_for_task(
+                    task_type=task_type,
+                    task_id=task.id,
+                    accounts_by_role=accounts_by_role,
+                    task_attempt_id=attempt_id,
+                )
+                await self._adapter.execute(task, account=execute_account)
 
             await self._finish_attempt(attempt_id, status="success")
 

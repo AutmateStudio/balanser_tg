@@ -45,6 +45,12 @@ export QUEUE_DATABASE_URL='postgresql://...'
 docker compose run --rm test
 ```
 
+> На shared PG (vps-100) перед прогоном остановите ОБА claimer'а — `queue-worker`
+> и `standalone-discovery-api` (его in-process worker) — и используйте
+> `make docker-test-safe`. Guard сделает probe-проверку и прервёт integration,
+> если задачи кто-то перехватывает. Подробно:
+> [docs/testing-shared-pg.md](docs/testing-shared-pg.md).
+
 ---
 
 ## Команды Makefile

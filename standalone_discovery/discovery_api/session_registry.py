@@ -44,6 +44,7 @@ from discovery_api.config import (
     get_session_reconnect_backoff_base,
     get_session_reconnect_backoff_max,
     get_session_resolve_min_interval,
+    get_use_pg_queue,
 )
 from discovery_api.session_health import (
     SessionHealth,
@@ -59,6 +60,9 @@ _session_strings: dict[str, str] = {}
 _locks: dict[str, asyncio.Lock] = {}
 _clumps: dict[str, "SessionClump"] = {}
 _health_monitor_task: asyncio.Task[None] | None = None
+
+# F3: однократный warning о выключении idle-rebalance при активном PG-балансере.
+_warned_rebalance_disabled = False
 
 
 class ChannelQuotaExceeded(Exception):
@@ -157,6 +161,16 @@ class ClumpConfig:
         return get_add_channels_per_hour()
 
     def eff_rebalance_enabled(self) -> bool:
+        # F3: при активном PG-балансере (F2) старый idle-rebalance принудительно
+        # выключен, чтобы два механизма переноса каналов не конфликтовали.
+        if get_use_pg_queue():
+            global _warned_rebalance_disabled
+            if not _warned_rebalance_disabled:
+                log.warning(
+                    "idle-rebalance отключён: активен PG-балансер (USE_PG_QUEUE=true, F2)"
+                )
+                _warned_rebalance_disabled = True
+            return False
         if self.rebalance_enabled is not None:
             return self.rebalance_enabled
         return get_rebalance_enabled()
@@ -315,6 +329,11 @@ async def release_client(session_name: str) -> None:
 
 def get_clump(parser_id: str) -> Optional["SessionClump"]:
     return _clumps.get(parser_id)
+
+
+def iter_clumps() -> list[tuple[str, "SessionClump"]]:
+    """F2: снимок (parser_id, clump) всех загруженных clump'ов реестра."""
+    return list(_clumps.items())
 
 
 async def get_or_create_clump(

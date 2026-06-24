@@ -102,8 +102,9 @@ class _CollectPipelineAdapter:
         self.fail_at_index = fail_at_index
         self.executed_ops: list[str] = []
 
-    async def execute(self, task, *, account) -> None:
-        task_type = await TaskTypesRepo().get_by_code(COLLECT_EXTRA_DATA)
+    async def execute(self, task, *, account, task_type=None, attempt_id=None) -> None:
+        if task_type is None:
+            task_type = await TaskTypesRepo().get_by_code(COLLECT_EXTRA_DATA)
         assert task_type is not None
         op_index = 0
 
@@ -122,6 +123,7 @@ class _CollectPipelineAdapter:
             task_type=task_type,
             account=account,
             execute_op=execute_op,
+            attempt_id=attempt_id,
             queue=TaskQueueRepo(),
             usage=ResourceUsageRepo(),
         )

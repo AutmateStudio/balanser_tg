@@ -87,10 +87,18 @@ async def test_e2_flood_wait_persists_cooldown_and_excludes_from_pick(e2_clean) 
     assert row["cooldown_until"] is not None
     assert row["cooldown_until"] > datetime.now(timezone.utc)
 
+    # Вторая реальная задача (без фикс. аккаунта) для auto-pick: на cooldown
+    # аккаунт попасть не должен, остаётся только other_id.
+    pick_task_id = await enqueue_isolated_task(
+        prefix=_PREFIX,
+        task_type_code=_TASK_TYPE,
+    )
     accounts = AccountsRepo()
-    picked = await accounts.pick_and_reserve(task_id + 10_000)
+    picked = await accounts.pick_and_reserve(pick_task_id)
     assert picked is not None
-    assert picked.id == other_id
+    # Контракт E2: аккаунт на cooldown исключён из выбора. На shared PG может
+    # быть выбран другой свободный аккаунт, поэтому проверяем именно исключение.
+    assert picked.id != cooled_id
     await accounts.release(picked.id)
 
 

@@ -24,6 +24,7 @@ from app_balance.queue.resource_check import ResourceChecker
 from app_balance.queue.resource_usage import ResourceUsageRepo
 from app_balance.queue.task_queue import EnqueueInput, TaskQueueRepo
 from app_balance.queue.watchdog import StuckTaskWatchdog
+from tests.queue_integration_helpers import AlwaysOkResourceChecker, reclaim_retry_task
 from tests.tz30.conftest import (
     FailingTaskAdapter,
     PREFIX,
@@ -339,26 +340,20 @@ async def test_tz30_18_retry_run_after_uses_backoff(tz30_clean) -> None:
         delta1 = (row1["run_after"] - t0).total_seconds()
         assert 8 <= delta1 <= 14, f"1-я задержка ~10s, получили {delta1}s"
 
-        async with db.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE task_queue
-                SET run_after = now() - interval '1 second',
-                    status = 'retry',
-                    locked_by = NULL,
-                    locked_at = NULL,
-                    locked_until = NULL
-                WHERE id = $1
-                """,
-                task_id,
-            )
-
-        worker2 = build_worker(
-            worker_id="tz30-18b",
-            adapter=FailingTaskAdapter("transient_error"),
-        )
+        # Фаза 2: прямой dispatch по id — worker с claim_next на shared PG
+        # может 10+ секунд обрабатывать чужие задачи и не трогать нашу.
         t1 = datetime.now(timezone.utc)
-        await run_worker_until_task_status(worker2, task_id, "retry")
+        claimed2 = await reclaim_retry_task(task_id, locked_by="tz30-18b")
+        dispatcher2 = TaskDispatcher(
+            queue=TaskQueueRepo(),
+            accounts=AccountsRepo(),
+            task_types=TaskTypesRepo(),
+            adapter=FailingTaskAdapter("transient_error"),
+            resource_check=AlwaysOkResourceChecker(),
+            postpone_delay_seconds=300,
+        )
+        result2 = await dispatcher2.dispatch(claimed2)
+        assert result2 == DispatchResult.RETRIED
 
         row2 = await task_row(task_id)
         assert int(row2["attempt_count"]) == 2

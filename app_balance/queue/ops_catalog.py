@@ -28,6 +28,12 @@ COLLECT_EXTRA_DATA = "collect_extra_data"
 UPDATE_CHANNEL = "update_channel"
 PARSER_REMOVE_CHANNEL = "parser_remove_channel"
 
+# F6/F7: типы задач, чья adapter-ветка сама ведёт пошаговый учёт ресурса через
+# execute_multi_op_pipeline (record_op per op). Для них dispatch НЕ вызывает
+# record_for_task, иначе ресурс спишется дважды. Остальные типы — single-call,
+# списываются разом до RPC (record_for_task, инвариант D5 §7.3).
+MULTI_OP_TASK_TYPES = frozenset({COLLECT_EXTRA_DATA, UPDATE_CHANNEL})
+
 
 RESOURCE_OPS: dict[str, ResourceOpDefinition] = {
     "auth.qr_login": ResourceOpDefinition(

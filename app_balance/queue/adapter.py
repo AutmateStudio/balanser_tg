@@ -19,9 +19,17 @@ from app_balance.queue.errors import (
     map_clump_error_message,
     map_telethon_exception,
 )
+from app_balance.queue.collect_pipeline import (
+    ClientGetter,
+    CollectContext,
+    build_collect_op_executor,
+    build_signals,
+    default_client_getter,
+)
 from app_balance.queue.per_op_pipeline import OpExecutor, run_pipeline
 from app_balance.queue.per_op_reading import TaskType
 from app_balance.queue.resource_usage import ResourceUsageRepo
+from app_balance.queue.source_channels import SourceChannelsRepo
 from app_balance.queue.task_queue import ClaimedTask, TaskQueueRepo
 
 log = logging.getLogger(__name__)
@@ -29,6 +37,8 @@ log = logging.getLogger(__name__)
 PARSER_ADD_CHANNEL = "parser_add_channel"
 PARSER_REMOVE_CHANNEL = "parser_remove_channel"
 MOVE_CHANNEL = "move_channel"
+COLLECT_EXTRA_DATA = "collect_extra_data"
+UPDATE_CHANNEL = "update_channel"
 
 SyncAfterAdd = Callable[[ClaimedTask, Account, Any], Awaitable[None]]
 SyncAfterMove = Callable[[ClaimedTask, Account, Any], Awaitable[None]]
@@ -255,12 +265,118 @@ async def _execute_parser_remove_channel(
     await _start_clump_after_execute(parser_id=parser_id, clump=clump)
 
 
+async def _execute_collect_extra_data(
+    task: ClaimedTask,
+    *,
+    account: Account,
+    task_type: TaskType,
+    attempt_id: int | None,
+    client_getter: ClientGetter,
+    channels_repo: SourceChannelsRepo,
+    queue: TaskQueueRepo,
+    usage: ResourceUsageRepo,
+) -> None:
+    """F6 — multi-op сбор доп. данных: временный вход → сбор → выход (ТЗ §23).
+
+    Идемпотентный per-op пайплайн (E6): ресурс списывается и прогресс
+    фиксируется пошагово. Итоговые сигналы пишутся в source_channels.metadata,
+    `extra_data_collected` выставляется в true.
+    """
+    channel_id = task.channel_id
+    if channel_id is None:
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing channel_id")
+
+    target = await channels_repo.get_collect_target(channel_id)
+    if target is None:
+        raise PermanentError(
+            ErrorCode.INVALID_PAYLOAD, f"channel not found: {channel_id}"
+        )
+    ref = target.ref()
+    if not ref:
+        raise PermanentError(
+            ErrorCode.INVALID_PAYLOAD, f"channel {channel_id} has no ref"
+        )
+
+    client = await client_getter(account.session_name)
+    ctx = CollectContext()
+    execute_op = build_collect_op_executor(client, ref, ctx)
+
+    await execute_multi_op_pipeline(
+        task,
+        task_type=task_type,
+        account=account,
+        execute_op=execute_op,
+        attempt_id=attempt_id,
+        queue=queue,
+        usage=usage,
+    )
+
+    await channels_repo.save_extra_data(channel_id, build_signals(ctx))
+
+
+async def _execute_update_channel(
+    task: ClaimedTask,
+    *,
+    account: Account,
+    task_type: TaskType,
+    attempt_id: int | None,
+    client_getter: ClientGetter,
+    channels_repo: SourceChannelsRepo,
+    queue: TaskQueueRepo,
+    usage: ResourceUsageRepo,
+) -> None:
+    """F7 — multi-op обновление метаданных канала (ТЗ §24).
+
+    Тот же per-op Telethon-пайплайн, что collect_extra_data (F6): временный вход →
+    сбор метаданных/сигналов → выход. Отличие — финальная запись: метаданные
+    мёржатся в `source_channels.metadata`, обновляется `last_updated_at` (без
+    флага `extra_data_collected`). Пайплайн идемпотентен (E6): ресурс списывается
+    и прогресс фиксируется пошагово.
+    """
+    channel_id = task.channel_id
+    if channel_id is None:
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing channel_id")
+
+    target = await channels_repo.get_collect_target(channel_id)
+    if target is None:
+        raise PermanentError(
+            ErrorCode.INVALID_PAYLOAD, f"channel not found: {channel_id}"
+        )
+    ref = target.ref()
+    if not ref:
+        raise PermanentError(
+            ErrorCode.INVALID_PAYLOAD, f"channel {channel_id} has no ref"
+        )
+
+    client = await client_getter(account.session_name)
+    ctx = CollectContext()
+    execute_op = build_collect_op_executor(client, ref, ctx)
+
+    await execute_multi_op_pipeline(
+        task,
+        task_type=task_type,
+        account=account,
+        execute_op=execute_op,
+        attempt_id=attempt_id,
+        queue=queue,
+        usage=usage,
+    )
+
+    await channels_repo.save_channel_update(channel_id, build_signals(ctx))
+
+
 async def execute_task(
     task: ClaimedTask,
     *,
     account: Account,
+    task_type: TaskType | None = None,
+    attempt_id: int | None = None,
     clump_getter: ClumpGetter | None = None,
     account_getter: AccountGetter | None = None,
+    client_getter: ClientGetter | None = None,
+    channels_repo: SourceChannelsRepo | None = None,
+    queue: TaskQueueRepo | None = None,
+    usage: ResourceUsageRepo | None = None,
     sync_after_add: SyncAfterAdd | None = None,
     sync_after_move: SyncAfterMove | None = None,
     sync_after_remove: SyncAfterRemove | None = None,
@@ -296,6 +412,38 @@ async def execute_task(
             account=account,
             clump_getter=clump_getter,
             sync_after_remove=sync_after_remove,
+        )
+    elif task.task_type_code == COLLECT_EXTRA_DATA:
+        if task_type is None:
+            raise PermanentError(
+                ErrorCode.INVALID_PAYLOAD,
+                "collect_extra_data requires task_type (multi-op)",
+            )
+        await _execute_collect_extra_data(
+            task,
+            account=account,
+            task_type=task_type,
+            attempt_id=attempt_id,
+            client_getter=client_getter or default_client_getter(),
+            channels_repo=channels_repo or SourceChannelsRepo(),
+            queue=queue or TaskQueueRepo(),
+            usage=usage or ResourceUsageRepo(),
+        )
+    elif task.task_type_code == UPDATE_CHANNEL:
+        if task_type is None:
+            raise PermanentError(
+                ErrorCode.INVALID_PAYLOAD,
+                "update_channel requires task_type (multi-op)",
+            )
+        await _execute_update_channel(
+            task,
+            account=account,
+            task_type=task_type,
+            attempt_id=attempt_id,
+            client_getter=client_getter or default_client_getter(),
+            channels_repo=channels_repo or SourceChannelsRepo(),
+            queue=queue or TaskQueueRepo(),
+            usage=usage or ResourceUsageRepo(),
         )
     else:
         raise PermanentError(
@@ -342,22 +490,37 @@ class ClumpTaskAdapter:
         *,
         clump_getter: ClumpGetter | None = None,
         account_getter: AccountGetter | None = None,
+        client_getter: ClientGetter | None = None,
+        channels_repo: SourceChannelsRepo | None = None,
         sync_after_add: SyncAfterAdd | None = None,
         sync_after_move: SyncAfterMove | None = None,
         sync_after_remove: SyncAfterRemove | None = None,
     ) -> None:
         self._clump_getter = clump_getter
         self._account_getter = account_getter
+        self._client_getter = client_getter
+        self._channels_repo = channels_repo
         self._sync_after_add = sync_after_add
         self._sync_after_move = sync_after_move
         self._sync_after_remove = sync_after_remove
 
-    async def execute(self, task: ClaimedTask, *, account: Account) -> None:
+    async def execute(
+        self,
+        task: ClaimedTask,
+        *,
+        account: Account,
+        task_type: TaskType | None = None,
+        attempt_id: int | None = None,
+    ) -> None:
         await execute_task(
             task,
             account=account,
+            task_type=task_type,
+            attempt_id=attempt_id,
             clump_getter=self._clump_getter,
             account_getter=self._account_getter,
+            client_getter=self._client_getter,
+            channels_repo=self._channels_repo,
             sync_after_add=self._sync_after_add,
             sync_after_move=self._sync_after_move,
             sync_after_remove=self._sync_after_remove,

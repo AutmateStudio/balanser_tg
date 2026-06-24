@@ -10,6 +10,7 @@ import pytest
 from app_balance.queue import db
 from app_balance.queue.accounts import AccountsRepo
 from app_balance.queue.dispatch import DispatchResult, TaskDispatcher
+from app_balance.queue.errors import RetryableError
 from app_balance.queue.mock_adapter import MockTaskAdapter
 from app_balance.queue.per_op_reading import TaskTypesRepo
 from app_balance.queue.resource_check import ResourceChecker
@@ -18,6 +19,7 @@ from app_balance.queue.task_queue import EnqueueInput, TaskQueueRepo
 from app_balance.queue_worker import QueueWorker, WorkerConfig
 from tests.conftest import requires_pg
 from tests.pg_cleanup import cleanup_queue_test_data
+from tests.queue_integration_helpers import AlwaysOkResourceChecker, reclaim_retry_task
 from tests.tz30.conftest import (
     assert_attempts_sync_with_queue,
     task_attempts_for_task,
@@ -27,6 +29,8 @@ _PREFIX = "test_c8_dispatch_"
 _HOLDER_PRIORITY = -2_000_000_000
 _TEST_PRIORITY = 2_000_000_000
 _TEST_PAYLOAD = {"ref": "@c8_test"}
+# Worker-loop на удалённом shared PG: каждый шаг — сетевой round-trip, 5s не хватает.
+_WORKER_WAIT_TIMEOUT = 30.0
 
 
 @pytest.fixture
@@ -173,12 +177,12 @@ async def _run_worker_until_task_done(worker: QueueWorker, task_id: int) -> None
     run_task = asyncio.create_task(worker.run())
     try:
         await asyncio.wait_for(
-            _wait_until_status(task_id, expected="done", timeout=5.0),
-            timeout=5.0,
+            _wait_until_status(task_id, expected="done", timeout=_WORKER_WAIT_TIMEOUT),
+            timeout=_WORKER_WAIT_TIMEOUT,
         )
     finally:
         worker.stop()
-        await asyncio.wait_for(run_task, timeout=5.0)
+        await asyncio.wait_for(run_task, timeout=_WORKER_WAIT_TIMEOUT)
 
 
 async def _wait_until_status(
@@ -291,12 +295,12 @@ class _FailOnceAdapter(MockTaskAdapter):
     async def execute(self, task, *, account) -> None:  # type: ignore[override]
         if task.id not in self._failures:
             self._failures.add(task.id)
-            raise RuntimeError("transient_fail")
+            raise RetryableError("transient_error", "transient_error")
         await super().execute(task, account=account)
 
 
 async def _run_worker_until_status(
-    worker: QueueWorker, task_id: int, expected: str, *, timeout: float = 5.0
+    worker: QueueWorker, task_id: int, expected: str, *, timeout: float = _WORKER_WAIT_TIMEOUT
 ) -> None:
     run_task = asyncio.create_task(worker.run())
     try:
@@ -371,7 +375,10 @@ async def test_e4_fail_retry_success_creates_two_attempts(clean_queue) -> None:
         accounts=AccountsRepo(),
         task_types=TaskTypesRepo(),
         adapter=mock,
-        resource_check=ResourceChecker(ResourceUsageRepo()),
+        # E4 проверяет учёт попыток на retry, а не RPH: 1-я (провальная) попытка уже
+        # записывает usage, поэтому реальный resource_check отклонил бы 2-ю попытку
+        # (postponed). Отвязываемся от ресурс-учёта через always-ok checker.
+        resource_check=AlwaysOkResourceChecker(),
         postpone_delay_seconds=300,
         retry_delay_seconds=0,
     )
@@ -379,25 +386,7 @@ async def test_e4_fail_retry_success_creates_two_attempts(clean_queue) -> None:
     result1 = await dispatcher.dispatch(claimed1)
     assert result1 == DispatchResult.RETRIED
 
-    claimed2 = await repo.claim_by_id(task_id, locked_by="e4-retry-2")
-    if claimed2 is None:
-        async with db.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE task_queue
-                SET run_after = now() - interval '1 second',
-                    locked_by = NULL,
-                    locked_until = NULL
-                WHERE id = $1 AND status = 'retry'
-                """,
-                task_id,
-            )
-        claimed2 = await repo.claim_by_id(task_id, locked_by="e4-retry-2")
-    if claimed2 is None:
-        pytest.skip(
-            "фоновый queue-worker забрал retry-задачу — "
-            "retry-сценарий покрыт unit-тестом test_e4_retry_creates_second_attempt"
-        )
+    claimed2 = await reclaim_retry_task(task_id, locked_by="e4-retry-2")
 
     result2 = await dispatcher.dispatch(claimed2)
     assert result2 == DispatchResult.COMPLETED
@@ -413,7 +402,9 @@ async def test_e4_fail_retry_success_creates_two_attempts(clean_queue) -> None:
     assert attempts[0]["status"] == "error"
     assert attempts[1]["status"] == "success"
     await assert_attempts_sync_with_queue(task_id)
-    assert len([e for e in mock.executions if e.task_id == task_id]) == 2
+    # MockTaskAdapter пишет в executions только успешный execute;
+    # 1-я попытка падает до super().execute() → одна запись.
+    assert len([e for e in mock.executions if e.task_id == task_id]) == 1
 
 
 @requires_pg

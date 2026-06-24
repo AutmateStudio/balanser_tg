@@ -11,7 +11,7 @@ SHELL := /bin/bash
 RUNNER := scripts/migrate_queue.sh
 MODE ?= auto
 
-.PHONY: migrate-queue migrate-queue-dry migrate-queue-schema migrate-queue-status docker-build docker-test docker-test-local docker-migrate sync-accounts docker-sync-accounts e2e-d12-preflight e2e-d12-run docker-e2e-d12-preflight docker-e2e-d12-run verify-ops-catalog
+.PHONY: migrate-queue migrate-queue-dry migrate-queue-schema migrate-queue-status docker-build docker-test docker-test-safe docker-test-local docker-migrate sync-accounts docker-sync-accounts e2e-d12-preflight e2e-d12-run docker-e2e-d12-preflight docker-e2e-d12-run verify-ops-catalog
 
 ## verify-ops-catalog: E7 — сверка ops_catalog ↔ A9_seed.sql (добавьте --db для PG)
 verify-ops-catalog:
@@ -27,8 +27,22 @@ docker-migrate:
 
 ## docker-test: pytest все suite (tests/ + standalone_discovery/tests/) против БД из .env
 ## (run_docker_tests.sh сначала прогоняет verify-ops-catalog seed-сверку, E7)
+## ВНИМАНИЕ: на shared PG используйте docker-test-safe — guard прервёт прогон
+## integration-тестов, если queue-worker не остановлен (QUEUE_WORKER_STOPPED).
 docker-test:
 	docker compose run --rm test
+
+## docker-test-safe: безопасный прогон на shared PG. Останавливает ВСЕ источники
+## claim (queue-worker + in-process worker внутри discovery-api), гоняет полный
+## pytest (guard сам делает probe-проверку), затем возвращает контейнеры.
+docker-test-safe:
+	-docker compose stop queue-worker
+	-docker stop standalone-discovery-api
+	docker compose run --rm test; \
+	  status=$$?; \
+	  docker compose up -d queue-worker; \
+	  docker start standalone-discovery-api 2>/dev/null || true; \
+	  exit $$status
 
 ## docker-test-local: postgres + migrate + полный pytest (profile local)
 docker-test-local:

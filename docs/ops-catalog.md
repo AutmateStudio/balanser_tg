@@ -99,7 +99,9 @@ effective_rph = floor(rph_limit × (1 − reserve_percent / 100))
 
 ## Примечания
 
-- `collect_extra_data` и `update_channel` остаются `is_enabled=false` до задач F6/F7.
+- `update_channel` включён в seed (`is_enabled=true`) — adapter-ветка F7 реализована
+  (`_execute_update_channel`). `collect_extra_data` остаётся `is_enabled=false` до
+  включения в рамках F6.
 - После любого изменения seed или каталога запустите `make verify-ops-catalog`
   (или `python scripts/verify_ops_catalog_seed.py --db` для сверки с PostgreSQL).
 - Per-op RPH с точки зрения оператора см. в [`docs/queue-runbook.md`](queue-runbook.md).

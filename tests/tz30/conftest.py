@@ -15,6 +15,7 @@ import pytest
 from app_balance.queue import db
 from app_balance.queue.accounts import AccountsRepo
 from app_balance.queue.dispatch import TaskDispatcher
+from app_balance.queue.errors import RetryableError
 from app_balance.queue.mock_adapter import MockTaskAdapter
 from app_balance.queue.per_op_reading import TaskTypesRepo
 from app_balance.queue.resource_check import ResourceChecker
@@ -290,15 +291,48 @@ async def run_worker_until_task_status(
         await asyncio.wait_for(run_task, timeout=timeout)
 
 
-class FailingTaskAdapter(MockTaskAdapter):
-    """Публичный mock-адаптер: имитирует ошибку Telethon без реального RPC."""
+async def run_worker_until_attempt_count(
+    worker: QueueWorker,
+    task_id: int,
+    expected: int,
+    *,
+    timeout: float = 10.0,
+) -> None:
+    """Дождаться attempt_count >= expected.
 
-    def __init__(self, message: str = "temporary_telegram_error") -> None:
+    При retry worker.processed не растёт и status может уже быть 'retry' с прошлой
+    попытки — поэтому ориентируемся именно на счётчик попыток.
+    """
+    run_task = asyncio.create_task(worker.run())
+    try:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            row = await task_row(task_id)
+            if row is not None and int(row["attempt_count"]) >= expected:
+                return
+            await asyncio.sleep(0.05)
+        raise TimeoutError(
+            f"задача {task_id} не достигла attempt_count={expected} за {timeout}s"
+        )
+    finally:
+        worker.stop()
+        await asyncio.wait_for(run_task, timeout=timeout)
+
+
+class FailingTaskAdapter(MockTaskAdapter):
+    """Публичный mock-адаптер: имитирует retryable-ошибку Telethon без реального RPC.
+
+    E1: адаптеры обязаны бросать типизированные ошибки. message трактуется как
+    стабильный error_code (например flood_wait / transient_error) — он попадает в
+    task_queue.last_error и task_attempts.error_code.
+    """
+
+    def __init__(self, message: str = "transient_error") -> None:
         super().__init__()
         self.message = message
 
     async def execute(self, task, *, account) -> None:  # type: ignore[override]
-        raise RuntimeError(self.message)
+        raise RetryableError(self.message, self.message)
 
 
 def future_run_after(*, hours: float = 1.0) -> datetime:

@@ -610,6 +610,7 @@ class RebalanceIdleTests(unittest.IsolatedAsyncioTestCase):
     async def test_gap_too_small_skips(self) -> None:
         from unittest.mock import patch
 
+        from discovery_api import session_registry as sr
         from discovery_api.session_registry import SessionClump
 
         clump = SessionClump(["/s1", "/s2"], "c", webhook_url="http://h")
@@ -624,7 +625,9 @@ class RebalanceIdleTests(unittest.IsolatedAsyncioTestCase):
         )
         clump.parser_client_list[0].channels = ["@a"] * 55
         clump.parser_client_list[1].channels = ["@b"] * 30
-        with patch.object(clump, "_in_idle_window", return_value=True):
+        with patch.object(clump, "_in_idle_window", return_value=True), patch.object(
+            sr, "get_use_pg_queue", return_value=False
+        ):
             result = await clump.rebalance_idle()
         self.assertEqual(result["skipped"], "gap_too_small")
 
@@ -632,6 +635,7 @@ class RebalanceIdleTests(unittest.IsolatedAsyncioTestCase):
         import time
         from unittest.mock import patch
 
+        from discovery_api import session_registry as sr
         from discovery_api.session_registry import SessionClump
 
         clump = SessionClump(["/s1", "/s2"], "c", webhook_url="http://h")
@@ -651,13 +655,16 @@ class RebalanceIdleTests(unittest.IsolatedAsyncioTestCase):
         s1.ref_to_chat_id[ref] = 999
         s1.allowed_chat_ids.add(999)
         clump._channel_rebalance_at[ref] = time.time()
-        with patch.object(clump, "_in_idle_window", return_value=True):
+        with patch.object(clump, "_in_idle_window", return_value=True), patch.object(
+            sr, "get_use_pg_queue", return_value=False
+        ):
             result = await clump.rebalance_idle()
         self.assertEqual(result["moved"], [])
 
     async def test_rebalance_moves_channel(self) -> None:
         from unittest.mock import AsyncMock, patch
 
+        from discovery_api import session_registry as sr
         from discovery_api.session_registry import SessionClump
 
         clump = SessionClump(["/s1", "/s2"], "c", webhook_url="http://h")
@@ -684,12 +691,65 @@ class RebalanceIdleTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(clump, "_in_idle_window", return_value=True), patch.object(
             s2, "add_channel", side_effect=_fake_add
-        ), patch.object(s2, "start", new_callable=AsyncMock):
+        ), patch.object(s2, "start", new_callable=AsyncMock), patch.object(
+            sr, "get_use_pg_queue", return_value=False
+        ):
             result = await clump.rebalance_idle()
 
         self.assertIn(ref, result["moved"])
         self.assertNotIn(ref, s1.channels)
         self.assertIn(ref, s2.channels)
+
+    async def test_pg_queue_forces_rebalance_disabled(self) -> None:
+        # F3: при USE_PG_QUEUE=true idle-rebalance off даже при rebalance_enabled=True.
+        from unittest.mock import patch
+
+        from discovery_api import session_registry as sr
+        from discovery_api.session_registry import SessionClump
+
+        clump = SessionClump(["/s1", "/s2"], "c", webhook_url="http://h")
+        clump.update_config(rebalance_enabled=True)
+        sr._warned_rebalance_disabled = False
+        with patch.object(sr, "get_use_pg_queue", return_value=True):
+            self.assertFalse(clump.config.eff_rebalance_enabled())
+
+    async def test_pg_queue_rebalance_idle_skips(self) -> None:
+        # F3: rebalance_idle() ничего не переносит при активном PG-балансере.
+        from unittest.mock import patch
+
+        from discovery_api import session_registry as sr
+        from discovery_api.session_registry import SessionClump
+
+        clump = SessionClump(["/s1", "/s2"], "c", webhook_url="http://h")
+        s1, s2 = clump.parser_client_list
+        for pc in (s1, s2):
+            pc.health.mark_connected()
+        clump.update_config(
+            rebalance_enabled=True,
+            rebalance_min_gap_channels=10,
+            max_channels_per_session=100,
+            rebalance_high_watermark_ratio=0.9,
+            rebalance_low_watermark_ratio=0.1,
+        )
+        s1.channels = ["@x"] * 89 + ["@moveme"]
+        sr._warned_rebalance_disabled = False
+        with patch.object(clump, "_in_idle_window", return_value=True), patch.object(
+            sr, "get_use_pg_queue", return_value=True
+        ):
+            result = await clump.rebalance_idle()
+        self.assertEqual(result["moved"], [])
+
+    async def test_no_pg_queue_keeps_rebalance_enabled(self) -> None:
+        # F3: без PG-очереди поведение прежнее (регрессия существующих тестов).
+        from unittest.mock import patch
+
+        from discovery_api import session_registry as sr
+        from discovery_api.session_registry import SessionClump
+
+        clump = SessionClump(["/s1", "/s2"], "c", webhook_url="http://h")
+        clump.update_config(rebalance_enabled=True)
+        with patch.object(sr, "get_use_pg_queue", return_value=False):
+            self.assertTrue(clump.config.eff_rebalance_enabled())
 
 
 if __name__ == "__main__":

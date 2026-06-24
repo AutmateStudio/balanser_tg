@@ -9,7 +9,7 @@ import pytest
 from app_balance.queue import db
 from app_balance.queue.task_attempts import TaskAttemptsRepo
 from app_balance.queue.task_queue import EnqueueInput, TaskQueueRepo
-from tests.conftest import requires_pg
+from tests.conftest import TEST_ISOLATION_PRIORITY, requires_pg
 from tests.pg_cleanup import cleanup_queue_test_data
 from tests.queue_integration_helpers import insert_test_account
 
@@ -41,7 +41,11 @@ async def attempts_ctx(pg_pool):
         )
 
     enqueue = await TaskQueueRepo().enqueue(
-        EnqueueInput(task_type_code="parser_add_channel", dedup_key=dedup_key)
+        EnqueueInput(
+            task_type_code="parser_add_channel",
+            dedup_key=dedup_key,
+            priority=TEST_ISOLATION_PRIORITY,
+        )
     )
 
     yield {
@@ -84,7 +88,8 @@ async def test_attempt_number_monotonic(attempts_ctx) -> None:
     repo = TaskAttemptsRepo()
     task_id = attempts_ctx["task_id"]
 
-    await queue.claim_next(locked_by="b9-worker", task_type_codes=["parser_add_channel"])
+    claimed1 = await queue.claim_by_id(task_id, locked_by="b9-worker")
+    assert claimed1 is not None, "задача недоступна для claim (shared PG / run_after)"
     attempt_number_1 = await queue.begin_execution_attempt(task_id)
     id_1 = await repo.insert(
         task_id=task_id,
@@ -103,9 +108,8 @@ async def test_attempt_number_monotonic(attempts_ctx) -> None:
             task_id,
         )
 
-    reclaimed = await queue.claim_next(locked_by="b9-worker-2", task_type_codes=["parser_add_channel"])
-    assert reclaimed is not None
-    assert reclaimed.id == task_id
+    reclaimed = await queue.claim_by_id(task_id, locked_by="b9-worker-2")
+    assert reclaimed is not None, "retry-задача недоступна для reclaim (shared PG / run_after)"
 
     attempt_number_2 = await queue.begin_execution_attempt(task_id)
     id_2 = await repo.insert(
