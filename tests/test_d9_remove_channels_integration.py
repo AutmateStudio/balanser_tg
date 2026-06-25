@@ -100,8 +100,14 @@ async def test_d9_enqueue_parser_remove_creates_tasks_in_pg(d9_clean) -> None:
     from discovery_api.queue.producer import enqueue_parser_remove_channels
 
     account_id, session_name = await insert_test_account(prefix=f"{_PREFIX}enq_")
+    # Уникальные parser_id / channel_ref — иначе dedup на shared PG вернёт
+    # existing_task_id с чужим account_id (§30.15, idx_task_queue_dedup_active).
+    suffix = uuid.uuid4().hex[:12]
+    parser_id = f"pid_d9_{suffix}"
+    ch_a = f"@ch_a_{suffix}"
+    ch_b = f"@ch_b_{suffix}"
     clump = MagicMock()
-    clump.assignments = {"@ch_a": session_name, "@ch_b": session_name}
+    clump.assignments = {ch_a: session_name, ch_b: session_name}
 
     with (
         patch("discovery_api.session_registry.get_clump", return_value=clump),
@@ -112,9 +118,9 @@ async def test_d9_enqueue_parser_remove_creates_tasks_in_pg(d9_clean) -> None:
         ),
     ):
         result = await enqueue_parser_remove_channels(
-            parser_id="pid_d9",
-            channel_list=["@ch_a", "@ch_b"],
-            action_id=f"{_PREFIX}action",
+            parser_id=parser_id,
+            channel_list=[ch_a, ch_b],
+            action_id=f"{_PREFIX}action_{suffix}",
         )
 
     assert len(result.task_ids) == 2
@@ -135,7 +141,7 @@ async def test_d9_enqueue_parser_remove_creates_tasks_in_pg(d9_clean) -> None:
             payload = row["payload"]
             if isinstance(payload, str):
                 payload = json.loads(payload)
-            assert payload["parser_id"] == "pid_d9"
+            assert payload["parser_id"] == parser_id
     assert len(dedup_keys) == 2
 
 

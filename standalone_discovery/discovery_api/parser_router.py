@@ -52,6 +52,7 @@ from discovery_api.queue.producer import (
     enqueue_parser_add_channels,
     enqueue_parser_remove_channels,
 )
+from discovery_api.queue.metrics import MetricsResponse, get_queue_metrics
 from discovery_api.queue.status import get_task_snapshot
 from discovery_api.parser_store import (
     clump_to_record,
@@ -873,6 +874,11 @@ async def parser_queue_task_get(task_id: int) -> TaskQueueItemResponse:
     if task is None:
         raise HTTPException(status_code=404, detail="Задача не найдена")
     return _task_snapshot_to_response(task)
+
+
+@parser_router.get("/queue/metrics", response_model=MetricsResponse)
+async def parser_queue_metrics() -> MetricsResponse:
+    return await get_queue_metrics()
 
 
 @parser_router.get("/settings", response_model=BalancerSettingsResponse)

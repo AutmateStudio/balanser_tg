@@ -1,7 +1,8 @@
 # Runbook — очередь PostgreSQL (Lidogen Telegram Balancer)
 
-**Дата:** 2026-06-24  
-**Задача:** E5 — стабильные коды `last_error`
+**Дата:** 2026-06-25  
+**Охват:** E5 (коды ошибок), F (продюсеры), **G1–G7** (мониторинг §26)  
+**План блока G:** [`docs/plan-ispolneniya-blok-g.md`](plan-ispolneniya-blok-g.md)
 
 ---
 
@@ -55,7 +56,7 @@
 
 | Код | Причина | Действие worker | Что делать оператору |
 |-----|---------|-----------------|----------------------|
-| `watchdog:task_timeout_exceeded` | Задача зависла в `in_progress` | stuck (watchdog) | Разобрать причину зависания; см. G5 auto-retry |
+| `watchdog:task_timeout_exceeded` | Задача зависла в `in_progress` | stuck (по умолчанию) либо auto-retry (G5) | Разобрать причину зависания; см. [§G5 — Watchdog auto-retry](#g5--watchdog-auto-retry) |
 | `unexpected_error` | Нетипизированное исключение | retry | Смотреть `task_attempts.error_message` и логи worker |
 
 ### Планируется (E2 — Telethon)
@@ -103,7 +104,7 @@
 Операторские подсказки:
 
 - `flood_wait` — Telegram попросил подождать; при частоте по конкретному op снижать
-  его `rph_limit` (автокоррекция — будущая задача G6★).
+  его `rph_limit` (автокоррекция — G6★, см. [§G6 — Детектор ошибок](#g6--детектор-повторяющихся-ошибок)).
 - `insufficient_resource:<account>:<op>` — исчерпан RPH именно этого op у аккаунта;
   смотреть суффикс `last_error`, какой op уперся в лимит.
 - Источник истины RPH — `app_balance/queue/ops_catalog.py`; БД заполняется из
@@ -234,10 +235,440 @@ iter_messages -> GetParticipants -> LeaveChannel` (`collect_pipeline.py`).
 
 ---
 
+## G — Обзор стека мониторинга (блок G, §26)
+
+Компоненты observability и их роли:
+
+| Компонент | Процесс | Задачи G |
+|-----------|---------|----------|
+| PostgreSQL VIEW | — | G1, G2 — метрики очереди и ресурсов |
+| discovery-api | HTTP | G3 — `GET /parser/queue/metrics` |
+| `queue-monitor` | `python -m app_balance.queue_monitor all` | G4 (алерты), G6 (детектор), G7 (пороги) |
+| `queue-worker` | `python -m app_balance.queue_worker` | G5 — watchdog auto-retry (env на **worker**, не monitor) |
+
+### Порядок запуска prod/staging
+
+```bash
+# 1. Миграции (включая A11: G6 audit + VIEW)
+docker compose run --rm migrate
+
+# 2. Исполнение очереди
+docker compose up -d queue-worker
+
+# 3. Продюсеры (опционально, profile producers)
+docker compose --profile producers up -d producer-collect producer-update producer-balancer
+
+# 4. Мониторинг (profile monitoring)
+docker compose --profile monitoring up -d queue-monitor
+# или: make docker-monitor
+```
+
+Discovery-api с `USE_PG_QUEUE=true` отдаёт G3 metrics и может поднимать in-process worker —
+**не запускайте полный pytest на shared PG**, пока работают claimer'ы (см.
+[`docs/testing-shared-pg.md`](testing-shared-pg.md), `make docker-test-safe`).
+
+### §G — Env (сводная таблица G4–G7 + G5)
+
+| Переменная | Сервис | Default | Назначение |
+|------------|--------|---------|------------|
+| `MONITOR_INTERVAL_SECONDS` | queue-monitor | 120 | Интервал tick |
+| `ALERT_ENABLED` | queue-monitor | true | G4 вкл/выкл |
+| `ALERT_WEBHOOK_URL` | queue-monitor | — | Webhook n8n |
+| `ALERT_COOLDOWN_SECONDS` | queue-monitor | 1800 | Debounce алертов |
+| `ALERT_QUEUE_GROWTH_PERCENT` | queue-monitor | 20 | G4: рост очереди |
+| `ALERT_QUEUE_GROWTH_WINDOW_SECONDS` | queue-monitor | 900 | Окно роста очереди |
+| `ALERT_OLDEST_QUEUED_MAX_SECONDS` | queue-monitor | 3600 | G4: stale queue |
+| `ALERT_HIGH_POSTPONE_MIN` | queue-monitor | 10 | G4: high postpone |
+| `ALERT_ERROR_RATE_MIN_PERCENT` | queue-monitor | 50 | G4: error spike |
+| `ALERT_ERROR_RATE_MIN_ATTEMPTS` | queue-monitor | 5 | Мин. попыток для spike |
+| `THRESHOLD_ALERT_ENABLED` | queue-monitor | true | G7 вкл/выкл |
+| `THRESHOLD_CHANNEL_PERCENT` | queue-monitor | 75 | G7: каналы fleet |
+| `THRESHOLD_RESOURCE_PERCENT` | queue-monitor | 0 | G7: исчерпан op |
+| `MAX_CHANNELS_PER_SESSION` | queue-monitor | 500 | Лимит каналов/акк |
+| `DEV_ALERT_TELEGRAM_CHAT_ID` | monitor + G6 | — | Telegram dev-чат |
+| `BOT_TOKEN` / `TELEGRAM_BOT_TOKEN` | monitor + G6 | — | Bot API |
+| `ERROR_DETECTOR_ENABLED` | queue-monitor | true | G6 вкл/выкл |
+| `ERROR_DETECTOR_WINDOW_SECONDS` | queue-monitor | 3600 | Окно G6 |
+| `ERROR_DETECTOR_MIN_COUNT` | queue-monitor | 5 | Порог N ошибок |
+| `ERROR_DETECTOR_RPH_FACTOR` | queue-monitor | 0.7 | Множитель RPH |
+| `ERROR_DETECTOR_MIN_RPH` | queue-monitor | 2 | Min RPH после снижения |
+| `ERROR_DETECTOR_REPEAT_WINDOW_SECONDS` | queue-monitor | 86400 | Окно disable op |
+| `ERROR_DETECTOR_COOLDOWN_SECONDS` | queue-monitor | 3600 | Cooldown peer_flood |
+| `WATCHDOG_AUTO_RETRY_ENABLED` | **queue-worker** | false | G5 auto-retry |
+| `WATCHDOG_AUTO_RETRY_MAX_ATTEMPTS` | **queue-worker** | 2 | Cap watchdog-retry |
+| `WATCHDOG_AUTO_RETRY_DELAY_SECONDS` | **queue-worker** | 60 | run_after delay |
+| `WORKER_WATCHDOG_ENABLED` | queue-worker | true | C6 tick вкл |
+| `WORKER_WATCHDOG_INTERVAL_SECONDS` | queue-worker | 30 | Интервал C6 |
+
+Источник дефолтов: `app_balance/queue/monitoring/config.py`, `app_balance/queue/watchdog.py`.
+Шаблон: `.env.example`.
+
+### §G — Incident response (кратко)
+
+| Симптом | Действия |
+|---------|----------|
+| Очередь растёт | `curl …/queue/metrics` → `queue.total`, `oldest_queued_age_seconds`; G4 `queue_growth` / `high_postpone`; проверить `accounts.without_resource` |
+| Нет выполнений | `done_last_5_min=0` при `queue.total>0` → G4 `queue_no_progress`; worker/discovery-api живы? |
+| Задачи stuck | `stuck_count>0` → логи worker; G5 только если осознанно включён |
+| RPH снижен автоматически | `SELECT * FROM resource_limit_adjustments ORDER BY created_at DESC LIMIT 10`; rollback — [§G6](#g6--детектор-повторяющихся-ошибок) |
+| Спам Telegram | увеличить `ALERT_COOLDOWN_SECONDS` или `THRESHOLD_ALERT_ENABLED=false` |
+
+---
+
+## G1 — Мониторинг очереди (§26.2)
+
+SQL-представления для метрик очереди. Источник: `DB/BD_schema.sql`, накат на
+shared PG — `DB/A8_integrate_main_db.sql` (`CREATE OR REPLACE VIEW`).
+
+| VIEW | Назначение |
+|------|------------|
+| `v_queue_size_by_status` | Количество задач по каждому статусу |
+| `v_queue_size_by_type` | Активные задачи (`queued`/`scheduled`/`retry`/`in_progress`) по типу |
+| `v_queue_metrics` | Сводка одной строкой для G3 / алертов |
+| `v_high_postpone_tasks` | Задачи с частым postpone (G4) |
+
+**`oldest_queued_task_age_seconds`** — возраст самой старой задачи в статусах
+`queued` или `scheduled` (карточка G1; §26.2 «самая старая задача в очереди»).
+Если таких задач нет — `0`.
+
+Примеры диагностики:
+
+```sql
+SELECT * FROM v_queue_metrics;
+SELECT status, tasks_count FROM v_queue_size_by_status ORDER BY status;
+SELECT * FROM v_high_postpone_tasks LIMIT 10;
+```
+
+Preflight перед pytest проверяет все мониторинговые VIEW (G1+G2):
+`python scripts/preflight_test_db.py` → `monitoring_views=9/9`.
+
+Тесты приёмки G1: `tests/test_monitoring_views.py` (секция queue),
+`tests/tz30/test_scenarios_e2e.py::test_tz30_20_monitoring_views_reflect_queue_state`.
+
+---
+
+## G2 — Мониторинг ресурсов и аккаунтов (§26.3)
+
+SQL-представления per-op ресурса и сводки по парку аккаунтов. Источник:
+`DB/BD_schema.sql`, накат на shared PG — `DB/A8_integrate_main_db.sql`.
+
+| VIEW | Метрики §26.3 | Назначение |
+|------|---------------|------------|
+| `v_account_op_usage_last_hour` | used/available/% per op | **Per op_type_id** (§0.5); колонка `available_resource_percent` = «account_available_resource_percent» из карточки G2 |
+| `v_account_resource_summary` | худший op аккаунта | `worst_available_percent`, `any_op_exhausted` |
+| `v_accounts_overview` | active, cooldown, без ресурса | одна строка по парку |
+| `v_account_error_rate_last_hour` | error rate аккаунта | G4 alert |
+| `v_task_type_error_rate_last_hour` | error rate по типу задачи | G4 alert |
+
+**Per-op лимит (§0.5):** `effective_rph = floor(rph_limit × (1 − reserve_percent/100))`.
+VIEW **не используют** `accounts.hourly_limit`.
+
+**Edge case:** op с `rph_limit = 1` → `effective_rph = 0` → у аккаунта
+`any_op_exhausted = true` для этого op. Это ожидаемое поведение, не баг.
+
+Примеры диагностики:
+
+```sql
+SELECT * FROM v_accounts_overview;
+SELECT account_id, op_code, used_last_hour, available_resource_percent
+FROM v_account_op_usage_last_hour WHERE account_id = $1;
+SELECT * FROM v_account_resource_summary WHERE any_op_exhausted = true;
+SELECT * FROM v_account_error_rate_last_hour ORDER BY error_rate_percent DESC LIMIT 10;
+```
+
+Тесты приёмки G2: `tests/test_monitoring_views.py` (секция resource/G2),
+`tests/tz30/test_scenarios_e2e.py::test_tz30_20b_monitoring_views_reflect_accounts_and_resource`.
+
+---
+
+## G3 — GET /queue/metrics (§26)
+
+Единая HTTP-точка метрик для админки и n8n. Агрегирует VIEW G1/G2 в JSON.
+
+**Требования:** `USE_PG_QUEUE=true`, инициализированный пул PG (`QUEUE_DATABASE_URL`),
+API key (как у остальных маршрутов discovery-api).
+
+| Метод | URL |
+|-------|-----|
+| GET | `/discovery-api/parser/queue/metrics` |
+
+Пример:
+
+```bash
+curl -s -H "X-API-Key: $DISCOVERY_API_KEY" \
+  "http://localhost:8000/discovery-api/parser/queue/metrics" | jq .
+```
+
+**JSON-контракт (верхний уровень):**
+
+| Поле | Источник |
+|------|----------|
+| `queue.total` | `v_queue_metrics.queue_size_total` |
+| `queue.by_status` | `v_queue_size_by_status` |
+| `queue.by_type` | `v_queue_size_by_type` (вложенный: тип → статус → count) |
+| `queue.oldest_queued_age_seconds` | `v_queue_metrics` (queued + scheduled) |
+| `queue.stuck_count` | `v_queue_metrics.stuck_tasks_count` |
+| `queue.done_last_5_min` | `v_queue_metrics.done_tasks_last_5_min` |
+| `accounts.active` | `v_accounts_overview.active_accounts_count` |
+| `accounts.in_cooldown` | `v_accounts_overview.accounts_in_cooldown` |
+| `accounts.without_resource` | `v_accounts_overview.accounts_without_resource` |
+| `accounts.per_op[]` | `v_account_op_usage_last_hour` (per-op §0.5) |
+| `accounts.worst_by_account[]` | `v_account_resource_summary` |
+| `alerts_preview.high_postpone_count` | `COUNT(*)` из `v_high_postpone_tasks` |
+| `generated_at` | UTC ISO timestamp снимка |
+
+**Код:** `app_balance/queue/monitoring/metrics_repo.py` (data layer),
+`standalone_discovery/discovery_api/queue/metrics.py` (HTTP).
+
+При `USE_PG_QUEUE=false` — **503** с сообщением «PG-очередь не включена».
+
+Тесты приёмки G3: `tests/test_g3_queue_metrics_api.py`,
+`standalone_discovery/tests/test_pg_queue_metrics.py`.
+
+---
+
+## G4 — Алерты §26.4
+
+Фоновый tick оценивает 8 правил и при срабатывании пишет structured ERROR-log
+и (опционально) POST в webhook. Переиспользуется `MetricsRepo` (G3).
+
+**Запуск:**
+
+```bash
+# Docker (profile monitoring)
+docker compose --profile monitoring up -d queue-monitor
+
+# Локально / cron
+python -m app_balance.queue_monitor --once
+python -m app_balance.queue_monitor --interval 120
+```
+
+**Правила (`alert_code`):**
+
+| Код | Severity | Env-порог |
+|-----|----------|-----------|
+| `queue_growth` | WARNING | `ALERT_QUEUE_GROWTH_PERCENT` / `ALERT_QUEUE_GROWTH_WINDOW_SECONDS` |
+| `oldest_queue_stale` | WARNING | `ALERT_OLDEST_QUEUED_MAX_SECONDS` |
+| `high_postpone` | WARNING | `ALERT_HIGH_POSTPONE_MIN` |
+| `no_active_accounts` | ERROR | active=0 |
+| `task_type_error_spike` | ERROR | `ALERT_ERROR_RATE_MIN_PERCENT` + `ALERT_ERROR_RATE_MIN_ATTEMPTS` |
+| `account_error_spike` | ERROR | аналогично |
+| `stuck_no_progress` | ERROR | stuck>0 и done_5min=0 |
+| `queue_no_progress` | ERROR | queue>0 и done_5min=0 |
+
+Debounce: `{alert_code}:{scope_key}`, интервал `ALERT_COOLDOWN_SECONDS` (default 1800).
+
+**Webhook payload (пример):**
+
+```json
+{
+  "alert_code": "no_active_accounts",
+  "severity": "ERROR",
+  "message": "Нет активных аккаунтов (active_accounts_count=0)",
+  "scope_key": "global",
+  "metrics_snapshot": { "...": "..." },
+  "generated_at": "2026-06-25T12:00:00+00:00"
+}
+```
+
+**Код:** `app_balance/queue/monitoring/alert_rules.py`, `notify.py`, `config.py`,
+`queue_monitor.py`.
+
+**Warm-up:** правило `queue_growth` требует ≥2 точек в окне — после рестарта monitor
+нужно подождать один интервал (`MONITOR_INTERVAL_SECONDS`).
+
+Тесты приёмки G4: `tests/test_g4_alert_rules.py`.
+
+---
+
+## G7★ — пороги загрузки каналов и ресурса (Telegram)
+
+Фоновый tick `queue-monitor` (тот же процесс, что G4) дополнительно оценивает
+пороги загрузки и шлёт сообщения в dev-чат Telegram. Debounce — общий с G4
+(`{alert_code}:{scope_key}`, `ALERT_COOLDOWN_SECONDS`).
+
+**Правила (`alert_code`):**
+
+| Код | Severity | Условие | Env-порог |
+|-----|----------|---------|-----------|
+| `threshold_channel_capacity` | WARNING | суммарная загрузка каналов по парку | `THRESHOLD_CHANNEL_PERCENT` (default 75) |
+| `threshold_resource_exhausted` | ERROR | active-аккаунт с исчерпанным op | `THRESHOLD_RESOURCE_PERCENT` (default 0) |
+
+**Метрики:**
+
+| Поле | Источник |
+|------|----------|
+| `channels.assigned_channels_total` | VIEW `v_channel_capacity_usage` |
+| `channels.fleet_capacity` | `active_accounts × MAX_CHANNELS_PER_SESSION` |
+| `accounts.worst_by_account[]` | VIEW `v_account_resource_summary` |
+
+**Env (дополнительно к G4):**
+
+| Переменная | Default | Назначение |
+|------------|---------|------------|
+| `THRESHOLD_ALERT_ENABLED` | `true` | вкл/выкл G7 |
+| `THRESHOLD_CHANNEL_PERCENT` | `75` | порог каналов (fleet, %) |
+| `THRESHOLD_RESOURCE_PERCENT` | `0` | alert если `worst_available_percent <= N` |
+| `MAX_CHANNELS_PER_SESSION` | `500` | лимит каналов на аккаунт (как в discovery) |
+| `DEV_ALERT_TELEGRAM_CHAT_ID` | — | чат разработчика |
+| `BOT_TOKEN` | — | Telegram Bot API |
+
+G4-алерты по-прежнему идут в webhook + log. G7 — в Telegram (+ log, webhook опционально).
+
+**Пример сообщения Telegram:**
+
+```
+Загрузка каналов 80.0% (8/10 при 1 active акк., лимит 10/акк.; порог 75%)
+```
+
+**Код:** `app_balance/queue/monitoring/threshold_rules.py`, расширения `config.py`,
+`metrics_repo.py`, `notify.py`, `queue_monitor.py`.
+
+Тесты приёмки G7: `tests/test_g7_threshold_notifier.py`.
+
+---
+
+## G5 — Watchdog auto-retry
+
+Watchdog (C6) переводит задачи, зависшие в `in_progress` дольше
+`task_types.task_timeout_seconds`, в `stuck` и освобождает аккаунты (ТЗ §13.4).
+G5 добавляет **опциональное** восстановление: вместо `stuck` задача возвращается
+в `retry`, чтобы worker подхватил её повторно.
+
+**По умолчанию выключено** (`WATCHDOG_AUTO_RETRY_ENABLED=false`) — в проде watchdog
+работает как раньше (только `stuck`). Включать осознанно: на staging или после
+инцидента с падением worker, когда зависания носят инфраструктурный характер.
+
+### Env
+
+| Переменная | Дефолт | Назначение |
+|------------|--------|------------|
+| `WATCHDOG_AUTO_RETRY_ENABLED` | `false` | Включает auto-retry зависших задач |
+| `WATCHDOG_AUTO_RETRY_MAX_ATTEMPTS` | `2` | Cap на число watchdog-повторов одной задачи |
+| `WATCHDOG_AUTO_RETRY_DELAY_SECONDS` | `60` | Задержка `run_after` перед повтором |
+
+### Политика (исход одного тика watchdog)
+
+```
+in_progress дольше task_timeout_seconds
+  ├─ WATCHDOG_AUTO_RETRY_ENABLED=false  → stuck (поведение C6)
+  └─ WATCHDOG_AUTO_RETRY_ENABLED=true
+       ├─ attempt_count < max_attempts И watchdog_retry_count < cap
+       │     → retry (run_after = now + DELAY, watchdog_retry_count += 1)
+       └─ иначе → failed
+```
+
+- **Два независимых лимита.** `attempt_count`/`max_attempts` — общий лимит попыток
+  задачи (как E3); `payload.watchdog_retry_count` — отдельный счётчик именно
+  watchdog-восстановлений (cap = `WATCHDOG_AUTO_RETRY_MAX_ATTEMPTS`). Любой
+  исчерпанный лимит даёт `failed` — это защита от бесконечного цикла
+  `stuck → retry → stuck`.
+- **`attempt_count` не инкрементируется** на watchdog-retry: счётчик попыток
+  растёт только при реальном execute (`begin_execution_attempt`, ТЗ §9.3).
+- `last_error` во всех исходах — `watchdog:task_timeout_exceeded`; аккаунты
+  освобождаются (`accounts.current_task_id = NULL`), lock снимается.
+- Логи watchdog: `retry` → INFO `auto-retry id=…`, `failed` → WARNING
+  `auto-retry исчерпан id=…`, `stuck` → WARNING (как в C6).
+
+Реализация: `app_balance/queue/watchdog.py` (`WatchdogAutoRetryConfig`,
+`StuckTaskWatchdog`), SQL `_MARK_STUCK_TIMED_OUT_SQL` в
+`app_balance/queue/task_queue.py`. Тесты: `tests/test_g5_watchdog_auto_retry.py`.
+
+---
+
+## G6 — Детектор повторяющихся ошибок
+
+G6★ автоматически снижает per-op RPH и отключает проблемные op при повторяющихся
+ошибках `flood_wait` / `peer_flood`. Коррекция идёт **только** через
+`resource_op_types.rph_limit` / `is_enabled`, **не** через `accounts.hourly_limit`
+(ТЗ §0.5).
+
+Детектор работает в `queue-monitor` (subcommand `detector` или `all`), читает
+агрегат `v_recurring_errors_window` (пара `error_code + op_code` за скользящий час).
+
+### Env
+
+| Переменная | Дефолт | Назначение |
+|------------|--------|------------|
+| `ERROR_DETECTOR_ENABLED` | `true` | Включает tick G6 |
+| `ERROR_DETECTOR_WINDOW_SECONDS` | `3600` | Окно агрегации ошибок |
+| `ERROR_DETECTOR_MIN_COUNT` | `5` | Порог N ошибок на пару (error, op) |
+| `ERROR_DETECTOR_RPH_FACTOR` | `0.7` | Множитель снижения RPH |
+| `ERROR_DETECTOR_MIN_RPH` | `2` | Нижняя граница RPH после снижения |
+| `ERROR_DETECTOR_REPEAT_WINDOW_SECONDS` | `86400` | Окно для правила «2-е срабатывание → disable» |
+| `ERROR_DETECTOR_COOLDOWN_SECONDS` | `3600` | Cooldown аккаунта при `peer_flood` |
+| `DEV_ALERT_TELEGRAM_CHAT_ID` | — | Telegram-чат разработчика |
+| `BOT_TOKEN` | — | Bot API token |
+
+### Правила
+
+| Условие (за окно) | Действие |
+|-------------------|----------|
+| ≥N × `flood_wait` на op | `rph_limit := max(floor(rph×0.7), 2)` + audit |
+| ≥N × `peer_flood` на op | то же + `AccountsRepo.set_cooldown` для аккаунта последней ошибки |
+| 2-е adjustment `(error_code, op_code)` за 24 ч | `resource_op_types.is_enabled = false` + CRITICAL notify |
+
+Debounce: повторное снижение **не** выполняется, если audit по этой паре уже есть
+за текущее окно (`ERROR_DETECTOR_WINDOW_SECONDS`).
+
+### Audit
+
+Таблица `resource_limit_adjustments` — история всех auto-коррекций:
+
+```sql
+SELECT id, error_code, op_code, action, old_rph_limit, new_rph_limit,
+       account_id, error_count, created_at
+FROM resource_limit_adjustments
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+### Rollback (G6d-A, runbook-only)
+
+Восстановить RPH и включить op по последнему audit или канону `ops_catalog.py`:
+
+```sql
+-- Пример: вернуть get_entity к каталогу (rph_limit=7)
+UPDATE resource_op_types
+SET rph_limit = 7, is_enabled = true, updated_at = now()
+WHERE code = 'get_entity';
+
+-- Или из последнего audit reduce_rph:
+UPDATE resource_op_types rot
+SET rph_limit = a.old_rph_limit,
+    is_enabled = true,
+    updated_at = now()
+FROM (
+  SELECT old_rph_limit, op_type_id
+  FROM resource_limit_adjustments
+  WHERE op_code = 'get_entity' AND action = 'reduce_rph'
+  ORDER BY created_at DESC
+  LIMIT 1
+) a
+WHERE rot.id = a.op_type_id;
+```
+
+После rollback сверьте seed: `make verify-ops-catalog`.
+
+### Запуск
+
+```bash
+python -m app_balance.queue_monitor detector   # только G6
+python -m app_balance.queue_monitor all        # G4 + G6 + G7
+```
+
+Код: `app_balance/queue/monitoring/error_detector.py`,
+`error_detector_repo.py`, миграция `DB/A11_g6_error_detector.sql`.
+Тесты: `tests/test_g6_error_detector.py`.
+
+---
+
 ## Связанные документы
 
 | Документ | Назначение |
 |----------|------------|
+| `docs/plan-ispolneniya-blok-g.md` | План и волны блока G |
+| `docs/testing-shared-pg.md` | pytest, `make docker-test-g`, preflight 11/11 |
 | `docs/zadachi-bloki-e-g.md` | Backlog E–G |
 | `docs/ops-catalog.md` | Каталог op ↔ RPH и пайплайны task_type_ops |
 | `app_balance/queue/error_codes.py` | Реестр кодов |

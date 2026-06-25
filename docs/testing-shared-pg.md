@@ -3,6 +3,15 @@
 > **Блок E (S4):** закрыт 2026-06-24 — vps-101, полный pytest `594 passed, 3 skipped`
 > (`make docker-test-safe`). Статус задач: [zadachi-bloki-e-g.md](zadachi-bloki-e-g.md).
 
+> **Блок F (S5):** закрыт 2026-06-24 — vps-101, полный pytest `674 passed, 3 skipped`
+> (`make docker-test-safe`). Статус задач: [zadachi-bloki-e-g.md](zadachi-bloki-e-g.md).
+
+> **Блок G (S5):** закрыт 2026-06-25 — local PG (profile `local`), полный pytest
+> `756 passed` (`docker compose --profile local run --rm -e PYTEST_DB_ISOLATED=1 test-local`).
+> Preflight: `monitoring_views=11/11`. На shared PG после merge: `docker compose run --rm migrate`
+> затем `make docker-test-safe`. Статус: [zadachi-bloki-e-g.md](zadachi-bloki-e-g.md),
+> runbook: [queue-runbook.md](queue-runbook.md) §G.
+
 Полный integration-suite использует общую БД `lead_monitor` на vps-100. На этой
 БД задачи может перехватывать **любой claimer**. Их ДВА:
 
@@ -80,6 +89,39 @@ docker compose run --rm test python -m pytest -m integration \
 docker compose up -d queue-worker
 docker start standalone-discovery-api
 ```
+
+## Только блок G (мониторинг §26)
+
+Preflight (11 VIEW, включая G6/G7):
+
+```bash
+docker compose run --rm test python scripts/preflight_test_db.py
+# Ожидание: monitoring_views=11/11
+```
+
+Быстрый прогон (shared PG, остановите claimer'ы как для полного suite):
+
+```bash
+make docker-test-g
+```
+
+Локальная PG без probe-guard:
+
+```bash
+docker compose --profile local up -d postgres
+docker compose --profile local run --rm migrate-local
+docker compose --profile local run --rm -e PYTEST_DB_ISOLATED=1 test-local \
+  python -m pytest tests/test_monitoring_views.py tests/test_g3_queue_metrics_api.py \
+  tests/test_g4_alert_rules.py tests/test_g5_watchdog_auto_retry.py \
+  tests/test_g6_error_detector.py tests/test_g7_threshold_notifier.py \
+  tests/test_g_monitor_scheduler.py \
+  standalone_discovery/tests/test_pg_queue_metrics.py \
+  tests/tz30/test_scenarios_e2e.py -k "monitoring or tz30_20 or tz30_19" -v
+```
+
+Файлы тестов блока G: `tests/test_monitoring_views.py`, `tests/test_g3_*` … `tests/test_g7_*`,
+`tests/test_g_monitor_scheduler.py`, `standalone_discovery/tests/test_pg_queue_metrics.py`,
+§30.19–20 в `tests/tz30/test_scenarios_e2e.py`.
 
 ## Перенос на сервер
 

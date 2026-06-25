@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -661,6 +661,14 @@ async def test_tz30_19_stuck_in_progress_becomes_stuck(tz30_clean) -> None:
     async with db.acquire() as conn:
         await conn.execute(
             """
+            UPDATE task_types
+            SET task_timeout_seconds = 5
+            WHERE code = $1
+            """,
+            TASK_TYPE_ADD,
+        )
+        await conn.execute(
+            """
             UPDATE task_queue
             SET locked_at = now() - interval '10 seconds',
                 started_at = now() - interval '1 hour',
@@ -739,6 +747,58 @@ async def test_tz30_20_monitoring_views_reflect_queue_state(tz30_clean) -> None:
             "DELETE FROM task_queue WHERE id = ANY($1::bigint[])",
             [stuck_id, postpone_id],
         )
+
+
+@pytest.mark.asyncio
+async def test_tz30_20b_monitoring_views_reflect_accounts_and_resource(
+    tz30_clean,
+) -> None:
+    """§30.20, §26.3 (G2): VIEW видят cooldown и исчерпание ресурса per-op."""
+    cooldown_account_id = await insert_account(suffix="cooldown")
+    exhausted_account_id = await insert_account(suffix="exhausted")
+    task_id = await enqueue_task(account_id=exhausted_account_id)
+
+    async with db.acquire() as conn:
+        cooldown_session = await conn.fetchval(
+            "SELECT session_name FROM accounts WHERE id = $1", cooldown_account_id
+        )
+        task_type_id = await conn.fetchval(
+            "SELECT id FROM task_types WHERE code = $1", TASK_TYPE_ADD
+        )
+        op = await conn.fetchrow(
+            "SELECT id, rph_limit, reserve_percent FROM resource_op_types "
+            "WHERE code = 'get_entity'"
+        )
+        cooldown_before = await conn.fetchval(
+            "SELECT accounts_in_cooldown FROM v_accounts_overview"
+        )
+
+    effective_rph = int(op["rph_limit"] * (1 - float(op["reserve_percent"]) / 100.0))
+    until = datetime.now(timezone.utc) + timedelta(hours=1)
+    assert await AccountsRepo().set_cooldown(cooldown_session, until) is True
+
+    await ResourceUsageRepo().insert(
+        account_id=exhausted_account_id,
+        op_type_id=op["id"],
+        task_id=task_id,
+        task_type_id=task_type_id,
+        units=effective_rph,
+    )
+
+    async with db.acquire() as conn:
+        cooldown_after = await conn.fetchval(
+            "SELECT accounts_in_cooldown FROM v_accounts_overview"
+        )
+        summary = await conn.fetchrow(
+            "SELECT any_op_exhausted, worst_available_percent "
+            "FROM v_account_resource_summary WHERE account_id = $1",
+            exhausted_account_id,
+        )
+
+    assert int(cooldown_after) == int(cooldown_before) + 1
+    assert summary is not None
+    assert summary["any_op_exhausted"] is True
+    assert float(summary["worst_available_percent"]) == 0.0
 
 
 # --- Сквозной E2E: полный жизненный цикл §13.1 ---

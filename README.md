@@ -38,6 +38,16 @@ Postgres снаружи: `localhost:5433`, DSN внутри compose:
 
 `postgresql://lead_monitor_owner:dev_password@postgres:5432/lead_monitor`
 
+### Мониторинг (блок G)
+
+```bash
+docker compose --profile monitoring up -d queue-monitor   # или: make docker-monitor
+make docker-test-g                                        # быстрый pytest блока G
+```
+
+Runbook: [`docs/queue-runbook.md`](docs/queue-runbook.md) §G. Метрики API:
+`GET /discovery-api/parser/queue/metrics` (при `USE_PG_QUEUE=true`).
+
 ### 3. Только pytest на сервере (без compose migrate)
 
 ```bash

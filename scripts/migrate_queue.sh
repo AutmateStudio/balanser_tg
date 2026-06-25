@@ -119,11 +119,14 @@ apply_seed() {
 
 # --- Выполнение --------------------------------------------------------------
 A10_FILE="$DB_DIR/A10_attempt_status_running.sql"
+A11_FILE="$DB_DIR/A11_g6_error_detector.sql"
 
 ensure_ledger
 apply_once "$SCHEMA_FILE"
 [[ -f "$A10_FILE" ]] || die "Файл миграции не найден: $A10_FILE"
 apply_once "$A10_FILE"
+[[ -f "$A11_FILE" ]] || die "Файл миграции не найден: $A11_FILE"
+apply_once "$A11_FILE"
 if [[ "$RUN_SEED" == "1" ]]; then
   apply_seed "$SEED_FILE"
 else

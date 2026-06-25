@@ -10,13 +10,16 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import asyncpg
 
 from app_balance.queue.db import acquire, transaction
 from app_balance.queue.error_codes import ErrorCode, error_code_prefix
 from app_balance.queue.per_op_reading import TaskTypesRepo
+
+if TYPE_CHECKING:
+    from app_balance.queue.watchdog import WatchdogAutoRetryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +58,10 @@ class EnqueueResult:
 
 @dataclass(frozen=True, slots=True)
 class StuckTaskResult:
-    """Задача, переведённая watchdog в stuck (C6)."""
+    """Задача, обработанная watchdog по таймауту (C6 stuck / G5 auto-retry).
+
+    outcome — итоговый статус: 'stuck' (C6), 'retry' или 'failed' (G5).
+    """
 
     id: int
     task_type_code: str
@@ -63,6 +69,10 @@ class StuckTaskResult:
     account_id: int | None
     source_account_id: int | None
     target_account_id: int | None
+    outcome: Literal["stuck", "retry", "failed"] = "stuck"
+    attempt_count: int = 0
+    max_attempts: int = 0
+    watchdog_retry_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,8 +322,11 @@ WHERE id = $1
   AND status = 'in_progress'
 """
 
-# C6: in_progress дольше task_timeout_seconds от locked_at → stuck + release аккаунтов.
-_MARK_STUCK_TIMED_OUT_SQL = f"""
+# C6/G5: in_progress дольше task_timeout_seconds → stuck (C6) либо auto-retry (G5).
+# Параметры: $1 limit, $2 auto_retry_enabled, $3 watchdog max_attempts (cap),
+# $4 retry delay (s), $5 last_error код. Во всех ветках — release аккаунтов + снятие lock.
+# can_retry = enabled И watchdog_retry_count < cap И attempt_count < max_attempts.
+_MARK_STUCK_TIMED_OUT_SQL = """
 WITH timed_out AS (
     SELECT t.id
     FROM task_queue t
@@ -325,19 +338,55 @@ WITH timed_out AS (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 ),
+computed AS (
+    SELECT t.id,
+           COALESCE((t.payload->>'watchdog_retry_count')::int, 0) AS wd_count,
+           (
+               $2::boolean
+               AND COALESCE((t.payload->>'watchdog_retry_count')::int, 0) < $3::int
+               AND t.attempt_count < t.max_attempts
+           ) AS can_retry
+    FROM task_queue t
+    JOIN timed_out x ON x.id = t.id
+),
 marked AS (
     UPDATE task_queue t
-    SET status = 'stuck',
-        last_error = '{WATCHDOG_STUCK_REASON}',
+    SET status = CASE
+            WHEN NOT $2::boolean THEN 'stuck'::task_status
+            WHEN c.can_retry THEN 'retry'::task_status
+            ELSE 'failed'::task_status
+        END,
+        last_error = $5,
         last_error_at = now(),
+        finished_at = CASE
+            WHEN $2::boolean AND NOT c.can_retry THEN now()
+            ELSE t.finished_at
+        END,
+        run_after = CASE
+            WHEN $2::boolean AND c.can_retry
+                THEN now() + ($4::int * interval '1 second')
+            ELSE t.run_after
+        END,
+        payload = CASE
+            WHEN $2::boolean AND c.can_retry THEN jsonb_set(
+                COALESCE(t.payload, '{}'::jsonb),
+                '{watchdog_retry_count}',
+                to_jsonb(c.wd_count + 1),
+                true
+            )
+            ELSE t.payload
+        END,
         locked_by = NULL,
         locked_at = NULL,
         locked_until = NULL,
         updated_at = now()
-    FROM timed_out x
-    WHERE t.id = x.id
+    FROM computed c
+    WHERE t.id = c.id
     RETURNING t.id, t.task_type_code, t.locked_by,
-              t.account_id, t.source_account_id, t.target_account_id
+              t.account_id, t.source_account_id, t.target_account_id,
+              t.status::text AS outcome, t.attempt_count, t.max_attempts,
+              COALESCE((t.payload->>'watchdog_retry_count')::int, 0)
+                  AS watchdog_retry_count
 ),
 released AS (
     UPDATE accounts a
@@ -346,7 +395,8 @@ released AS (
     RETURNING a.id
 )
 SELECT id, task_type_code, locked_by,
-       account_id, source_account_id, target_account_id
+       account_id, source_account_id, target_account_id,
+       outcome, attempt_count, max_attempts, watchdog_retry_count
 FROM marked
 """
 
@@ -359,6 +409,10 @@ def _row_to_stuck(row) -> StuckTaskResult:
         account_id=row["account_id"],
         source_account_id=row["source_account_id"],
         target_account_id=row["target_account_id"],
+        outcome=row["outcome"],
+        attempt_count=row["attempt_count"],
+        max_attempts=row["max_attempts"],
+        watchdog_retry_count=row["watchdog_retry_count"],
     )
 
 
@@ -602,8 +656,27 @@ class TaskQueueRepo:
                 return False
             return True
 
-    async def mark_stuck_timed_out(self, *, limit: int = 100) -> list[StuckTaskResult]:
-        """C6: переводит зависшие in_progress в stuck и освобождает аккаунты."""
+    async def mark_stuck_timed_out(
+        self,
+        *,
+        limit: int = 100,
+        auto_retry: "WatchdogAutoRetryConfig | None" = None,
+    ) -> list[StuckTaskResult]:
+        """C6/G5: обрабатывает зависшие in_progress и освобождает аккаунты.
+
+        Без auto_retry (или при enabled=False) — поведение C6: → stuck.
+        При auto_retry.enabled — G5: → retry (если остались попытки) либо failed.
+        """
+        enabled = bool(auto_retry and auto_retry.enabled)
+        cap = auto_retry.max_attempts if auto_retry else 0
+        delay = auto_retry.delay_seconds if auto_retry else 0
         async with transaction() as conn:
-            rows = await conn.fetch(_MARK_STUCK_TIMED_OUT_SQL, limit)
+            rows = await conn.fetch(
+                _MARK_STUCK_TIMED_OUT_SQL,
+                limit,
+                enabled,
+                cap,
+                delay,
+                WATCHDOG_STUCK_REASON.value,
+            )
             return [_row_to_stuck(row) for row in rows]

@@ -11,7 +11,7 @@ SHELL := /bin/bash
 RUNNER := scripts/migrate_queue.sh
 MODE ?= auto
 
-.PHONY: migrate-queue migrate-queue-dry migrate-queue-schema migrate-queue-status docker-build docker-test docker-test-safe docker-test-local docker-migrate sync-accounts docker-sync-accounts e2e-d12-preflight e2e-d12-run docker-e2e-d12-preflight docker-e2e-d12-run verify-ops-catalog
+.PHONY: migrate-queue migrate-queue-dry migrate-queue-schema migrate-queue-status docker-build docker-test docker-test-safe docker-test-local docker-test-g docker-migrate docker-monitor sync-accounts docker-sync-accounts e2e-d12-preflight e2e-d12-run docker-e2e-d12-preflight docker-e2e-d12-run verify-ops-catalog
 
 ## verify-ops-catalog: E7 — сверка ops_catalog ↔ A9_seed.sql (добавьте --db для PG)
 verify-ops-catalog:
@@ -49,6 +49,23 @@ docker-test-local:
 	docker compose --profile local up -d postgres
 	docker compose --profile local run --rm migrate-local
 	docker compose --profile local run --rm test-local
+
+## docker-monitor: поднять queue-monitor (profile monitoring, G4+G6+G7)
+docker-monitor:
+	docker compose --profile monitoring up -d queue-monitor
+
+## docker-test-g: только тесты блока G (быстрая проверка перед полным прогоном)
+docker-test-g:
+	docker compose run --rm test python -m pytest \
+	  tests/test_monitoring_views.py \
+	  tests/test_g3_queue_metrics_api.py \
+	  tests/test_g4_alert_rules.py \
+	  tests/test_g5_watchdog_auto_retry.py \
+	  tests/test_g6_error_detector.py \
+	  tests/test_g7_threshold_notifier.py \
+	  tests/test_g_monitor_scheduler.py \
+	  standalone_discovery/tests/test_pg_queue_metrics.py \
+	  tests/tz30/test_scenarios_e2e.py -k "monitoring or tz30_20 or tz30_19" -v
 
 ## migrate-queue: применить схему + seed (auto-режим integrate/greenfield)
 migrate-queue:

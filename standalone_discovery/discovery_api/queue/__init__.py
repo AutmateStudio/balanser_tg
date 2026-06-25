@@ -4,10 +4,12 @@ from discovery_api.queue.producer import (
     enqueue_parser_add_channels,
     enqueue_parser_remove_channels,
 )
+from discovery_api.queue.metrics import get_queue_metrics
 from discovery_api.queue.status import get_task_snapshot
 
 __all__ = [
     "enqueue_parser_add_channels",
     "enqueue_parser_remove_channels",
+    "get_queue_metrics",
     "get_task_snapshot",
 ]

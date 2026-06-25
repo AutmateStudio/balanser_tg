@@ -51,7 +51,14 @@ async def test_list_enabled(pg_pool) -> None:
     enabled = await repo.list_enabled()
     codes = {item.code for item in enabled}
 
-    assert codes == {"parser_add_channel", "move_channel"}
+    # Канон A9_seed: add, move, remove (D9), update (F7); collect — off до F6.
+    assert codes == {
+        "parser_add_channel",
+        "move_channel",
+        "parser_remove_channel",
+        "update_channel",
+    }
+    assert "collect_extra_data" not in codes
     assert all(item.is_enabled for item in enabled)
 
 

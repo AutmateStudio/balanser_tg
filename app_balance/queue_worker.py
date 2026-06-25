@@ -25,7 +25,7 @@ from app_balance.queue.per_op_reading import TaskTypesRepo
 from app_balance.queue.resource_check import ResourceChecker
 from app_balance.queue.resource_usage import ResourceUsageRepo
 from app_balance.queue.task_queue import ClaimedTask, TaskQueueRepo
-from app_balance.queue.watchdog import StuckTaskWatchdog
+from app_balance.queue.watchdog import StuckTaskWatchdog, WatchdogAutoRetryConfig
 
 logger = logging.getLogger("queue_worker")
 
@@ -42,6 +42,9 @@ class WorkerConfig:
     task_type_codes: list[str] | None = None
     watchdog_enabled: bool = True
     watchdog_interval_seconds: float = 30.0
+    watchdog_auto_retry: WatchdogAutoRetryConfig = field(
+        default_factory=WatchdogAutoRetryConfig
+    )
 
     @classmethod
     def from_env(cls) -> "WorkerConfig":
@@ -62,6 +65,7 @@ class WorkerConfig:
             watchdog_interval_seconds=float(
                 os.getenv("WORKER_WATCHDOG_INTERVAL_SECONDS", "30")
             ),
+            watchdog_auto_retry=WatchdogAutoRetryConfig.from_env(),
         )
 
 
@@ -199,6 +203,7 @@ class QueueWorker:
                 self._queue,
                 interval_seconds=self.config.watchdog_interval_seconds,
                 stop=self._stop,
+                auto_retry=self.config.watchdog_auto_retry,
             )
             wd_task = asyncio.create_task(watchdog.run())
         try:

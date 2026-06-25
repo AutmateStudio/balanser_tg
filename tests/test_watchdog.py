@@ -33,8 +33,11 @@ class FakeQueueForWatchdog:
         self._stuck = list(stuck or [])
         self.calls = 0
 
-    async def mark_stuck_timed_out(self, *, limit: int = 100) -> list[StuckTaskResult]:
+    async def mark_stuck_timed_out(
+        self, *, limit: int = 100, auto_retry=None
+    ) -> list[StuckTaskResult]:
         self.calls += 1
+        self.last_auto_retry = auto_retry
         return list(self._stuck)
 
     async def claim_next(self, locked_by, lock_ttl_seconds, task_type_codes):
@@ -93,7 +96,7 @@ async def test_worker_serve_starts_and_stops_watchdog(monkeypatch: pytest.Monkey
         pool_closed = True
 
     class TrackingWatchdog:
-        def __init__(self, queue, *, interval_seconds, stop) -> None:
+        def __init__(self, queue, *, interval_seconds, stop, auto_retry=None) -> None:
             self._stop = stop
 
         async def run(self) -> None:

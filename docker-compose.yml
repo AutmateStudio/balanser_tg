@@ -12,7 +12,10 @@ name: lidogen-telegram-balancer
 # Тесты все (локальная PG):      docker compose --profile local run --rm test-local
 # Миграции перед первым test:    docker compose run --rm migrate
 # Воркер очереди (Z4):           docker compose up -d queue-worker
-# На хосте Linux:                 bash scripts/run_all_tests.sh
+# Продюсеры (F8):                 docker compose --profile producers up -d producer-collect producer-update producer-balancer
+# Мониторинг (G4+G6+G7):          docker compose --profile monitoring up -d queue-monitor
+# Быстрые тесты блока G:          make docker-test-g
+# Полный pytest (shared PG):      make docker-test-safe
 
 # Общий образ приложения. build: только у сервиса test — остальные переиспользуют image.
 x-balancer-image: &balancer-image
@@ -72,6 +75,11 @@ services:
       WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-1.0}
       WORKER_LOCK_TTL_SECONDS: ${WORKER_LOCK_TTL_SECONDS:-300}
       WORKER_POSTPONE_DELAY_SECONDS: ${WORKER_POSTPONE_DELAY_SECONDS:-300}
+      WORKER_WATCHDOG_ENABLED: ${WORKER_WATCHDOG_ENABLED:-true}
+      WORKER_WATCHDOG_INTERVAL_SECONDS: ${WORKER_WATCHDOG_INTERVAL_SECONDS:-30}
+      WATCHDOG_AUTO_RETRY_ENABLED: ${WATCHDOG_AUTO_RETRY_ENABLED:-false}
+      WATCHDOG_AUTO_RETRY_MAX_ATTEMPTS: ${WATCHDOG_AUTO_RETRY_MAX_ATTEMPTS:-2}
+      WATCHDOG_AUTO_RETRY_DELAY_SECONDS: ${WATCHDOG_AUTO_RETRY_DELAY_SECONDS:-60}
       API_ID: ${API_ID:-}
       API_HASH: ${API_HASH:-}
       # Пути внутри контейнера (не путать с HOST_SESSIONS_DIR — bind mount на хосте).
@@ -142,6 +150,38 @@ services:
     stop_signal: SIGTERM
     stop_grace_period: 30s
     command: ["python", "-m", "app_balance.queue_scheduler", "balancer"]
+
+  # G4 + G6 + G7 — мониторинг очереди, алерты §26.4, детектор ошибок, пороги загрузки.
+  queue-monitor:
+    <<: *balancer-image
+    profiles: [monitoring]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MONITOR_INTERVAL_SECONDS: ${MONITOR_INTERVAL_SECONDS:-120}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_COOLDOWN_SECONDS: ${ALERT_COOLDOWN_SECONDS:-1800}
+      ALERT_ENABLED: ${ALERT_ENABLED:-true}
+      THRESHOLD_ALERT_ENABLED: ${THRESHOLD_ALERT_ENABLED:-true}
+      THRESHOLD_CHANNEL_PERCENT: ${THRESHOLD_CHANNEL_PERCENT:-75}
+      THRESHOLD_RESOURCE_PERCENT: ${THRESHOLD_RESOURCE_PERCENT:-0}
+      MAX_CHANNELS_PER_SESSION: ${MAX_CHANNELS_PER_SESSION:-500}
+      DEV_ALERT_TELEGRAM_CHAT_ID: ${DEV_ALERT_TELEGRAM_CHAT_ID:-}
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      ERROR_DETECTOR_ENABLED: ${ERROR_DETECTOR_ENABLED:-true}
+      ERROR_DETECTOR_WINDOW_SECONDS: ${ERROR_DETECTOR_WINDOW_SECONDS:-3600}
+      ERROR_DETECTOR_MIN_COUNT: ${ERROR_DETECTOR_MIN_COUNT:-5}
+      ERROR_DETECTOR_RPH_FACTOR: ${ERROR_DETECTOR_RPH_FACTOR:-0.7}
+      ERROR_DETECTOR_MIN_RPH: ${ERROR_DETECTOR_MIN_RPH:-2}
+      ERROR_DETECTOR_REPEAT_WINDOW_SECONDS: ${ERROR_DETECTOR_REPEAT_WINDOW_SECONDS:-86400}
+      ERROR_DETECTOR_COOLDOWN_SECONDS: ${ERROR_DETECTOR_COOLDOWN_SECONDS:-3600}
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_monitor", "all"]
 
   queue-worker-local:
     <<: *balancer-image

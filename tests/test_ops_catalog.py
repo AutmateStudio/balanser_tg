@@ -74,12 +74,17 @@ def test_docs_lists_all_resource_ops() -> None:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_task_type_ops_for_collect_update(pg_pool) -> None:
+    """E7/F6/F7: op-состав совпадает с catalog; is_enabled — как в A9_seed."""
     repo = TaskTypesRepo()
+    expected_enabled = {
+        "collect_extra_data": False,  # F6 — включить в seed после adapter
+        "update_channel": True,  # F7 — adapter в seed уже enabled
+    }
 
-    for task_type_code in ("collect_extra_data", "update_channel"):
+    for task_type_code, want_enabled in expected_enabled.items():
         task_type = await repo.get_by_code(task_type_code)
         assert task_type is not None
-        assert task_type.is_enabled is False
+        assert task_type.is_enabled is want_enabled
         ops = {
             (op.op_code, op.units_per_execution, op.account_role)
             for op in task_type.ops
