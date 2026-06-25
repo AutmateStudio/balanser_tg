@@ -6,10 +6,9 @@
 > **Блок F (S5):** закрыт 2026-06-24 — vps-101, полный pytest `674 passed, 3 skipped`
 > (`make docker-test-safe`). Статус задач: [zadachi-bloki-e-g.md](zadachi-bloki-e-g.md).
 
-> **Блок G (S5):** закрыт 2026-06-25 — local PG (profile `local`), полный pytest
-> `756 passed` (`docker compose --profile local run --rm -e PYTEST_DB_ISOLATED=1 test-local`).
-> Preflight: `monitoring_views=11/11`. На shared PG после merge: `docker compose run --rm migrate`
-> затем `make docker-test-safe`. Статус: [zadachi-bloki-e-g.md](zadachi-bloki-e-g.md),
+> **Блок G (S5):** ✅ **закрыт** 2026-06-25 — local PG: `756 passed` (profile `local`);
+> shared PG vps-101: **`756 passed, 0 failed`** (`make docker-test-safe` после migrate A11+A12).
+> Preflight: `monitoring_views=11/11`. Статус: [zadachi-bloki-e-g.md](zadachi-bloki-e-g.md),
 > runbook: [queue-runbook.md](queue-runbook.md) §G.
 
 Полный integration-suite использует общую БД `lead_monitor` на vps-100. На этой

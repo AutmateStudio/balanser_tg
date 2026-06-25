@@ -527,7 +527,7 @@ queue-monitor:
 ☑ docker-compose profile monitoring + G5 env на queue-worker
 ☑ Makefile docker-test-g / docker-monitor
 ☑ local PG: 756 passed (2026-06-25)
-☐ shared PG vps-101: make docker-test-safe — оператор после merge
+☑ shared PG vps-101: make docker-test-safe — **756 passed, 0 failed** (2026-06-25)
 ```
 
 ---
@@ -542,7 +542,7 @@ queue-monitor:
 | Compose/env | `WATCHDOG_AUTO_RETRY_*` на `queue-worker`, `.env.example` G5+G6, header compose |
 | Makefile | `docker-monitor`, `docker-test-g` |
 | Тесты | `tests/test_g_monitor_scheduler.py`; fix `test_tz30_19` (task_timeout_seconds) |
-| Pytest | local PG: **756 passed**; G-subset: **19 passed** |
+| Pytest | local PG: **756 passed**; shared PG vps-101: **756 passed**; G-subset: **19 passed** |
 | Docs | Appendix D в [`zadachi-bloki-e-g.md`](zadachi-bloki-e-g.md), [`testing-shared-pg.md`](testing-shared-pg.md) §G |
 
 ---

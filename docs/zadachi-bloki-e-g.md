@@ -3,7 +3,7 @@
 **Дата:** 2026-06-24  
 **Статус S4 (блок E):** ✅ **закрыт** — vps-101, `594 passed, 3 skipped` (2026-06-24, `make docker-test-safe`)  
 **Статус S5 (блок F):** ✅ **закрыт** — vps-101, `674 passed, 3 skipped` (2026-06-24, `make docker-test-safe`)  
-**Статус S5 (блок G):** ✅ **закрыт** — local PG (Docker profile local), `756 passed` (2026-06-25, `docker-test-local` + `PYTEST_DB_ISOLATED=1`); на shared PG — `make docker-test-safe` после `docker compose run --rm migrate`  
+**Статус S5 (блок G):** ✅ **закрыт** — local PG: `756 passed` (2026-06-25, `docker-test-local`); shared PG vps-101: **`756 passed, 0 failed`** (2026-06-25, `make docker-test-safe` после migrate A11+A12)  
 **Источники:** `docs(plan)/итоговый-план-разработки.md`, `docs(plan)/_gen_tasks_xlsx.py`, `docs(plan)/tz-extract.txt` (§10, §20, §21–24, §26–29), `docs(plan)/diff-tz-vs-standalone-discovery.md`
 
 Документ описывает **все запланированные задачи после MVP (S3)** — блоки **E** (ошибки и идемпотентность), **F** (продюсеры), **G** (мониторинг и оповещения), включая **G6** и **G7** из утверждённого ТЗ.
@@ -384,7 +384,7 @@
 
 **Зачем блок:** observability очереди и ресурсов (§26 ТЗ), алерты, автоматическая реакция на паттерны ошибок и пороги загрузки.
 
-**Приёмка (2026-06-25):** local PG (Docker profile `local`): **756 passed** (`docker compose --profile local run --rm test-local`, `PYTEST_DB_ISOLATED=1`). Preflight: `monitoring_views=11/11`. Runbook §G, compose profile `monitoring`, Makefile `docker-test-g` / `docker-monitor`. План: [`plan-ispolneniya-blok-g.md`](plan-ispolneniya-blok-g.md).
+**Приёмка (2026-06-25):** local PG: **756 passed** (`docker compose --profile local run --rm test-local`, `PYTEST_DB_ISOLATED=1`); shared PG vps-101: **756 passed, 0 failed** (`make docker-test-safe` после `docker compose run --rm migrate`, preflight `monitoring_views=11/11`). Runbook §G, compose profile `monitoring`, Makefile `docker-test-g` / `docker-monitor`. План: [`plan-ispolneniya-blok-g.md`](plan-ispolneniya-blok-g.md).
 
 | ID | Название | Часы | SP | Deps | MVP | Статус |
 |----|----------|------|----|------|-----|--------|
@@ -587,8 +587,8 @@
 ☑ docker-compose profile monitoring + WATCHDOG_AUTO_RETRY_* на queue-worker
 ☑ .env.example: G4, G5, G6, G7
 ☑ Makefile: docker-monitor, docker-test-g
-☑ migrate A11 (G6 audit + v_recurring_errors_window) в migrate_queue.sh
-☐ Shared PG vps-101: make docker-test-safe — повторить оператором после merge
+☑ migrate A11 (G6 audit + v_recurring_errors_window) + A12 (VIEW на integrate-PG) в migrate_queue.sh
+☑ Shared PG vps-101: make docker-test-safe — **756 passed, 0 failed** (2026-06-25)
 ```
 
 ---
