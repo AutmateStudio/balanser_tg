@@ -48,6 +48,11 @@ make docker-test-g                                        # быстрый pytes
 Runbook: [`docs/queue-runbook.md`](docs/queue-runbook.md) §G. Метрики API:
 `GET /discovery-api/parser/queue/metrics` (при `USE_PG_QUEUE=true`).
 
+### Деплой на production (полный ТЗ + G)
+
+Пошаговый ops-чеклист: Tailscale, VPN discovery, worker, продюсеры, мониторинг —
+[`docs/deploy_roadmap.md`](docs/deploy_roadmap.md).
+
 ### 3. Только pytest на сервере (без compose migrate)
 
 ```bash
@@ -96,6 +101,8 @@ app_balance/queue/db.py   # пул, acquire, transaction, healthcheck
 DB/                       # SQL-схема и seed
 scripts/migrate_queue.sh  # runner миграций (A11)
 docs(plan)/               # план разработки
+docs/deploy_roadmap.md    # ops: prod deploy (Tailscale, G max)
 ```
 
-Подробнее по доступу к prod БД: `docs(plan)/db-access-via-tailscale.md`.
+Подробнее: [`docs/deploy_roadmap.md`](docs/deploy_roadmap.md) (prod),
+`docs(plan)/db-access-via-tailscale.md` (сеть и ACL).
