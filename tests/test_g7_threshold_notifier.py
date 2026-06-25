@@ -1,6 +1,7 @@
 """G7★ — unit/integration тесты порогов загрузки каналов и ресурса."""
 from __future__ import annotations
 
+import math
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -220,7 +221,19 @@ async def test_integration_channel_threshold_with_view(pg_pool) -> None:
     session_name = f"test_g7_{suffix}"
     platform_code = f"test_g7_plat_{suffix}"
 
+    config = _config(max_channels_per_session=10, threshold_channel_percent=75.0)
+
     async with db.acquire() as conn:
+        capacity_before = await conn.fetchrow("SELECT * FROM v_channel_capacity_usage")
+        active_before = int(capacity_before["active_accounts_count"])
+        assigned_before = int(capacity_before["assigned_channels_total"])
+        # +1 active — тестовый аккаунт; fleet и порог считаются глобально (shared PG).
+        fleet_after = (active_before + 1) * config.max_channels_per_session
+        min_assigned = math.ceil(
+            fleet_after * config.threshold_channel_percent / 100.0
+        )
+        n_channels = max(8, min_assigned - assigned_before + 1)
+
         account_id = await conn.fetchval(
             "INSERT INTO accounts (session_name, status, is_enabled) "
             "VALUES ($1, 'active', true) RETURNING id",
@@ -231,7 +244,7 @@ async def test_integration_channel_threshold_with_view(pg_pool) -> None:
             platform_code,
             "G7 integration",
         )
-        for i in range(8):
+        for i in range(n_channels):
             await conn.execute(
                 """
                 INSERT INTO source_channels (
@@ -246,11 +259,12 @@ async def test_integration_channel_threshold_with_view(pg_pool) -> None:
             )
 
     try:
-        config = _config(max_channels_per_session=10, threshold_channel_percent=75.0)
         snapshot, _ctx = await MetricsRepo().fetch_alert_context(config)
         alerts = evaluate_threshold_alerts(snapshot, config)
-        assert "threshold_channel_capacity" in _codes(alerts)
-        assert snapshot.channels.assigned_channels_total >= 8
+        channel_codes = {a.code for a in alerts if a.code == "threshold_channel_capacity"}
+        assert "threshold_channel_capacity" in channel_codes
+        assert snapshot.channels.usage_percent >= config.threshold_channel_percent
+        assert snapshot.channels.assigned_channels_total >= assigned_before + n_channels
     finally:
         async with db.acquire() as conn:
             await conn.execute(

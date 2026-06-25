@@ -127,18 +127,81 @@ docker compose --profile local run --rm -e PYTEST_DB_ISOLATED=1 test-local \
 
 ### A. Через git (с сохранением конфигов)
 
-`.env`, `docker-compose.yml`, `Dockerfile` на сервере настроены под окружение и
-git их перетирать не должен. Сохраняем перед pull и возвращаем после:
+На vps-101 remote обычно **`origin`**, не `balanser_tg`.
+
+Если `git checkout` / `git pull` падает с *«local changes would be overwritten»* —
+локальные правки в tracked-файлах (часто `tests/*.py`). Их нужно **сохранить в
+бэкап и сбросить**, иначе ветка не переключится.
+
+**Рекомендуется:** скрипт `scripts/deploy_pull_preserve_env.sh` (после первого
+успешного pull):
 
 ```bash
 cd ~/Lidogen_telegram_balancer
+chmod +x scripts/deploy_pull_preserve_env.sh
+./scripts/deploy_pull_preserve_env.sh feat/g-wave5-finalize-monitoring
+```
+
+**Первый раз (если скрипта ещё нет)** — одним блоком на сервере:
+
+```bash
+cd ~/Lidogen_telegram_balancer
+BRANCH=feat/g-wave5-finalize-monitoring
+TS=$(date +%Y%m%d-%H%M%S)
+BACKUP=~/backups/lidogen-balancer-$TS
+mkdir -p "$BACKUP/server-config" "$BACKUP/local-changes"
+
+git status --porcelain > "$BACKUP/git-status.txt"
+git diff > "$BACKUP/local-changes/worktree.patch"
+git rev-parse HEAD > "$BACKUP/git-head.txt"
+
 KEEP=(.env docker-compose.yml Dockerfile standalone_discovery/.env \
   standalone_discovery/docker-compose.yml standalone_discovery/Dockerfile \
   standalone_discovery/Dockerfile.pg-queue scripts/e2e_d12/env.d12 scripts/e2e_d9/env.d9)
-for f in "${KEEP[@]}"; do [ -f "$f" ] && cp -a "$f" "$f.server-keep"; done
-git fetch origin && git pull --ff-only origin feat/e7-ops-catalog
-for f in "${KEEP[@]}"; do [ -f "$f.server-keep" ] && mv -f "$f.server-keep" "$f"; done
+for f in "${KEEP[@]}"; do
+  [ -f "$f" ] && mkdir -p "$BACKUP/server-config/$(dirname "$f")" \
+    && cp -a "$f" "$BACKUP/server-config/$f"
+done
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  path="${line:3}"; path="${path%% -> *}"
+  case "${line:0:2}" in \?\?|!!) continue ;; esac
+  [ -f "$path" ] && mkdir -p "$BACKUP/local-changes/$(dirname "$path")" \
+    && cp -a "$path" "$BACKUP/local-changes/$path"
+done < "$BACKUP/git-status.txt"
+
+git reset --hard HEAD
+git fetch origin
+git checkout "$BRANCH" || git checkout -b "$BRANCH" "origin/$BRANCH"
+git pull --ff-only origin "$BRANCH"
+
+for f in "${KEEP[@]}"; do
+  [ -f "$BACKUP/server-config/$f" ] && cp -a "$BACKUP/server-config/$f" "$f"
+done
+git log -1 --oneline
+echo "Бэкап: $BACKUP"
 ```
+
+Очистка мусора G-тестов на shared PG (FK-safe, после pull):
+
+```bash
+docker compose stop queue-worker
+docker stop standalone-discovery-api 2>/dev/null || true
+docker compose run --rm test python -c "
+import asyncio
+from app_balance.queue import db
+from tests.pg_cleanup import cleanup_queue_test_data
+async def main():
+    await db.init_pool()
+    for p in ('test_g7_%','test_g6_%','test_g3_%','test_g4_%','test_g5_%'):
+        await cleanup_queue_test_data(session_name_like=p)
+    await db.close_pool()
+asyncio.run(main())
+"
+```
+
+`.env`, `docker-compose.yml`, `Dockerfile` по SFTP не заливать — только
+восстанавливать из бэкапа на сервере (см. `KEEP` выше).
 
 ### B. Точечно по SFTP (отдельные файлы)
 

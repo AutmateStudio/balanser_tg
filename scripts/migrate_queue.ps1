@@ -99,12 +99,15 @@ function Invoke-ApplySeed([string]$file) {
 
 $A10File = Join-Path $DbDir 'A10_attempt_status_running.sql'
 $A11File = Join-Path $DbDir 'A11_g6_error_detector.sql'
+$A12File = Join-Path $DbDir 'A12_g7_monitoring_views.sql'
 if (-not (Test-Path $A10File)) { Die "Файл миграции не найден: $A10File" }
 if (-not (Test-Path $A11File)) { Die "Файл миграции не найден: $A11File" }
+if (-not (Test-Path $A12File)) { Die "Файл миграции не найден: $A12File" }
 
 Invoke-ApplyOnce $SchemaFile
 Invoke-ApplyOnce $A10File
 Invoke-ApplyOnce $A11File
+Invoke-ApplyOnce $A12File
 if (-not $NoSeed) { Invoke-ApplySeed $SeedFile } else { Log "seed пропущен (-NoSeed)." }
 
 Log "Готово. Применённые миграции:"

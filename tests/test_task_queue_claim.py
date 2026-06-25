@@ -12,8 +12,9 @@ from app_balance.queue.task_queue import EnqueueInput, TaskQueueRepo
 from tests.conftest import requires_pg
 
 _PREFIX = "test_b4_"
-# Изолируем тестовые задачи от чужих на dev-базе и от фонового queue-worker.
-_TEST_PRIO = 2_000_000_000
+# Выше PYTEST_TEST_PRIORITY (2_000_000_000): claim_next берёт глобальный MAX(priority),
+# на shared PG чужие тестовые задачи на 2B конкурируют с B4.
+_TEST_PRIO = 3_000_000_000
 _CODES = ["parser_add_channel"]
 
 

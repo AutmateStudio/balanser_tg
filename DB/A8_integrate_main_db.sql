@@ -319,7 +319,10 @@ SELECT
   count(*) FILTER (WHERE "status" = 'failed')      AS "failed_tasks_count",
   count(*) FILTER (WHERE "status" IN ('scheduled', 'retry') AND "postpone_count" > 0) AS "postponed_tasks_count",
   count(*) FILTER (WHERE "status" = 'done' AND "finished_at" >= now() - interval '5 minutes') AS "done_tasks_last_5_min",
-  COALESCE(EXTRACT(EPOCH FROM (now() - min("created_at") FILTER (WHERE "status" IN ('queued', 'scheduled')))::bigint, 0) AS "oldest_queued_task_age_seconds"
+  COALESCE(
+    EXTRACT(EPOCH FROM (now() - min("created_at") FILTER (WHERE "status" IN ('queued', 'scheduled'))))::bigint,
+    0
+  ) AS "oldest_queued_task_age_seconds"
 FROM "task_queue";
 
 CREATE OR REPLACE VIEW "v_high_postpone_tasks" AS
