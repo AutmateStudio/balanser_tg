@@ -1,0 +1,129 @@
+# Lidogen Discovery API — reverse proxy vps-104 (prod)
+#
+# Схема:
+#   Интернет :80 / :443
+#     → nginx (хост Ubuntu)
+#     → 127.0.0.1:@@UPSTREAM_PORT@@  (docker compose: vpn → discovery-api :8000)
+#
+# Перед установкой:
+#   cd ~/Lidogen_telegram_balancer/standalone_discovery
+#   docker compose up -d vpn discovery-api
+#   curl -sS http://127.0.0.1:@@UPSTREAM_PORT@@/health
+#
+# Установка: ./deploy/install-nginx-discovery.sh
+# Документация: deploy/NGINX.md
+
+upstream lidogen_discovery_upstream {
+    server 127.0.0.1:@@UPSTREAM_PORT@@ max_fails=3 fail_timeout=30s;
+    keepalive 32;
+}
+
+# Ограничение частоты создания QR-сессий (POST /discovery-api/auth/qr)
+limit_req_zone $binary_remote_addr zone=lidogen_discovery_qr:10m rate=10r/m;
+
+# Ограничение общего API (защита от случайного флуда)
+limit_req_zone $binary_remote_addr zone=lidogen_discovery_api:10m rate=120r/m;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name @@DOMAIN@@;
+
+    access_log /var/log/nginx/lidogen-discovery.access.log combined;
+    error_log  /var/log/nginx/lidogen-discovery.error.log warn;
+
+    client_max_body_size 32m;
+    server_tokens off;
+
+    # Let's Encrypt (certbot --nginx / webroot)
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        default_type "text/plain";
+        allow all;
+    }
+
+    # --- Health (без API-ключа, для мониторинга и curl) ---
+    location = /health {
+        limit_req zone=lidogen_discovery_api burst=30 nodelay;
+
+        proxy_pass http://lidogen_discovery_upstream;
+        include /etc/nginx/snippets/lidogen-discovery-proxy-headers.conf;
+
+        proxy_connect_timeout 5s;
+        proxy_send_timeout    10s;
+        proxy_read_timeout    10s;
+    }
+
+    # --- Swagger / OpenAPI (по умолчанию открыты; см. блок ниже для ограничения) ---
+    location ~ ^/(docs|redoc|openapi\.json)$ {
+        limit_req zone=lidogen_discovery_api burst=20 nodelay;
+
+        proxy_pass http://lidogen_discovery_upstream;
+        include /etc/nginx/snippets/lidogen-discovery-proxy-headers.conf;
+    }
+
+    # Раскомментируйте, чтобы закрыть Swagger с интернета (доступ только Tailscale):
+    # location ~ ^/(docs|redoc|openapi\.json)$ {
+    #     allow 100.64.0.0/10;
+    #     allow 127.0.0.1;
+    #     deny all;
+    #     proxy_pass http://lidogen_discovery_upstream;
+    #     include /etc/nginx/snippets/lidogen-discovery-proxy-headers.conf;
+    # }
+
+    # --- QR-авторизация (Telethon, может долго ждать) ---
+    location ~ ^/discovery-api/auth/qr {
+        limit_req zone=lidogen_discovery_qr burst=5 nodelay;
+
+        proxy_pass http://lidogen_discovery_upstream;
+        include /etc/nginx/snippets/lidogen-discovery-proxy-headers.conf;
+
+        proxy_connect_timeout 15s;
+        proxy_send_timeout    180s;
+        proxy_read_timeout    180s;
+    }
+
+    # --- Долгие Telethon / parser операции ---
+    location ~ ^/discovery-api/(discover|discover-groups)(/|$) {
+        limit_req zone=lidogen_discovery_api burst=10 nodelay;
+
+        proxy_pass http://lidogen_discovery_upstream;
+        include /etc/nginx/snippets/lidogen-discovery-proxy-headers.conf;
+
+        proxy_connect_timeout 15s;
+        proxy_send_timeout    600s;
+        proxy_read_timeout    600s;
+    }
+
+    location ~ ^/discovery-api/parser/[^/]+/(add-channels|remove-channels)(/|$) {
+        limit_req zone=lidogen_discovery_api burst=20 nodelay;
+
+        proxy_pass http://lidogen_discovery_upstream;
+        include /etc/nginx/snippets/lidogen-discovery-proxy-headers.conf;
+
+        proxy_connect_timeout 15s;
+        proxy_send_timeout    600s;
+        proxy_read_timeout    600s;
+    }
+
+    # --- Весь остальной API (parser, accounts, queue/metrics, …) ---
+    location / {
+        limit_req zone=lidogen_discovery_api burst=60 nodelay;
+
+        proxy_pass http://lidogen_discovery_upstream;
+        include /etc/nginx/snippets/lidogen-discovery-proxy-headers.conf;
+
+        proxy_connect_timeout 10s;
+        proxy_send_timeout    300s;
+        proxy_read_timeout    300s;
+    }
+}
+
+# После certbot на этом же server_name появится listen 443 ssl
+# и (опционально) редирект HTTP → HTTPS.
+#
+#   sudo certbot --nginx -d @@DOMAIN@@
+#
+# Проверка:
+#   curl -sS http://@@DOMAIN@@/health
+#   curl -sS -H "X-API-Key: $API_KEY" http://@@DOMAIN@@/discovery-api/parser/list
