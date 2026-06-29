@@ -347,3 +347,39 @@ async def sync_accounts_to_pg(
         unchanged=unchanged,
         total=total,
     )
+
+
+def pg_sync_enabled() -> bool:
+    """True, если задан QUEUE_DATABASE_URL (A10 / D6)."""
+    return bool(os.getenv("QUEUE_DATABASE_URL", "").strip())
+
+
+async def sync_accounts_to_pg_best_effort(*, context: str = "") -> SyncResult | None:
+    """A10 после QR: upsert accounts в PG; ошибки PG не пробрасывает.
+
+    Вызывается из discovery_api после успешного QR, чтобы новый аккаунт
+    сразу появился в queue/metrics и был доступен dispatch.
+    """
+    if not pg_sync_enabled():
+        log.debug(
+            "sync accounts (%s): пропуск — QUEUE_DATABASE_URL не задан",
+            context or "trigger",
+        )
+        return None
+    try:
+        result = await sync_accounts_to_pg(sync_config_from_env())
+        log.info(
+            "sync accounts (%s): total=%s inserted=%s updated=%s unchanged=%s",
+            context or "trigger",
+            result.total,
+            result.inserted,
+            result.updated,
+            result.unchanged,
+        )
+        return result
+    except Exception:  # noqa: BLE001 — QR не должен падать из-за PG
+        log.exception(
+            "sync accounts (%s): ошибка PG, операция discovery не прервана",
+            context or "trigger",
+        )
+        return None

@@ -132,6 +132,9 @@ class MainInprocessWorkerTests(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(_loop())
         main._inprocess_worker = worker
         main._inprocess_worker_task = task
+        main._inprocess_worker_pool = [worker]
+        main._inprocess_worker_tasks = [task]
+        main._inprocess_pool_stop = None
         try:
             await main._stop_inprocess_worker()
         finally:
@@ -144,6 +147,103 @@ class MainInprocessWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(task.done())
         self.assertIsNone(main._inprocess_worker)
         self.assertIsNone(main._inprocess_worker_task)
+        self.assertEqual(main._inprocess_worker_pool, [])
+        self.assertEqual(main._inprocess_worker_tasks, [])
+
+
+class MainWorkerPoolTests(unittest.IsolatedAsyncioTestCase):
+    """D12 worker pool: N воркеров запускаются параллельно (INPROCESS_WORKER_COUNT)."""
+
+    def _patch_startup_deps(self):
+        return [
+            patch("discovery_api.main.start_bot_polling_once", MagicMock()),
+            patch("discovery_api.main.sync_accounts_from_disk", MagicMock()),
+            patch("discovery_api.main.restore_active_sessions", AsyncMock()),
+            patch("discovery_api.main.restore_persisted_parsers", AsyncMock()),
+            patch("discovery_api.main.setup_parser_services", MagicMock()),
+            patch("discovery_api.main.start_health_monitor", MagicMock()),
+            patch("app_balance.queue.db.init_pool", new_callable=AsyncMock),
+        ]
+
+    async def test_pool_starts_n_workers(self) -> None:
+        """При INPROCESS_WORKER_COUNT=3 поднимается ровно 3 worker'а."""
+        from discovery_api import main
+
+        created_workers: list[MagicMock] = []
+        created_tasks: list[asyncio.Task] = []
+
+        stop_evt = asyncio.Event()
+
+        async def _noop_run() -> None:
+            await stop_evt.wait()
+
+        def _make_worker(*args, **kwargs):
+            w = MagicMock()
+            w.run = _noop_run
+            w.stop.side_effect = stop_evt.set
+            created_workers.append(w)
+            return w
+
+        with patch("discovery_api.main.get_inprocess_worker_count", return_value=3), patch(
+            "app_balance.queue_worker.QueueWorker", side_effect=_make_worker
+        ), patch(
+            "app_balance.queue_worker.WorkerConfig.from_env",
+            return_value=MagicMock(
+                worker_id="test",
+                poll_interval_seconds=1.0,
+                lock_ttl_seconds=300,
+                retry_delay_seconds=60,
+                postpone_delay_seconds=300,
+                task_type_codes=None,
+                watchdog_enabled=False,
+                watchdog_interval_seconds=30.0,
+                watchdog_auto_retry=MagicMock(),
+            ),
+        ), patch(
+            "app_balance.queue_worker.build_default_dispatcher", return_value=MagicMock()
+        ):
+            await main._start_inprocess_worker()
+            try:
+                self.assertEqual(len(main._inprocess_worker_pool), 3)
+                self.assertEqual(len(main._inprocess_worker_tasks), 3)
+                self.assertIs(main._inprocess_worker, main._inprocess_worker_pool[0])
+            finally:
+                stop_evt.set()
+                await main._stop_inprocess_worker()
+
+    async def test_pool_stop_calls_stop_on_all_workers(self) -> None:
+        """_stop_inprocess_worker вызывает .stop() на каждом воркере из пула."""
+        from discovery_api import main
+
+        stop_evt = asyncio.Event()
+
+        async def _loop() -> None:
+            await stop_evt.wait()
+
+        workers = [MagicMock() for _ in range(3)]
+        tasks = [asyncio.create_task(_loop()) for _ in range(3)]
+        for w in workers:
+            w.stop.side_effect = stop_evt.set
+
+        main._inprocess_worker_pool = list(workers)
+        main._inprocess_worker_tasks = list(tasks)
+        main._inprocess_pool_stop = None
+        main._inprocess_worker = workers[0]
+        main._inprocess_worker_task = tasks[0]
+
+        try:
+            await main._stop_inprocess_worker()
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await t
+
+        for w in workers:
+            w.stop.assert_called_once()
+        self.assertIsNone(main._inprocess_worker)
+        self.assertEqual(main._inprocess_worker_pool, [])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,9 @@
   python scripts/sync_accounts_to_pg.py
   docker compose up -d queue-worker
 
+После успешного QR (session_name задан) discovery-api автоматически вызывает
+sync_accounts_to_pg_best_effort — ручной sync нужен только для bulk/миграций.
+
 Env:
   QUEUE_DATABASE_URL  — обязательно
   ACCOUNT_STORE_PATH    — SQLite telegram_accounts (default: standalone_discovery/.../telegram_accounts.db)

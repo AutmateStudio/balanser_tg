@@ -398,7 +398,7 @@ SESSIONS_DIR=standalone_discovery/sessions
 ```env
 USE_PG_QUEUE=true
 QUEUE_DATABASE_URL=postgresql://app_balancer:***@100.105.75.79:5432/lead_monitor
-INPROCESS_WORKER=false
+DISCOVERY_INPROCESS_WORKER=false
 WORKER_TASK_ADAPTER=clump
 
 API_ID=...
@@ -409,10 +409,32 @@ MAX_CHANNELS_PER_SESSION=500
 ```
 
 - [ ] D8: async add → PG, не SQLite `action_queue`
-- [ ] In-process worker **выключен** (отдельный `queue-worker` на vps-101)
+- [ ] **Раздельные роли (vps-101):** `DISCOVERY_INPROCESS_WORKER=false`, отдельный `queue-worker`
+- [ ] **Co-located (vps-104):** `DISCOVERY_INPROCESS_WORKER=true`, `queue-worker` **остановлен** (см. ниже)
 - [ ] G3: `GET /discovery-api/parser/queue/metrics` + `X-API-Key`
 
 Шаблон: [`standalone_discovery/.env.example`](../standalone_discovery/.env.example).
+
+### vps-104 — co-located (D12 Вариант A)
+
+Discovery API и queue-worker на **одном** хосте с общим `sessions/`. Отдельный контейнер
+`queue-worker` конфликтует с listener'ами API (`database is locked` на `.session`).
+
+```env
+# standalone_discovery/.env
+DISCOVERY_INPROCESS_WORKER=true
+WORKER_TASK_ADAPTER=clump
+QUEUE_DATABASE_URL=postgresql://...@100.105.75.79:5432/lead_monitor
+```
+
+```bash
+cd ~/Lidogen_telegram_balancer
+docker compose stop queue-worker producer-balancer
+cd standalone_discovery && docker compose up -d --force-recreate discovery-api
+```
+
+Скрипт: [`scripts/apply_inprocess_worker_colocated.sh`](../scripts/apply_inprocess_worker_colocated.sh).
+Runbook: [queue-runbook.md](queue-runbook.md) — «Co-located».
 
 ---
 
@@ -518,7 +540,7 @@ SELECT code, is_enabled FROM task_types;
 |----------|--------|
 | `tailscale status` | после reboot app/discovery серверов |
 | `docker compose run --rm migrate` | после деплоя с новыми SQL |
-| `sync_accounts_to_pg.py` | после смены clump / sessions |
+| `sync_accounts_to_pg.py` | после смены clump / sessions; **после QR — автоматически** (discovery-api) |
 | `docker compose up -d --build` | новая версия образа |
 | **Не** `make docker-test-safe` | пока worker + discovery claimer активны |
 | Бэкап PG (vps-100) | по регламенту |
@@ -534,6 +556,7 @@ SELECT code, is_enabled FROM task_types;
 | Preflight fail из Docker | `network_mode: host` для test/migrate; IP вместо MagicDNS |
 | Discovery не видит PG | DSN с `100.105.75.79`, Tailscale на хосте discovery |
 | Worker не pickable accounts | `sync_accounts_to_pg.py`, sessions на диске |
+| `database is locked` на Client1 | Co-located: `DISCOVERY_INPROCESS_WORKER=true`, `docker compose stop queue-worker` |
 | Telethon flood / ban | runbook §E2, G6 auto RPH |
 | `peer's node key has expired` | `sudo tailscale up` с тегом на узле |
 

@@ -170,6 +170,18 @@ def get_inprocess_worker() -> bool:
     return _get_bool_env("DISCOVERY_INPROCESS_WORKER", False)
 
 
+def get_inprocess_worker_count() -> int:
+    """Сколько параллельных in-process worker'ов поднимать (INPROCESS_WORKER_COUNT).
+
+    Каждый worker — отдельная asyncio-задача с независимым claim_next.
+    PG-уровень (FOR UPDATE SKIP LOCKED + pick_and_reserve) гарантирует, что
+    разные воркеры захватывают разные задачи и разные аккаунты.
+    Рекомендуется = числу active-аккаунтов в clump (по умолчанию 4).
+    """
+    _ensure_env_loaded()
+    return max(1, _get_int_env("INPROCESS_WORKER_COUNT", 4))
+
+
 def get_rebalance_enabled() -> bool:
     return _get_bool_env("REBALANCE_ENABLED", False)
 

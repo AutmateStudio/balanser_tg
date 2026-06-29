@@ -41,7 +41,9 @@ services:
         max-file: "5"
 
   discovery-api:
-    build: .
+    build:
+      context: ..
+      dockerfile: standalone_discovery/Dockerfile.pg-queue
     image: standalone-discovery-api:latest
     container_name: standalone-discovery-api
     restart: unless-stopped

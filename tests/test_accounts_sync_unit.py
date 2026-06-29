@@ -110,3 +110,39 @@ def test_load_clump_sessions_v2_and_legacy(tmp_path) -> None:
 
 def test_load_clump_sessions_missing_file() -> None:
     assert load_clump_sessions("/nonexistent/parser_jobs.json") == set()
+
+
+async def test_sync_best_effort_skips_without_dsn(monkeypatch) -> None:
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+
+    monkeypatch.delenv("QUEUE_DATABASE_URL", raising=False)
+    assert await sync_accounts_to_pg_best_effort(context="test") is None
+
+
+async def test_sync_best_effort_calls_sync_when_dsn_set(monkeypatch) -> None:
+    from app_balance.queue import accounts_sync
+    from app_balance.queue.accounts_sync import SyncResult, sync_accounts_to_pg_best_effort
+
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/test")
+
+    async def _fake_sync(_config, *, dry_run=False):
+        return SyncResult(inserted=1, updated=0, unchanged=2, total=3)
+
+    monkeypatch.setattr(accounts_sync, "sync_accounts_to_pg", _fake_sync)
+    result = await sync_accounts_to_pg_best_effort(context="qr:Test2")
+    assert result is not None
+    assert result.inserted == 1
+    assert result.total == 3
+
+
+async def test_sync_best_effort_swallows_pg_errors(monkeypatch) -> None:
+    from app_balance.queue import accounts_sync
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/test")
+
+    async def _fail(_config, *, dry_run=False):
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr(accounts_sync, "sync_accounts_to_pg", _fail)
+    assert await sync_accounts_to_pg_best_effort(context="qr:Test2") is None
