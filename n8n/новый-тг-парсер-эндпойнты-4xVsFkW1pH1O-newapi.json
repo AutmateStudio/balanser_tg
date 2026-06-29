@@ -1026,7 +1026,16 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/add-channels",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/add-channels?async=true",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim())) }}\n}",
@@ -1040,12 +1049,22 @@
         800,
         1792
       ],
-      "continueOnFail": true
+      "continueOnFail": true,
+      "notes": "POST add-channels?async=true — задачи кладутся в PG task_queue (по одной на канал), в ответе action_id и task_ids."
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/remove-channels",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/remove-channels?async=true",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim())) }}\n}",
@@ -1059,7 +1078,8 @@
         800,
         1920
       ],
-      "continueOnFail": true
+      "continueOnFail": true,
+      "notes": "POST remove-channels?async=true — при USE_PG_QUEUE=true задачи parser_remove_channel кладутся в PG task_queue (по одной на канал)."
     },
     {
       "parameters": {
