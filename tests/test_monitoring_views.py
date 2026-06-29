@@ -299,6 +299,36 @@ async def test_v_account_resource_summary_worst_op(queue_ctx) -> None:
 
 
 @pytest.mark.asyncio
+async def test_v_account_resource_summary_ignores_zero_effective_rph(queue_ctx) -> None:
+    """A13: свежий аккаунт без расхода НЕ числится без ресурса.
+
+    op с effective_rph = 0 (rph_limit, который reserve_percent округляет в ноль)
+    не считается «исчерпанным» — иначе любой аккаунт был бы any_op_exhausted=true
+    перманентно. Аккаунт без usage обязан иметь any_op_exhausted=false,
+    exhausted_ops_count=0 и worst_available_percent=100.
+    Дополнительно: после A13 в seed не должно остаться enabled-op с effective_rph=0.
+    """
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT worst_available_percent, any_op_exhausted, exhausted_ops_count "
+            "FROM v_account_resource_summary WHERE account_id = $1",
+            queue_ctx["account_id"],
+        )
+        zero_eff = await conn.fetchval(
+            """
+            SELECT count(*) FROM resource_op_types
+            WHERE is_enabled = true
+              AND floor(rph_limit * (1 - reserve_percent / 100.0)) = 0
+            """
+        )
+    assert row is not None
+    assert row["any_op_exhausted"] is False
+    assert int(row["exhausted_ops_count"]) == 0
+    assert float(row["worst_available_percent"]) == 100.0
+    assert int(zero_eff) == 0, "после A13 не должно остаться op с effective_rph=0"
+
+
+@pytest.mark.asyncio
 async def test_v_accounts_overview_active_and_cooldown(queue_ctx) -> None:
     """Перевод тестового аккаунта в cooldown увеличивает accounts_in_cooldown."""
     async with db.acquire() as conn:

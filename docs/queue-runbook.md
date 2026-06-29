@@ -363,8 +363,16 @@ SQL-представления per-op ресурса и сводки по пар
 **Per-op лимит (§0.5):** `effective_rph = floor(rph_limit × (1 − reserve_percent/100))`.
 VIEW **не используют** `accounts.hourly_limit`.
 
-**Edge case:** op с `rph_limit = 1` → `effective_rph = 0` → у аккаунта
-`any_op_exhausted = true` для этого op. Это ожидаемое поведение, не баг.
+**Edge case (исправлено в A13):** op с `rph_limit = 1` даёт
+`effective_rph = floor(1 × 0.9) = 0`, то есть `available_resource = 0` всегда.
+Раньше это перманентно помечало аккаунт `any_op_exhausted = true` и завышало
+`accounts_without_resource` в `v_accounts_overview` (аккаунты выглядели «навсегда
+без ресурса»). Теперь `v_account_resource_summary` **исключает** op с
+`effective_rph = 0` из расчёта исчерпания (`FILTER (WHERE effective_rph > 0)`), а
+lifecycle-op `connect_disconnect` / `get_me` / `is_user_authorized` поднят до
+`rph_limit = 30` (см. `DB/A13_fix_effective_rph_zero_exhausted.sql`). Эти op не
+входят в `task_type_ops` и не списываются в `account_resource_usage`, поэтому на
+диспетчер задач не влияли — это была визуальная проблема мониторинга.
 
 Примеры диагностики:
 

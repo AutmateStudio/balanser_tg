@@ -54,11 +54,12 @@ LEFT JOIN (
 ) "u" ON "u"."account_id" = "a"."id" AND "u"."op_type_id" = "rot"."id"
 WHERE "rot"."is_enabled" = true;
 
+-- effective_rph = 0 не считается «исчерпанным» (нет полезного лимита).
 CREATE OR REPLACE VIEW "v_account_resource_summary" AS
 SELECT "account_id", "session_name", "account_status",
-  min("available_resource_percent") AS "worst_available_percent",
-  bool_or("available_resource" <= 0) AS "any_op_exhausted",
-  count(*) FILTER (WHERE "available_resource" <= 0) AS "exhausted_ops_count"
+  min("available_resource_percent") FILTER (WHERE "effective_rph" > 0) AS "worst_available_percent",
+  COALESCE(bool_or("available_resource" <= 0) FILTER (WHERE "effective_rph" > 0), false) AS "any_op_exhausted",
+  count(*) FILTER (WHERE "available_resource" <= 0 AND "effective_rph" > 0) AS "exhausted_ops_count"
 FROM "v_account_op_usage_last_hour"
 GROUP BY "account_id", "session_name", "account_status";
 

@@ -478,14 +478,22 @@ LEFT JOIN (
 WHERE "rot"."is_enabled" = true;
 
 -- --- §26.3: сводка ресурса по аккаунту (худший op = решение C5/G7★) ---
+-- effective_rph = 0 (op с rph_limit, который reserve_percent округляет в ноль)
+-- НЕ считается «исчерпанным»: у такой op нет полезного лимита, иначе аккаунт
+-- числился бы any_op_exhausted перманентно, независимо от часа.
 CREATE VIEW "v_account_resource_summary" AS
 SELECT
   "account_id",
   "session_name",
   "account_status",
-  min("available_resource_percent")              AS "worst_available_percent",
-  bool_or("available_resource" <= 0)             AS "any_op_exhausted",
-  count(*) FILTER (WHERE "available_resource" <= 0) AS "exhausted_ops_count"
+  min("available_resource_percent") FILTER (WHERE "effective_rph" > 0)
+                                                 AS "worst_available_percent",
+  COALESCE(
+    bool_or("available_resource" <= 0) FILTER (WHERE "effective_rph" > 0),
+    false
+  )                                              AS "any_op_exhausted",
+  count(*) FILTER (WHERE "available_resource" <= 0 AND "effective_rph" > 0)
+                                                 AS "exhausted_ops_count"
 FROM "v_account_op_usage_last_hour"
 GROUP BY "account_id", "session_name", "account_status";
 
