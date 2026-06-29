@@ -39,102 +39,99 @@ RESOURCE_OPS: dict[str, ResourceOpDefinition] = {
     "auth.qr_login": ResourceOpDefinition(
         code="auth.qr_login",
         name="QR: qr_login + wait + recreate + get_me + save",
-        rph_limit=3,
+        rph_limit=15,
     ),
-    # rph_limit=30 (effective_rph=27): lifecycle/health-op'ы сессии. Раньше было 1,
-    # из-за чего effective_rph = floor(1×0.9) = 0 → аккаунт навсегда числился
-    # any_op_exhausted в сводках. Эти op не входят в task_type_ops очереди и не
-    # пишутся в account_resource_usage, поэтому конкретное значение не лимитирует
-    # диспетчер — важно лишь, чтобы effective_rph был > 0.
     "connect_disconnect": ResourceOpDefinition(
         code="connect_disconnect",
         name="Connect / disconnect сессии",
-        rph_limit=30,
+        rph_limit=150,
     ),
     "get_me": ResourceOpDefinition(
         code="get_me",
         name="Текущий пользователь (валидация сессии)",
-        rph_limit=30,
+        rph_limit=150,
     ),
     "is_user_authorized": ResourceOpDefinition(
         code="is_user_authorized",
         name="Проверка авторизации",
-        rph_limit=30,
+        rph_limit=150,
     ),
     "get_entity": ResourceOpDefinition(
         code="get_entity",
         name="Resolve username / ссылки / peer",
-        rph_limit=7,
+        # 20 кан/ч: 2 units/канал, threshold 80% → effective_rph ≥ 200 → rph_limit 223
+        rph_limit=223,
     ),
     "get_input_entity": ResourceOpDefinition(
         code="get_input_entity",
         name="get_input_entity() для InputPeer",
-        rph_limit=7,
+        rph_limit=35,
     ),
     "contacts.Search": ResourceOpDefinition(
         code="contacts.Search",
         name="Поиск контактов / каналов",
-        rph_limit=2,
+        rph_limit=10,
     ),
     "messages.SearchGlobal": ResourceOpDefinition(
         code="messages.SearchGlobal",
         name="Глобальный поиск сообщений",
-        rph_limit=120,
+        rph_limit=600,
     ),
     "channels.GetChannelRecommendations": ResourceOpDefinition(
         code="channels.GetChannelRecommendations",
         name="Рекомендации каналов",
-        rph_limit=30,
+        rph_limit=150,
     ),
     "channels.GetFullChannel": ResourceOpDefinition(
         code="channels.GetFullChannel",
         name="Полные данные канала",
-        rph_limit=80,
+        # 1 unit/канал, threshold 80% → effective_rph ≥ 100 → rph_limit 112
+        rph_limit=112,
     ),
     "channels.JoinChannel": ResourceOpDefinition(
         code="channels.JoinChannel",
         name="Подписка / join канала или discussion",
-        rph_limit=30,
+        rph_limit=223,
     ),
     "channels.LeaveChannel": ResourceOpDefinition(
         code="channels.LeaveChannel",
         name="Выход из канала или discussion",
-        rph_limit=30,
+        rph_limit=150,
     ),
     "channels.GetParticipant": ResourceOpDefinition(
         code="channels.GetParticipant",
         name="Проверка участника (InputPeerSelf)",
-        rph_limit=6000,
+        rph_limit=30000,
     ),
     "channels.GetParticipants": ResourceOpDefinition(
         code="channels.GetParticipants",
         name="Список участников (megagroup / lidgen)",
-        rph_limit=500,
+        rph_limit=2500,
     ),
     "get_permissions": ResourceOpDefinition(
         code="get_permissions",
         name="get_permissions() для legacy Chat",
-        rph_limit=30,
+        rph_limit=150,
     ),
     "iter_messages": ResourceOpDefinition(
         code="iter_messages",
         name="Итерация сообщений (скоринг / collect)",
-        rph_limit=450,
+        rph_limit=2250,
     ),
     "users.GetFullUser": ResourceOpDefinition(
         code="users.GetFullUser",
         name="Полные данные пользователя (NewMessage sender)",
-        rph_limit=1500,
+        rph_limit=7500,
     ),
     "bot.send_message": ResourceOpDefinition(
         code="bot.send_message",
         name="Bot API: send_message",
-        rph_limit=1000,
+        rph_limit=5000,
     ),
     "bot.send_photo": ResourceOpDefinition(
         code="bot.send_photo",
         name="Bot API: send_photo",
-        rph_limit=500,
+        rph_limit=2500,
     ),
 }
 

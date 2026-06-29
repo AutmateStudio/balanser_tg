@@ -64,7 +64,20 @@ async def main() -> None:
             else:
                 print("  нет задач со статусом scheduled/retry")
 
-            # ── 3. RPH-лимиты по аккаунтам ───────────────────────────────────
+            # ── 3. Pickable-аккаунты (сводка) ────────────────────────────────
+            pickable = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM accounts
+                WHERE status IN ('active', 'cooldown')
+                  AND is_enabled = true
+                  AND current_task_id IS NULL
+                  AND (cooldown_until IS NULL OR cooldown_until <= now())
+                """
+            )
+            total = await conn.fetchval("SELECT COUNT(*) FROM accounts")
+            print(f"\n=== Аккаунты pickable: {pickable} / {total} ===")
+
+            # ── 4. RPH-лимиты по аккаунтам ───────────────────────────────────
             rows = await conn.fetch(
                 """
                 SELECT
@@ -102,7 +115,7 @@ async def main() -> None:
             else:
                 print("  аккаунты не найдены")
 
-            # ── 4. Глобальные настройки task_types ───────────────────────────
+            # ── 5. Глобальные настройки task_types ───────────────────────────
             rows = await conn.fetch(
                 """
                 SELECT
@@ -111,10 +124,10 @@ async def main() -> None:
                     tt.min_available_resource_percent,
                     tt.retry_delay_seconds,
                     tt.max_attempts,
-                    COUNT(tto.id) AS ops_count
+                    COUNT(tto.id) FILTER (WHERE rot.is_enabled) AS ops_count
                 FROM task_types tt
-                LEFT JOIN task_type_ops tto
-                       ON tto.task_type_id = tt.id AND tto.is_enabled = true
+                LEFT JOIN task_type_ops tto ON tto.task_type_id = tt.id
+                LEFT JOIN resource_op_types rot ON rot.id = tto.op_type_id
                 GROUP BY tt.id
                 ORDER BY tt.code
                 """
@@ -133,10 +146,57 @@ async def main() -> None:
                     f"  retry_delay={r['retry_delay_seconds']}s"
                 )
 
-            # ── 5. Совет ─────────────────────────────────────────────────────
-            postponed = sum(r["cnt"] for r in await conn.fetch(
-                "SELECT COUNT(*) AS cnt FROM task_queue WHERE status='scheduled'"
-            ))
+            # ── 6. get_entity — узкое место для parser_add_channel ─────────────
+            threshold_row = await conn.fetchrow(
+                """
+                SELECT min_available_resource_percent
+                FROM task_types WHERE code = 'parser_add_channel'
+                """
+            )
+            db_threshold = int(threshold_row["min_available_resource_percent"]) if threshold_row else 80
+            env_threshold = os.environ.get("RESOURCE_MIN_AVAILABLE_PERCENT", "").strip()
+            threshold = int(env_threshold) if env_threshold.isdigit() else db_threshold
+
+            blocked = await conn.fetch(
+                """
+                SELECT a.session_name,
+                       ROUND(v.available_resource_percent::numeric, 1) AS avail_pct
+                FROM accounts a
+                JOIN v_account_op_usage_last_hour v
+                  ON v.account_id = a.id AND v.op_code = 'get_entity'
+                WHERE a.status IN ('active', 'cooldown')
+                  AND a.is_enabled = true
+                  AND a.current_task_id IS NULL
+                  AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())
+                  AND v.available_resource_percent < $1
+                ORDER BY a.session_name
+                """,
+                threshold,
+            )
+            if blocked:
+                print(
+                    f"\n=== get_entity ниже порога {threshold}% "
+                    f"(parser_add_channel не возьмёт эти аккаунты) ==="
+                )
+                for r in blocked:
+                    print(f"  {r['session_name']:20s}  avail={r['avail_pct']}%")
+                print(
+                    f"\n⚠  Все pickable-аккаунты заблокированы по get_entity "
+                    f"(avail < {threshold}%). Задачи уходят в postpone "
+                    f"insufficient_resource:*:get_entity."
+                )
+                print(
+                    "   Быстрый фикс: RESOURCE_MIN_AVAILABLE_PERCENT=50 "
+                    "в standalone_discovery/.env → docker compose up -d --force-recreate discovery-api"
+                )
+                print(
+                    "   Или подождите ~1 ч — used_last_hour для get_entity сбросится."
+                )
+
+            # ── 7. Совет ─────────────────────────────────────────────────────
+            postponed = await conn.fetchval(
+                "SELECT COUNT(*) FROM task_queue WHERE status = 'scheduled'"
+            )
             if postponed > 0:
                 print(
                     f"\n⚠  {postponed} задач в scheduled. Если причина INSUFFICIENT_RESOURCE"
