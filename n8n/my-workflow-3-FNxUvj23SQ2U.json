@@ -1,0 +1,64 @@
+{
+  "name": "My workflow 3",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/vk/user/Server_account_2/messages/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"peer_id\": 2000000003,\n  \"text\": \"Выберите вариант:\",\n  \"keyboard\": {\n    \"inline\": true,\n    \"buttons\": [\n      [\n        {\n          \"action\": {\n            \"type\": \"text\",\n            \"label\": \"Да\",\n            \"payload\": \"{\\\"button\\\": \\\"yes\\\"}\"\n          },\n          \"color\": \"positive\"\n        },\n        {\n          \"action\": {\n            \"type\": \"text\",\n            \"label\": \"Нет\",\n            \"payload\": \"{\\\"button\\\": \\\"no\\\"}\"\n          },\n          \"color\": \"negative\"\n        }\n      ]\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "43ebdcb1-f754-41c3-a9c0-ef313a33d1eb",
+      "name": "HTTP Request1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -240,
+        0
+      ],
+      "id": "73e47364-4c4f-45f6-a708-d45205cecc67",
+      "name": "When Executed by Another Workflow",
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

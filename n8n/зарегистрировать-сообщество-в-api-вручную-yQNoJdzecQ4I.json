@@ -1,0 +1,174 @@
+{
+  "name": "Зарегистрировать сообщество в API (вручную)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -304,
+        0
+      ],
+      "id": "26a4bfec-afa1-4c3a-a137-ea5788f57f0d",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/clients/clear",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "type",
+              "value": "vk"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        160,
+        192
+      ],
+      "id": "da860bcf-886b-4444-b412-140efdcb918f",
+      "name": "Удалить все клиенты"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"client_id\": \"237079234\",\n  \"access_token\": \"vk1.a.pEnDNFOm2hY2Vu0t7TovDoulkHiS_8fmrakUPeHUysAhFvdKdhtnyHhlWkdiLcymt8E4QB1KiaclOTovqaSB7TkqGm6_7YqqaOEbGOVXWcPNM7Gk9mSpaP32cVbEPozRCiQsBbnSYlPrCh5QUcBDSsbtRTSNoaZTYekBaEsgp1dgYmgmb5b2axFk9uCH2quRHuGGr9wEhP6DbCiH7YB-vw\",\n  \"webhook_url\": \"https://mokuegopasan.beget.app/webhook/community-paid-messages\",\n  \"group_id\": 237079234\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -64,
+        0
+      ],
+      "id": "b04b3c51-4d7c-4f79-b869-3cf41e294e7c",
+      "name": "Устанавливаем значения для сообщества"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/clients/vk",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "={{ $json.client_id }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $json.access_token }}"
+            },
+            {
+              "name": "webhook_url",
+              "value": "={{ $json.webhook_url }}"
+            },
+            {
+              "name": "group_id",
+              "value": "={{ $json.group_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        160,
+        0
+      ],
+      "id": "f7b4fdf2-777c-4a88-896f-70d5e9df84a6",
+      "name": "Регистрируем сообщество в API",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/listeners/vk/start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "={{ $json.client }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        368,
+        0
+      ],
+      "id": "23add7b7-cf60-4aca-91df-3dc6b99a6b07",
+      "name": "Включаем слушатель для сообщества",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Устанавливаем значения для сообщества",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Устанавливаем значения для сообщества": {
+      "main": [
+        [
+          {
+            "node": "Регистрируем сообщество в API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Регистрируем сообщество в API": {
+      "main": [
+        [
+          {
+            "node": "Включаем слушатель для сообщества",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

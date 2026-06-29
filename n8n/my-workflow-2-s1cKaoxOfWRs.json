@@ -1,0 +1,168 @@
+{
+  "name": "My workflow 2",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "96046c5e-e835-4150-8437-7e2a21f92252",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.vk.com/method/wall.getCommentsForPosts",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "v",
+              "value": "5.275"
+            },
+            {
+              "name": "client_id",
+              "value": "6287487"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "*/*"
+            },
+            {
+              "name": "accept-language",
+              "value": "ru,en;q=0.9"
+            },
+            {
+              "name": "dnt",
+              "value": "1"
+            },
+            {
+              "name": "origin",
+              "value": "https://vk.com"
+            },
+            {
+              "name": "priority",
+              "value": "u=1, i"
+            },
+            {
+              "name": "referer",
+              "value": "https://vk.com/"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"YaBrowser\";v=\"26.3\", \"Yowser\";v=\"2.5\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"macOS\""
+            },
+            {
+              "name": "sec-fetch-dest",
+              "value": "empty"
+            },
+            {
+              "name": "sec-fetch-mode",
+              "value": "cors"
+            },
+            {
+              "name": "sec-fetch-site",
+              "value": "same-site"
+            },
+            {
+              "name": "user-agent",
+              "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 YaBrowser/26.3.0.0 Safari/537.36"
+            },
+            {
+              "name": "cookie",
+              "value": "remixlang=0;remixstid=619394827_eV0nVJAoUhRHsWm5s4LuSW9MgVNwAuD0j9WN1YEyrGD;remixuacck=b26ba5ae3ed757199c;remixcolor_scheme_mode=auto;remixdt=0;remixdmgr=ab802bf5cdcd166d9b8613ba4e48725cb1ed63fd4210d15a7ad4edc4954ab3fa;_ga=GA1.1.955808580.1759834375;_ym_uid=1759834375719052331;_ym_d=1759834375;tmr_lvid=0422962bed0e35a206dbab758bd1b422;tmr_lvidTS=1759835556164;remixuas=ZThiMWFmZjRkYWViNDMwODVmMGI3Mzhh;remixstlid=9088059490202565866_kbzOXKMz6LQrAuAOT9fZ2zKpkB5xW09QOOkOBBQWQTX;remixsf=1;remixrefkey=1ab1dacdc0da1c55e9;_ga_04L1QYDPKP=GS2.1.s1769758632$o6$g1$t1769758742$j59$l0$h0;remixscreen_orient=1;remixua=52%7C628%7C180%7C1977333106;remixcurr_audio=null;remixmaudio=null;remixage18=1;prcl=17758e4905f678;remixdark_color_scheme=0;remixpuad=6tYcgh-BPf9QNdnVvi6QUYHVCi6KwxoPDAaM22CJktk;remixsid=1_wUQ_KAmZk2KVOdvyV0Or4cvOCNqABq7k4q_sX-dSMpQnMFPUhc64KsfkRZSHokT8VKdrrXcOfJ9JeGhDW5Rv-A;remixseenads=4;remixgp=004be9e883e6805f8d84415653eff90c;httoken=5PjJ2NyoAhuTrGyhucHKpRywjEvutUsC6muOhJR50EuQjYACNVetZWVyhpqPNrVDz06nyivmHzULHUs50mJHdWxQ4dP686NZWTQIINR8336g35zYl_4eNVI5xDO8uk_zY14;remixscreen_width=2560;remixscreen_height=1440;remixscreen_dpr=1;remixscreen_depth=24;remixscreen_winzoom=1.62;remixrt=0;remixsts=%7B%22data%22%3A%5B%5B1774969027%2C%22entries_requests%22%2C1%2C%22core_spa_vk%22%2C%22core_spa%22%5D%2C%5B1774969027%2C%22entries_requests%22%2C1%2C%22ui_common%22%2C%22web%22%5D%2C%5B1774969027%2C%22entries_requests%22%2C1%2C%22notifier%22%2C%22web%22%5D%2C%5B1774969027%2C%22entries_requests%22%2C1%2C%22likes%22%2C%22web%22%5D%5D%2C%22uniqueId%22%3A430683403.6585834%7D;"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "need_likes",
+              "value": "1"
+            },
+            {
+              "name": "fields",
+              "value": "photo_50,photo_100,photo_200,first_name_dat,first_name_gen,last_name_gen,sex,verified,is_verified,image_status,can_message,last_seen,mutual,can_write_private_message,deactivated,friend_status,status,activity,members_preview,has_unseen_stories,members_count,member_status,is_member"
+            },
+            {
+              "name": "extended",
+              "value": "1"
+            },
+            {
+              "name": "preview_length",
+              "value": "0"
+            },
+            {
+              "name": "owner_id",
+              "value": "-19542789"
+            },
+            {
+              "name": "posts_ids",
+              "value": "-19542789_957892,-76477496_362413,-19542789_957770,-19542789_957758,-19542789_957725,-19542789_957692,-19542789_957666,-19542789_957659,-19542789_957604,-19542789_957579"
+            },
+            {
+              "name": "thread_items_count",
+              "value": "1"
+            },
+            {
+              "name": "count",
+              "value": "3"
+            },
+            {
+              "name": "access_token",
+              "value": "vk1.a.ONw0XIDtiQ-3Qt8oqjKsEEyrAiNMz4wZqm9I5NK19wN4feKpCHZOB4PwUy3AQ1olhEIAmWedIJpDO96YqdEkxCQ3kjwyuyPoVywLMEQX6pWKUb3_1Em1em1A0rLZDICtnaAJ4vjDoAX9Ei7JiZBE93xgy6S8woIK1XR3D_7lIgec6dn2GAp6axzLVQ7ScP5qX1Nf3rNCee3N8OR-GUyx8g"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "85d37fff-35b3-4552-9abb-1e68473d6820",
+      "name": "HTTP Request"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

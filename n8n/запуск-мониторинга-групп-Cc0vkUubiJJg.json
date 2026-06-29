@@ -1,0 +1,270 @@
+{
+  "name": "Запуск мониторинга групп",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "Client"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -160,
+        0
+      ],
+      "id": "c5c8324c-4732-4626-8f0f-71ab1097853e",
+      "name": "Получаем id клиента"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "z9maAvjRPMd4O3ik",
+          "mode": "list",
+          "cachedResultName": "Группы клиента",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/z9maAvjRPMd4O3ik"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Client_id",
+              "keyValue": "={{ $('Получаем id клиента').item.json.Client }}"
+            },
+            {
+              "keyName": "Active",
+              "condition": "isTrue"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "e4ea4d0f-a86f-4c63-ba31-c2ebdfc4eb1d",
+      "name": "находим все активные группы"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "f6609897-01c7-4117-a5ec-52ad47af1282",
+      "name": "Проходимся по всем группам"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "TzVNnyflmLD5SQgh",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/TzVNnyflmLD5SQgh",
+          "cachedResultName": "Включаем слушатель группы"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Client": "={{ $('находим все активные группы').item.json.Client_id }}",
+            "Wall": "={{ $('находим все активные группы').item.json.Group }}",
+            "Webhook": "={{ $('Получаем вебхук клиента').item.json.Webhook }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Client",
+              "displayName": "Client",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Wall",
+              "displayName": "Wall",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Webhook",
+              "displayName": "Webhook",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        672,
+        16
+      ],
+      "id": "1ebdc540-ca66-42c1-9b9a-ea970fbb261d",
+      "name": "Call 'Включаем слушатель группы'"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Cc0vkUubiJJgZgl0",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/Cc0vkUubiJJgZgl0",
+          "cachedResultName": "Запуск мониторинга групп"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Client": "1"
+          },
+          "matchingColumns": [
+            "Client"
+          ],
+          "schema": [
+            {
+              "id": "Client",
+              "displayName": "Client",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        16,
+        -192
+      ],
+      "id": "84f8e210-5645-49ea-aedd-4fed6cfaa519",
+      "name": "Call 'Запуск мониторинга групп'"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "3kG2vmGLTHN9ACXs",
+          "mode": "list",
+          "cachedResultName": "Клиент->Вебхук",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/3kG2vmGLTHN9ACXs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Client",
+              "keyValue": "={{ $json.Client }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        32,
+        0
+      ],
+      "id": "3fc742b8-ce50-4308-b8f2-d13fbc92f107",
+      "name": "Получаем вебхук клиента"
+    }
+  ],
+  "connections": {
+    "Получаем id клиента": {
+      "main": [
+        [
+          {
+            "node": "Получаем вебхук клиента",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "находим все активные группы": {
+      "main": [
+        [
+          {
+            "node": "Проходимся по всем группам",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проходимся по всем группам": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Call 'Включаем слушатель группы'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'Включаем слушатель группы'": {
+      "main": [
+        [
+          {
+            "node": "Проходимся по всем группам",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем вебхук клиента": {
+      "main": [
+        [
+          {
+            "node": "находим все активные группы",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

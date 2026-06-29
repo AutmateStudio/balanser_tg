@@ -1,0 +1,412 @@
+{
+  "name": "vk-parser-sync",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.to_add }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "id": "2b513365-9f70-47d4-b828-5b368205d847"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "24e57650-057c-4279-aa0c-b156c2af05a2",
+      "name": "If has new",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.to_remove }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "id": "4a451363-cfd0-40df-97f2-87258774c1d4"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c0f84ddb-69f0-40e6-ae28-6b191cf50026",
+      "name": "If has removed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "fd6e7173-9cc1-4498-b557-6221c4045815",
+      "name": "Every 1m1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2032,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "platform_id",
+              "value": "1"
+            },
+            {
+              "column": "is_active",
+              "value": "True"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9f8b86e8-9a51-48b6-a09d-b1d7d4800a8c",
+      "name": "Get new channels1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1824,
+        -144
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:3000/listeners/vk-user/Server_account_3/status",
+        "options": {}
+      },
+      "id": "086e18cb-7b2b-4096-872d-ad10ffb288c9",
+      "name": "List parsers1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1424,
+        -144
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst groupIds = new Set();\n\nfunction addOwnerId(value) {\n  const id = Number(value);\n  if (Number.isFinite(id) && id < 0) {\n    groupIds.add(id);\n  }\n}\n\nfunction walk(node) {\n  if (!Array.isArray(node)) return;\n\n  // Пара [owner_id, post_id]\n  if (\n    node.length === 2 &&\n    (typeof node[0] === 'number' || typeof node[0] === 'string') &&\n    (typeof node[1] === 'number' || typeof node[1] === 'string')\n  ) {\n    addOwnerId(node[0]);\n    return;\n  }\n\n  // Вложенные массивы\n  for (const part of node) {\n    walk(part);\n  }\n}\n\nfor (const item of items) {\n  walk(item.json.watched_posts);\n}\n\nconst uniqueGroupIds = [...groupIds].sort((a, b) => a - b);\n\nreturn [\n  {\n    json: {\n      unique_group_ids: uniqueGroupIds,\n      count: uniqueGroupIds.length,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        -144
+      ],
+      "id": "bcecf86e-99d4-45b9-a8e1-f0f365381c00",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "external_channel_id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -1616,
+        -144
+      ],
+      "id": "f14a85e7-9e97-417d-8745-107edfdf51d5",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "watched_posts"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -1232,
+        -144
+      ],
+      "id": "e06c05dd-7c10-402e-a50b-e1aab1cc82e4",
+      "name": "Aggregate1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/listeners/vk-user/Server_account_3/comments/walls/remove",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"owner_ids\": [{{ $('Code in JavaScript').item.json.to_remove }}]\n} ",
+        "options": {}
+      },
+      "id": "75353c10-ae93-411a-824b-3bdecf52ae6a",
+      "name": "Remove",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -208,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/listeners/vk-user/Server_account_3/comments/walls/add",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"owner_ids\": [{{ $json.to_add }}],\n  \"count\": 10\n}",
+        "options": {}
+      },
+      "id": "bd5c6434-717c-4a2d-9e8b-2ea25885ef82",
+      "name": "add",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -224,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fcdc5fc8-a79f-4d6f-b50f-42fa56c0379a",
+              "name": "unique_group_ids",
+              "value": "={{ $json.unique_group_ids }}",
+              "type": "array"
+            },
+            {
+              "id": "d04641be-28a2-4543-9601-19a3b50d9234",
+              "name": "external_channel_id",
+              "value": "={{ $('Aggregate').item.json.external_channel_id }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -832,
+        -144
+      ],
+      "id": "3861a110-fecc-41bb-808d-59ba8c39b30a",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nfunction toGroupId(value) {\n  const n = Number(String(value).trim());\n  return Number.isFinite(n) && n < 0 ? n : null;\n}\n\nconst watchedSet = new Set(\n  (item.unique_group_ids || []).map(toGroupId).filter((id) => id !== null)\n);\n\nconst channelsSet = new Set(\n  (item.external_channel_id || []).map(toGroupId).filter((id) => id !== null)\n);\n\nconst to_add = [...channelsSet]\n  .filter((id) => !watchedSet.has(id))\n  .sort((a, b) => a - b);\n\nconst to_remove = [...watchedSet]\n  .filter((id) => !channelsSet.has(id))\n  .sort((a, b) => a - b);\n\nreturn [\n  {\n    json: {\n      to_add,\n      to_remove,\n      to_add_count: to_add.length,\n      to_remove_count: to_remove.length,\n      watched_count: watchedSet.size,\n      channels_count: channelsSet.size,\n      walls_add_body: {\n        owner_ids: to_add,\n        count: 10,\n      },\n      walls_remove_body: {\n        owner_ids: to_remove,\n      },\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -624,
+        -144
+      ],
+      "id": "2d303d4a-5189-44a0-b143-f9f1e60976be",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "connections": {
+    "If has new": {
+      "main": [
+        [
+          {
+            "node": "add",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If has removed": {
+      "main": [
+        [
+          {
+            "node": "Remove",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 1m1": {
+      "main": [
+        [
+          {
+            "node": "Get new channels1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get new channels1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List parsers1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "List parsers1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If has new",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If has removed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Every 1m1": {
+      "recurrenceRules": []
+    }
+  },
+  "pinData": {},
+  "meta": null
+}

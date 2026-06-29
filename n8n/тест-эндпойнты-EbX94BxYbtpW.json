@@ -1,0 +1,1339 @@
+{
+  "name": "Тест эндпойнты",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        1104
+      ],
+      "id": "01077deb-a6a2-4eee-847a-ae3e902dec18",
+      "name": "Запуск"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "98f254b2-cbdb-477f-a47a-7890df647de5",
+              "name": "Function",
+              "value": "Status",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -512,
+        -400
+      ],
+      "id": "2df85942-068c-4a47-8f3a-02e014e6ee2f",
+      "name": "Название вызова",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Health",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "aca92663-c6a2-4b73-9abb-d23c3180e38b"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Health"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "dbf1ef05-13d3-49a0-947e-6d6ea67bb98e",
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e365e426-f796-4637-8ed0-61018bb26937",
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Register",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Register"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "02347e38-b126-48b9-ba52-93138de74ee1",
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -304,
+        -416
+      ],
+      "id": "3f113b89-8488-439c-bf51-c9ae47b436f9",
+      "name": "распределение по эндпойнтам",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:3000/health",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        160,
+        -816
+      ],
+      "id": "f6890ae8-059d-4169-b8b0-c9bede85e684",
+      "name": "health",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:3000/status",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        160,
+        -640
+      ],
+      "id": "768bc25e-268d-4a4c-94b0-46ef6634d0b9",
+      "name": "listener_status",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/clients/vk-user/auth/start",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_name",
+              "value": "Session1"
+            },
+            {
+              "name": "webhook_url",
+              "value": "https://example.com/webhook"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        128,
+        -368
+      ],
+      "id": "30bd1901-b0c8-434b-8cfd-b57429565c59",
+      "name": "Register_step-1: implicit flow get link",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5e637b00-f17c-4491-98e8-922120bc6532",
+              "name": "URL",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        336,
+        -368
+      ],
+      "id": "ca56fbac-3b8f-44a7-8465-c7ac8887d23d",
+      "name": "Вставить url страницы после регистрации",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/clients/vk-user/auth/complete",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_name",
+              "value": "Session1"
+            },
+            {
+              "name": "redirect_url",
+              "value": "https://oauth.vk.com/blank.html#access_token=ВАШ_ТОКЕН"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        544,
+        -368
+      ],
+      "id": "7d61cdbd-916a-4eab-b640-46ad5eccd831",
+      "name": "Register_step-2: implicit flow get token from url",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:3000/vk/user/my_session/search/groups",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "python"
+            },
+            {
+              "name": "count",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -96,
+        -208
+      ],
+      "id": "93db717e-4e83-4f99-a288-cb24d924e6c8",
+      "name": "HTTP Request",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "=http://217.26.24.119:3000/vk/user/{{ $json.session_name }}/search/groups",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.search_query }}"
+            },
+            {
+              "name": "count",
+              "value": "={{ $json.search_count }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        528
+      ],
+      "id": "5c4ab99c-e7f6-4567-8f6d-12daf599a1ca",
+      "name": "VK: поиск сообществ",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://217.26.24.119:3000/vk/user/{{ $json.session_name }}/search/chats",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.search_query }}"
+            },
+            {
+              "name": "count",
+              "value": "={{ $json.search_count }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        672
+      ],
+      "id": "624dda67-4cc6-4ac0-9f62-01250b7424f1",
+      "name": "VK: поиск в диалогах"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/{{ $json.session_name }}/start",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "webhook_url",
+              "value": "={{ $json.webhook_url }}"
+            },
+            {
+              "name": "watch_walls",
+              "value": "=[{{ $json.owner_id }}]"
+            },
+            {
+              "name": "wall_posts_count",
+              "value": "10"
+            },
+            {
+              "name": "poll_interval",
+              "value": "30"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        832
+      ],
+      "id": "4b68490b-c42f-4f0c-a520-8a1aa9084ea8",
+      "name": "VK: старт мониторинга"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/{{ $json.session_name }}/stop",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        992
+      ],
+      "id": "c40214f9-30d7-4612-8b30-9c3285a5978d",
+      "name": "VK: стоп мониторинга"
+    },
+    {
+      "parameters": {
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/{{ $json.session_name }}/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        1152
+      ],
+      "id": "5ca40ef2-38c5-47cf-a7c5-b3b25203501a",
+      "name": "VK: статус мониторинга",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://217.26.24.119:3000/vk/user/{{ $json.session_name }}/wall/{{ $json.owner_id }}/posts",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "count",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        1312
+      ],
+      "id": "0fb505f6-5871-4d34-bfee-1a31c43c9458",
+      "name": "VK: посты со стены"
+    },
+    {
+      "parameters": {
+        "url": "=http://217.26.24.119:3000/vk/user/{{ $json.session_name }}/wall/{{ $json.owner_id }}/{{ $json.post_id }}/comments",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "count",
+              "value": "50"
+            },
+            {
+              "name": "sort",
+              "value": "desc"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        1472
+      ],
+      "id": "7b9f0477-32da-4ebf-b829-fdc8b9206c86",
+      "name": "VK: комментарии к посту"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "98f254b2-cbdb-477f-a47a-7890df647de5",
+              "name": "Function",
+              "value": "Listen_Status",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000001",
+              "name": "session_name",
+              "value": "Server_account_2",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000002",
+              "name": "search_query",
+              "value": "Проблемы жкх",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000003",
+              "name": "search_count",
+              "value": "20",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000004",
+              "name": "webhook_url",
+              "value": "https://example.com/webhook/vk",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000005",
+              "name": "owner_id",
+              "value": "-152111071",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000006",
+              "name": "post_id",
+              "value": "103453",
+              "type": "string"
+            },
+            {
+              "id": "a9ac2f9b-8d02-4625-ad61-f8287595ed18",
+              "name": "topic_id",
+              "value": "38998000",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -400,
+        1104
+      ],
+      "id": "c866f2c7-bf5b-45e4-8b53-d7699cb9d6fb",
+      "name": "Название вызова1"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Health",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-health"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Health"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-status"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Register",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-register"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Register"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-search"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Search"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Search_Chats",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-search-chats"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Search_Chats"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Listen_Start",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-listen-start"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Listen_Start"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Listen_Stop",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-listen-stop"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Listen_Stop"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Listen_Status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-listen-status"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Listen_Status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Wall_Posts",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-wall-posts"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Wall_Posts"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Comments",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "sw-comments"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Comments"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "ff8fdbe0-330a-4c2c-9aa5-f5e44b72375b",
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Themes",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Themes"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "078dd4a8-fc82-475a-b780-952eabf608b4",
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Theme_messages",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Theme_messages"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -96,
+        944
+      ],
+      "id": "9f64149f-5e48-4f56-8de4-3cb423a9e1f4",
+      "name": "распределение по эндпойнтам1"
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:3000/health",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        16
+      ],
+      "id": "e77583d6-8984-44e3-901e-6a30f18c12f3",
+      "name": "health1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:3000/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        176
+      ],
+      "id": "0e8bf217-22a5-4205-b568-da2849ff9058",
+      "name": "listener_status1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/clients/vk-user/auth/start",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_name",
+              "value": "={{ $json.session_name }}"
+            },
+            {
+              "name": "webhook_url",
+              "value": "={{ $json.webhook_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -224,
+        656
+      ],
+      "id": "0f9aa049-06a6-4399-adab-1e9c76362fb5",
+      "name": "Register_step-1: implicit flow get link1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5e637b00-f17c-4491-98e8-922120bc6532",
+              "name": "redirect_url",
+              "value": "https://oauth.vk.com/blank.html#access_token=vk1.a.c_w7IUdG8SICWlH1es0GnkrLQSJyFIMo69Ic2v4trt8k2S6923KhC1LTMFP8VRSvRt5iYOYX8imM1lnyFeF_qdiVGN3kJl57qqn6ymvUqAnQgJ1YL2Xz-1fgIPU2z2KELlmifNxLPvhBpWJjNAlQu9CEjlBPYK_6D1TPFEvU_ntar2kH4ir1YAfci6X3Mf_ZnX0eD1Ys2-PSCjWm5_jQ2g&expires_in=0&user_id=616589052",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        544,
+        352
+      ],
+      "id": "bc8d568b-99a2-4d54-bf25-dc166a308bda",
+      "name": "Вставить url страницы после регистрации1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/clients/vk-user/auth/complete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_name",
+              "value": "Server_account_3"
+            },
+            {
+              "name": "redirect_url",
+              "value": "={{ $json.redirect_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        352
+      ],
+      "id": "d70f7121-97cf-4dfc-a20e-5b6029ea18ce",
+      "name": "Register_step-2: implicit flow get token from url1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/clients/vk-user/auth/start",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_name",
+              "value": "Server_account"
+            },
+            {
+              "name": "webhook_url",
+              "value": "https://example.com/webhook"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        304,
+        352
+      ],
+      "id": "2e2eed93-ae1e-4bec-84ab-7673ad8296c3",
+      "name": "Register_step-1: implicit flow get link2"
+    },
+    {
+      "parameters": {
+        "content": "Кратко: токен под IP сервера + сохранение в API\n1. На своём ПК — SOCKS через сервер (окно не закрывать):\n\nssh -D 1080 -N root@ВАШ_IP\n2. В браузере — прокси SOCKS5 127.0.0.1:1080 (лучше с проксированием DNS).\n\n3. В том же браузере открыть ссылку:\n\nhttps://oauth.vk.com/authorize?client_id=2685278&scope=340178&redirect_uri=https://oauth.vk.com/blank.html&display=page&response_type=token&v=5.199\n\n\nВойти в VK → разрешить доступ.\n\n4. Скопировать полный URL из адресной строки после редиректа (https://oauth.vk.com/blank.html#access_token=...).\n\n5. На ПК — отправить его на API (подставьте хост, имя сессии и весь URL вместо ...):\n\ncurl -X POST \"http://ВАШ_IP:3000/clients/vk-user/auth/complete\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"session_name\\\":\\\"my_server\\\",\\\"redirect_url\\\":\\\"ПОЛНЫЙ_URL_ИЗ_СТРОКИ\\\",\\\"webhook_url\\\":\\\"\\\"}\"\n6. Проверка:\n\ncurl \"http://ВАШ_IP:3000/clients/vk-user\"\n(Опционально: auth/start можно не открывать — OAuth делаете вручную по ссылке из п.3.)\n\nВажно для Docker: чтобы файл vk_user_my_server.json не пропал после пересборки контейнера, храните сессии на томе или копируйте JSON на хост — иначе после docker compose up --build сессию нужно проходить снова.",
+        "height": 528,
+        "width": 704
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        992,
+        224
+      ],
+      "id": "0c4f06d4-ae11-4809-a5cd-bc6d1b0f4f36",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "url": "=http://217.26.24.119:3000/vk/user/{{ $json.session_name }}/board/{{ $json.owner_id }}/topics",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "count",
+              "value": "20"
+            },
+            {
+              "name": "offset",
+              "value": "0"
+            },
+            {
+              "name": "order",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        1648
+      ],
+      "id": "3ce7a835-4e97-49e2-a964-b44f48ae8cf8",
+      "name": "VK: топики (обсуждения) группы"
+    },
+    {
+      "parameters": {
+        "url": "=http://217.26.24.119:3000/vk/user/{{ $('Название вызова1').item.json.session_name }}/board/{{ $('Название вызова1').item.json.owner_id }}/{{ $('Название вызова1').item.json.topic_id }}/comments",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "count",
+              "value": "50"
+            },
+            {
+              "name": "offset",
+              "value": "0"
+            },
+            {
+              "name": "sort",
+              "value": "desc"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        1808
+      ],
+      "id": "130fab0c-8dd1-49fb-8c48-ad996ed9477f",
+      "name": "VK: сообщения из топиков"
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:3000/listeners/vk-user/Server_account_3/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -480,
+        688
+      ],
+      "id": "3c50e5a6-a02c-447f-9d5b-6607b7f534f0",
+      "name": "HTTP Request1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "value": "z9maAvjRPMd4O3ik",
+          "mode": "list",
+          "cachedResultName": "Группы клиента",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/z9maAvjRPMd4O3ik"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "condition": "isNotEmpty"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -688,
+        768
+      ],
+      "id": "6052ea4c-6ea5-49b9-8707-d967e1beac66",
+      "name": "Delete row(s)"
+    }
+  ],
+  "connections": {
+    "Запуск": {
+      "main": [
+        [
+          {
+            "node": "Название вызова1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Название вызова": {
+      "main": [
+        [
+          {
+            "node": "распределение по эндпойнтам",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "распределение по эндпойнтам": {
+      "main": [
+        [
+          {
+            "node": "health",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "listener_status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Register_step-1: implicit flow get link",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register_step-1: implicit flow get link": {
+      "main": [
+        [
+          {
+            "node": "Вставить url страницы после регистрации",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Вставить url страницы после регистрации": {
+      "main": [
+        [
+          {
+            "node": "Register_step-2: implicit flow get token from url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Название вызова1": {
+      "main": [
+        [
+          {
+            "node": "распределение по эндпойнтам1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "распределение по эндпойнтам1": {
+      "main": [
+        [
+          {
+            "node": "health1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "listener_status1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [],
+        [
+          {
+            "node": "VK: поиск сообществ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VK: поиск в диалогах",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VK: старт мониторинга",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VK: стоп мониторинга",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VK: статус мониторинга",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VK: посты со стены",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VK: комментарии к посту",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VK: топики (обсуждения) группы",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VK: сообщения из топиков",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register_step-1: implicit flow get link1": {
+      "main": [
+        []
+      ]
+    },
+    "Вставить url страницы после регистрации1": {
+      "main": [
+        [
+          {
+            "node": "Register_step-2: implicit flow get token from url1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register_step-1: implicit flow get link2": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

@@ -1,0 +1,674 @@
+{
+  "name": "Добавление по ссылке ТГ (новый prod API)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "tg-resolve-score",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -304,
+        -32
+      ],
+      "id": "c00070b2-28d2-4a30-a8ab-8e033f009289",
+      "name": "Webhook",
+      "webhookId": "c4393189-dc24-4618-a7eb-1fb8ec57b057"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/add-channel-by-link",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_name",
+              "value": "/app/sessions/Lidochka_main"
+            },
+            {
+              "name": "link",
+              "value": "={{ $json.body.target }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -96,
+        -32
+      ],
+      "id": "79264701-2276-4a73-ab1f-ea626081f53f",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a2e6dd09-80cd-4de7-9d89-ecc15fe056a1",
+              "leftValue": "={{ $json.join_request }}",
+              "rightValue": "closed",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        128,
+        -32
+      ],
+      "id": "9b6a2d54-2a2b-4756-b4af-de7afec898ec",
+      "name": "Is closed"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        832,
+        96
+      ],
+      "id": "e011a59a-1da5-48ac-a7b1-a3ac8dc2377f",
+      "name": "Return full"
+    },
+    {
+      "parameters": {
+        "url": "https://mokuegopasan.beget.app/webhook/tg-resolve-score",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "лидотест_поисковый1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -144,
+        -240
+      ],
+      "id": "ac0544f5-90aa-473d-9d49-dbcf3cee69b3",
+      "name": "Тестовый запуск"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"headers\": {\n      \"host\": \"mokuegopasan.beget.app\",\n      \"user-agent\": \"axios/1.13.5\",\n      \"content-length\": \"36\",\n      \"accept\": \"application/json,text/html,application/xhtml+xml,application/xml,text/*;q=0.9, image/*;q=0.8, */*;q=0.7\",\n      \"accept-encoding\": \"gzip, compress, deflate, br\",\n      \"content-type\": \"application/json\",\n      \"x-forwarded-for\": \"172.18.0.1\",\n      \"x-forwarded-host\": \"mokuegopasan.beget.app\",\n      \"x-forwarded-port\": \"443\",\n      \"x-forwarded-proto\": \"https\",\n      \"x-forwarded-server\": \"ed84361b6596\",\n      \"x-real-ip\": \"172.18.0.1\"\n    },\n    \"params\": {},\n    \"query\": {},\n    \"body\": {\n      \"target\": \"https://t.me/pravoalpha\"\n    },\n    \"webhookUrl\": \"https://mokuegopasan.beget.app/webhook/tg-resolve-score\",\n    \"executionMode\": \"production\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -304,
+        176
+      ],
+      "id": "b34d90a9-66ff-42b3-9dd3-f7880e5707a3",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -544,
+        176
+      ],
+      "id": "58f9199d-dac4-447c-8c03-5f840e5934c6",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "platform_id": "=2",
+            "external_channel_id": "={{ $json.peer_id.toString().replace('-100', '') }}",
+            "name": "={{ $json.title }}",
+            "external_url": "=https://t.me/{{ $json.username }}",
+            "metadata": "={{\n  {\n    name: $json.title,\n    username: $json.username,\n    about: $json.about,\n    participants_count: $json.participants_count,\n    scam: $json.scam,\n    score: $json.score,\n    score_breakdown: $json.score_breakdown\n  }\n}}",
+            "created_at": "={{ $now }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "platform_id",
+              "displayName": "platform_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_channel_id",
+              "displayName": "external_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "external_url",
+              "displayName": "external_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_url",
+              "displayName": "image_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "metadata",
+              "displayName": "metadata",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "linked_projects_count",
+              "displayName": "linked_projects_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "is_active",
+              "displayName": "is_active",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        608,
+        96
+      ],
+      "id": "db6794ce-b2bb-408d-8aaf-10a54cd7611f",
+      "name": "Апсертим значения в таблицу source_channels1",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "{{ $('Общие данные').item.json.telegram_message.chat_id.toString().replace('-100', '') }}",
+        "height": 208
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        256,
+        -480
+      ],
+      "id": "f8e8d50b-8675-4626-873c-dba1767d8435",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"peer_id\": -1003693224864,\n    \"title\": \"тест лидоген 3\",\n    \"username\": \"grtetlidog\",\n    \"participants_count\": 2,\n    \"depth\": 0,\n    \"source\": \"search\",\n    \"recommended_by\": null,\n    \"score\": 19,\n    \"score_breakdown\": {\n      \"relevance\": 0.75,\n      \"liveness\": 0.03981067661402026,\n      \"audience_quality\": 0.5225,\n      \"reachability\": 0.4,\n      \"geom_core\": 0.202635383022888,\n      \"depth_factor\": 1,\n      \"source_factor\": 1,\n      \"size_boost\": 1.0647508747628576\n    },\n    \"score_signals\": {\n      \"query_overlap\": 1,\n      \"query_exact_in_title\": false,\n      \"query_exact_in_about\": false,\n      \"freshness\": 0.9999966138697884,\n      \"cadence_posts_30d\": 3,\n      \"engagement_proxy\": 0.25,\n      \"reactions_per_view\": 0,\n      \"comments_proxy\": 0,\n      \"online_ratio_pct\": 0,\n      \"views_cv\": 0,\n      \"reaction_dominant_posts_frac\": 0,\n      \"bots_ratio_sample\": null,\n      \"members_count\": 2,\n      \"posts_scanned\": 3,\n      \"depth\": 0,\n      \"source\": \"search\",\n      \"recent_posts_limit\": 30,\n      \"members_sample_limit\": 200,\n      \"dead_days_threshold\": 180,\n      \"days_since_last_post\": 0.0002031678126917945\n    },\n    \"score_hard_flags\": {\n      \"scam\": false,\n      \"fake\": false,\n      \"dead\": false,\n      \"tiny_audience\": false\n    },\n    \"access_hash\": -4054675844621925000,\n    \"verified\": false,\n    \"scam\": false,\n    \"fake\": false,\n    \"restricted\": false,\n    \"megagroup\": false,\n    \"gigagroup\": false,\n    \"broadcast\": true,\n    \"forum\": false,\n    \"signatures\": false,\n    \"noforwards\": false,\n    \"slowmode_enabled\": false,\n    \"creator\": false,\n    \"has_link\": true,\n    \"has_geo\": false,\n    \"join_to_send\": false,\n    \"join_request\": false,\n    \"created_at\": \"2026-05-24T10:11:54+00:00\",\n    \"restriction_reason\": null,\n    \"about\": \"\",\n    \"online_count\": 0,\n    \"admins_count\": null,\n    \"kicked_count\": null,\n    \"banned_count\": null,\n    \"linked_chat_id\": 3830692648,\n    \"slowmode_seconds\": null,\n    \"pinned_msg_id\": null,\n    \"read_inbox_max_id\": 1,\n    \"source_peer_id\": -1003693224864,\n    \"listen_chat_id\": -1003830692648,\n    \"entity_kind\": \"channel\",\n    \"listen_mode\": \"discussion\",\n    \"source_joined\": true,\n    \"listen_joined\": true,\n    \"has_listen_access\": true,\n    \"access_note\": \"участник\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -96,
+        176
+      ],
+      "id": "6caf9590-8b91-405a-b621-d674f028b310",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "eb2350b9-f350-4db6-804c-cc7b8856dd44",
+              "leftValue": "={{ $json.entity_kind }}",
+              "rightValue": "channel",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        336,
+        -16
+      ],
+      "id": "273ef44d-5041-47c0-a2c9-9311c787d664",
+      "name": "Is channel"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        832,
+        -128
+      ],
+      "id": "4f382105-0339-4e55-b7e6-6f473b18265c",
+      "name": "Return full1"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "platform_id": "=2",
+            "external_channel_id": "={{ $json.listen_chat_id.toString().replace('-100', '') }}",
+            "name": "={{ $json.title }}",
+            "external_url": "=https://t.me/{{ $json.username }}",
+            "metadata": "={{\n  {\n    name: $json.title,\n    username: $json.username,\n    about: $json.about,\n    participants_count: $json.participants_count,\n    scam: $json.scam,\n    score: $json.score,\n    score_breakdown: $json.score_breakdown\n  }\n}}",
+            "created_at": "={{ $now }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "platform_id",
+              "displayName": "platform_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_channel_id",
+              "displayName": "external_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "external_url",
+              "displayName": "external_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_url",
+              "displayName": "image_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "metadata",
+              "displayName": "metadata",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "linked_projects_count",
+              "displayName": "linked_projects_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "is_active",
+              "displayName": "is_active",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        608,
+        -128
+      ],
+      "id": "9c978ea7-5d3d-4433-81e3-d7f3263b40df",
+      "name": "Апсертим каналы",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is closed": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Is channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Is closed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Апсертим значения в таблицу source_channels1": {
+      "main": [
+        [
+          {
+            "node": "Return full",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Is closed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is channel": {
+      "main": [
+        [
+          {
+            "node": "Апсертим каналы",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Апсертим значения в таблицу source_channels1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Апсертим каналы": {
+      "main": [
+        [
+          {
+            "node": "Return full1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

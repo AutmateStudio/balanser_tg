@@ -1,0 +1,289 @@
+{
+  "name": "Chron-собрать данные по промптам и определить направления",
+  "nodes": [
+    {
+      "parameters": {
+        "model": "z-ai/glm-4.7-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        384,
+        192
+      ],
+      "id": "bf7946d7-673f-4244-92fe-cf048461070f",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "hwaDdGPn5HFuYp7N",
+          "name": "Лидоген ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -288,
+        0
+      ],
+      "id": "90926ee8-5175-4df8-b69c-e974ce3fe789",
+      "name": "Раз в неделю"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "monitoring_projects",
+          "mode": "list",
+          "cachedResultName": "monitoring_projects"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "status",
+              "value": "active"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -80,
+        0
+      ],
+      "id": "6690d4ef-bf4a-4395-b4fc-8be9f3befc98",
+      "name": "Получаем промпты проектов",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        128,
+        0
+      ],
+      "id": "45fbe24a-a79a-4203-a867-b566cc83a9df",
+      "name": "цикл"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=<raw_prompts>\n{{ $json.lead_search_prompt }}\n</raw_prompts>",
+        "options": {
+          "systemMessage": "=# Роль\nТы — точный бизнес-аналитик. Твоя специализация — обратный инжиниринг: ты умеешь по запросам на поиск лидов безошибочно определять, в какой сфере бизнеса работает сам автор запроса.\n\n# Задача\nПроанализировать один промпт пользователя, предназначенный для поиска лидов, и определить, **в каких сферах деятельности работает сама компания** (автор промпта), какие услуги или продукты она предоставляет.\n\n# Инструкции по анализу\n1. Внимательно изучи текст промпта пользователя.\n2. Ответь на вопрос: «Что именно продает или предлагает автор этого текста, раз он ищет таких лидов?».\n3. Сформулируй сферы бизнеса, услуги или направления деятельности компании-автора (например: \"Корпоративное право\", \"Юридический консалтинг\", \"Арбитражное представительство\").\n4. КРИТИЧЕСКОЕ ПРАВИЛО: СТРОГО ЗАПРЕЩЕНО выводить целевую аудиторию. Не выводи должности (\"Собственники бизнеса\", \"Руководители\") и не выводи портрет клиента (\"Компании, нуждающиеся во взыскании долга\"). Выводи ТОЛЬКО ниши/услуги самой компании.\n5. Не придумывай лишнего: указывай только те сферы, которые явно следуют из текста.\n\n# КРИТИЧЕСКИЕ ТРЕБОВАНИЯ К ФОРМАТУ ВЫВОДА\nТвой финальный ответ должен состоять ИСКЛЮЧИТЕЛЬНО из строк простого текста (по одной строке на каждое выявленное направление бизнеса компании). Любые отклонения приведут к фатальному сбою системы.\n\nОбязательно сформируй минимум 5 направлений.\n\nСТРОГИЕ ПРАВИЛА ВЫВОДА:\n- ОБЯЗАТЕЛЬНО НА РУССКОМ ЯЗЫКЕ\n- БЕЗ цифр, буллитов, тире, звездочек или любых спецсимволов в начале строки.\n- БЕЗ Markdown-разметки (запрещено использовать **, #, ` и прочее).\n- БЕЗ вводных слов, пояснений и заключений (строго запрещено писать \"Сферы деятельности компании:\", \"Готово\" и т.д.).\n- БЕЗ тегов и форматов JSON/XML.\n- Каждая строка — это строго одна сфера деятельности или услуга.\n- Разделитель строк — строго один перенос строки (\\n)."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        384,
+        16
+      ],
+      "id": "091f39c9-1767-4765-96fe-0f94c60071c7",
+      "name": "Формируем направления"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем первый item (или обрабатываем все items, если их несколько)\nconst inputItems = $input.all(); // или $items()? В n8n v1+ используется $input.all()\n// Но в ноде Code есть входной параметр \"items\" (массив)\n// По документации: в ноде \"Code\" (Node.js) входные данные доступны как переменная `items`. \n// В текущей версии n8n (1.x) в ноде Code можно использовать `$input.item.json` для одного item\n// Но для надежности: если это код в стандартной ноде \"Code\", то доступны `$input`, `$json`, `items`.\n\n// Лучше использовать: `const items = $input.all();` получим массив всех входных items.\n// Далее обработаем каждый item, но у нас обычно один item.\n\nlet resultItems = [];\n\nfor (const item of $input.all()) {\n    const outputString = item.json.output; // предполагаем, что поле называется output\n    if (typeof outputString === 'string') {\n        const lines = outputString.split('\\n');\n        for (const line of lines) {\n            // Опционально: trim и пропуск пустых строк\n            const trimmedLine = line.trim();\n            if (trimmedLine !== \"\") {\n                resultItems.push({ json: { line: trimmedLine } });\n            } else {\n                // Если хотим сохранить пустые строки, можно добавить и их\n                // resultItems.push({ json: { line: line } });\n            }\n        }\n    }\n}\n\nreturn resultItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        16
+      ],
+      "id": "1edd927e-3359-4506-bd4b-917fa56929bd",
+      "name": "Разбираем на строки",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "line"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        960,
+        16
+      ],
+      "id": "df8ef8b2-3b0d-4176-b165-6fe4abbdcb08",
+      "name": "Собираем в объект",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "t3x1YhyaMXqAKDla",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/t3x1YhyaMXqAKDla",
+          "cachedResultName": "Поиск по направлениям общий"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "line": "={{ $json.line }}"
+          },
+          "matchingColumns": [
+            "line"
+          ],
+          "schema": [
+            {
+              "id": "line",
+              "displayName": "line",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1152,
+        16
+      ],
+      "id": "50eafeae-b185-4117-8a5e-3aff260d1e94",
+      "name": "Call 'Поиск по направлениям общий'",
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Формируем направления",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Раз в неделю": {
+      "main": [
+        [
+          {
+            "node": "Получаем промпты проектов",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем промпты проектов": {
+      "main": [
+        [
+          {
+            "node": "цикл",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "цикл": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Формируем направления",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Формируем направления": {
+      "main": [
+        [
+          {
+            "node": "Разбираем на строки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Разбираем на строки": {
+      "main": [
+        [
+          {
+            "node": "Собираем в объект",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Собираем в объект": {
+      "main": [
+        []
+      ]
+    },
+    "Call 'Поиск по направлениям общий'": {
+      "main": [
+        [
+          {
+            "node": "Формируем направления",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

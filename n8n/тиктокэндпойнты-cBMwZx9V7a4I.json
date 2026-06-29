@@ -1,0 +1,2106 @@
+{
+  "name": "ТикТокЭндпойнты",
+  "nodes": [
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Health",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-5a8a-40e3-b616-501dd8d07feb"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Health"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "8f41feee-df2d-4b10-bc04-6dc006c94f88",
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "CreateSession",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CreateSession"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "82ac6c8d-6127-4a29-b8c8-ab09a1867668",
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Search"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -416,
+        32
+      ],
+      "id": "0782c3d5-8ed4-434f-b241-9fe45d4523b8",
+      "name": "Switch",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8e92bf20-b8d1-4551-a5cb-66b459295709",
+              "name": "Function",
+              "value": "Search",
+              "type": "string"
+            },
+            {
+              "id": "5cb2d8ec-ea4b-42b8-8fdb-3a409afa7d1b",
+              "name": "ms_token",
+              "value": "NUeNfly7kAVKEi6on8IfhxdrE2EkogifCyyZV0ChiIxv0P0BE9Psa4DiaSQYSw2xyihl3iSH9f8ws18h0caGND3fftV1MRf9zZUi2QsgC_GAJ6ufbZt0eNMYDmBEWJg72Kjxl6UvSUaSms8L9EwFii4SeA==",
+              "type": "string"
+            },
+            {
+              "id": "2d446b28-3d05-4df2-a50a-e238307b9a31",
+              "name": "webhook_url",
+              "value": "https://mokuegopasan.beget.app/webhook/tiktoktest",
+              "type": "string"
+            },
+            {
+              "id": "299c6eed-20fb-4250-9ab5-93f00d149207",
+              "name": "search_query",
+              "value": "Стройка",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -624,
+        48
+      ],
+      "id": "3b9d8e0b-e5d9-43f8-bf44-c17905b4059c",
+      "name": "Настройки функции",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:2000/health",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -112,
+        -304
+      ],
+      "id": "cc6a3132-4710-4908-a777-359cf9dfd892",
+      "name": "Health",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:2000/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "ms_token",
+              "value": "={{ $json.ms_token }}"
+            },
+            {
+              "name": "webhook_url",
+              "value": "={{ $json.webhook_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -112,
+        -128
+      ],
+      "id": "88c82384-ee13-455b-a56b-d863297d3745",
+      "name": "Создать сессию ТикТок",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:2000/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "Стройка"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -112,
+        32
+      ],
+      "id": "4b4cd358-7743-4f57-a8b1-baf182506383",
+      "name": "Поиск каналов в ТикТок",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2720,
+        1936
+      ],
+      "id": "c116f988-d8d9-4c58-91fe-044ddaa260e2",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.216.75:2000/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "ms_token",
+              "value": "={{ $json.ms_token }}"
+            },
+            {
+              "name": "webhook_url",
+              "value": "={{ $json.webhook_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        480
+      ],
+      "id": "6ea0192b-ab1c-41bb-843e-a167ea0ec7a8",
+      "name": "Создать сессию",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        640
+      ],
+      "id": "1b975eb4-2b35-4918-ad7a-fa768688d786",
+      "name": "Список сессий",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://159.194.216.75:2000/sessions/{{ $json.session_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        800
+      ],
+      "id": "6f4233fb-514c-4437-8ca3-de57f88967a2",
+      "name": "Деактивировать сессию",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.search_query }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        960
+      ],
+      "id": "78c222a0-08eb-4df3-9f9a-2283d4205fd4",
+      "name": "Поиск каналов",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.216.75:2000/listeners",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_id\": {{ $json.session_id }},\n  \"channels\": {{ JSON.stringify($json.channels.split(',')) }},\n  \"poll_interval\": {{ $json.poll_interval }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        1120
+      ],
+      "id": "9952c60c-44d4-4c21-a7c6-4b361af75335",
+      "name": "Создать слушатель",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/listeners",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        1280
+      ],
+      "id": "60aca808-cab3-4431-870a-69500f2760de",
+      "name": "Список слушателей",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "=http://159.194.216.75:2000/listeners/{{ $json.listener_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        1440
+      ],
+      "id": "30d64103-c024-4abb-b597-f903c95f1295",
+      "name": "Получить слушатель",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://159.194.216.75:2000/listeners/{{ $json.listener_id }}/channels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channels\": {{ JSON.stringify($json.channels.split(',')) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        1600
+      ],
+      "id": "c90b5b05-4046-4c5a-ba65-0c4d35d06d0a",
+      "name": "Обновить каналы слушателя",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://159.194.216.75:2000/listeners/{{ $json.listener_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        1760
+      ],
+      "id": "3d927023-b148-4e20-8484-cbc4a3e0a1e5",
+      "name": "Деактивировать слушатель",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8e92bf20-b8d1-4551-a5cb-66b459295709",
+              "name": "Function",
+              "value": "ListListeners",
+              "type": "string"
+            },
+            {
+              "id": "5cb2d8ec-ea4b-42b8-8fdb-3a409afa7d1b",
+              "name": "ms_token",
+              "value": "NUeNfly7kAVKEi6on8IfhxdrE2EkogifCyyZV0ChiIxv0P0BE9Psa4DiaSQYSw2xyihl3iSH9f8ws18h0caGND3fftV1MRf9zZUi2QsgC_GAJ6ufbZt0eNMYDmBEWJg72Kjxl6UvSUaSms8L9EwFii4SeA==",
+              "type": "string"
+            },
+            {
+              "id": "2d446b28-3d05-4df2-a50a-e238307b9a31",
+              "name": "webhook_url",
+              "value": "https://mokuegopasan.beget.app/webhook/tiktoktest",
+              "type": "string"
+            },
+            {
+              "id": "299c6eed-20fb-4250-9ab5-93f00d149207",
+              "name": "search_query",
+              "value": "Стройка",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000001",
+              "name": "session_id",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000002",
+              "name": "listener_id",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000003",
+              "name": "channels",
+              "value": "@tiktok,@funny_videos",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000004",
+              "name": "poll_interval",
+              "value": "300",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        208,
+        1136
+      ],
+      "id": "13672c4e-e673-44d7-b6d1-b4672b8249ea",
+      "name": "Настройки функции1",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Health",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0001"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Health"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "CreateSession",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0002"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CreateSession"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "ListSessions",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0003"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ListSessions"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "DeleteSession",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0004"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DeleteSession"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0005"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Search"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "CreateListener",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0006"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CreateListener"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "ListListeners",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0007"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ListListeners"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "GetListener",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0008"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "GetListener"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "UpdateListenerChannels",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0009"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "UpdateListenerChannels"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "DeleteListener",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0010"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DeleteListener"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        1008
+      ],
+      "id": "fdd7abc5-9c83-4299-9d9b-0b46f6ee696f",
+      "name": "Switch1",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/health",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        320
+      ],
+      "id": "c0757f54-f3f6-4ec2-be4a-cf6e4f156da4",
+      "name": "Health1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.216.75:2000/watches",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_id\": {{ $json.session_id }},\n  \"query\": \"{{ $json.watch_query }}\",\n  \"video_limit\": {{ $json.watch_video_limit }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        2720
+      ],
+      "id": "ec55d27a-dfeb-45e6-8bab-bdf2b4a4d7e5",
+      "name": "Создать watch",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/watches",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        2880
+      ],
+      "id": "cbec2778-c374-4c93-8ad4-a81e257cede2",
+      "name": "Список watches",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://159.194.216.75:2000/watches/{{ $json.watch_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        3040
+      ],
+      "id": "f1f70762-fb99-4df9-b4fc-8f8864c3352d",
+      "name": "Деактивировать watch",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://159.194.216.75:2000/watches/{{ $json.watch_id }}/videos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "offset",
+              "value": "0"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        3200
+      ],
+      "id": "efdb9577-e1fd-4fa2-b2b4-d9ca878c289c",
+      "name": "Видео по watch",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.216.75:2000/watches/refresh",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "watch_id",
+              "value": "={{ $json.watch_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        3360
+      ],
+      "id": "2756029e-139b-4bdd-805c-b47fa90495df",
+      "name": "Refresh watches",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.216.75:2000/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "ms_token",
+              "value": "={{ $json.ms_token }}"
+            },
+            {
+              "name": "webhook_url",
+              "value": "={{ $json.webhook_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        1280
+      ],
+      "id": "7f7bcef8-aa64-4196-9815-568c443d7d05",
+      "name": "Создать сессию1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        1440
+      ],
+      "id": "45a19447-1df2-4e46-a141-f5a0532e041e",
+      "name": "Список сессий1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://159.194.216.75:2000/sessions/{{ $json.session_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        1600
+      ],
+      "id": "fcb7cbe5-3d27-49e5-b133-72ff3ba78570",
+      "name": "Деактивировать сессию1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.search_query }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        1760
+      ],
+      "id": "b6cd6f24-3503-4fb5-b525-e94df1b7560d",
+      "name": "Поиск каналов1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.216.75:2000/listeners",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_id\": {{ $json.session_id }},\n  \"channels\": {{ JSON.stringify($json.channels.split(',')) }},\n  \"poll_interval\": {{ $json.poll_interval }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        1920
+      ],
+      "id": "65ee7c95-7d00-4fb2-85bf-a6f8e762ee71",
+      "name": "Создать слушатель1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/listeners",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        2080
+      ],
+      "id": "3a987c23-d66f-49ab-ad37-731cc64a2cfc",
+      "name": "Список слушателей1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://159.194.216.75:2000/listeners/{{ $json.listener_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        2240
+      ],
+      "id": "6f20787f-0e16-49fc-a60f-8e5214af37da",
+      "name": "Получить слушатель1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://159.194.216.75:2000/listeners/{{ $json.listener_id }}/channels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channels\": {{ JSON.stringify($json.channels.split(',')) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        2400
+      ],
+      "id": "2c4a9ab2-4991-4e50-9df4-01d6caaf6c5c",
+      "name": "Обновить каналы слушателя1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://159.194.216.75:2000/listeners/{{ $json.listener_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        2560
+      ],
+      "id": "a111b6d0-cf21-4bbe-94de-bcf4d7baeaf4",
+      "name": "Деактивировать слушатель1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/health",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1824,
+        1120
+      ],
+      "id": "be1a8587-55b7-4c23-bff0-b9f180a39a12",
+      "name": "Health2",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8e92bf20-b8d1-4551-a5cb-66b459295709",
+              "name": "Function",
+              "value": "Search",
+              "type": "string"
+            },
+            {
+              "id": "5cb2d8ec-ea4b-42b8-8fdb-3a409afa7d1b",
+              "name": "ms_token",
+              "value": "zjQZfev6QafOPOwTNpvO9CS5qdhC14Pr4r36r2BARJ3zO7dlCoOMo1ShRCBEXrHmuO1UfTpj5Niy6P0fBnZuPV6i6sCIbFHRKvewvfZpsAsZx4SkZ1eoJdgK6-xNuyh6Eyhz99pLITsGGyQh0sLXzqU=",
+              "type": "string"
+            },
+            {
+              "id": "2d446b28-3d05-4df2-a50a-e238307b9a31",
+              "name": "webhook_url",
+              "value": "https://mokuegopasan.beget.app/webhook/tiktoktest",
+              "type": "string"
+            },
+            {
+              "id": "299c6eed-20fb-4250-9ab5-93f00d149207",
+              "name": "search_query",
+              "value": "Стройка",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000001",
+              "name": "session_id",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000002",
+              "name": "listener_id",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000003",
+              "name": "channels",
+              "value": "@tiktok,@funny_videos",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000004",
+              "name": "poll_interval",
+              "value": "120",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-w001-0001-0001-100000000001",
+              "name": "watch_query",
+              "value": "Стройка",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-w001-0001-0001-100000000002",
+              "name": "watch_video_limit",
+              "value": "50",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-w001-0001-0001-100000000003",
+              "name": "watch_id",
+              "value": "1",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2512,
+        1936
+      ],
+      "id": "44043126-8a11-45ad-9ec7-5f778cfe78e6",
+      "name": "Настройки функции2"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Health",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0001"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Health"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "CreateSession",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0002"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CreateSession"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "ListSessions",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0003"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ListSessions"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "DeleteSession",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0004"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DeleteSession"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "Search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0005"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Search"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "CreateListener",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0006"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CreateListener"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "ListListeners",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0007"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ListListeners"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "GetListener",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0008"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "GetListener"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "UpdateListenerChannels",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0009"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "UpdateListenerChannels"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "DeleteListener",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0010"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DeleteListener"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "CreateWatch",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0011"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CreateWatch"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "ListWatches",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0012"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ListWatches"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "DeleteWatch",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0013"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DeleteWatch"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "WatchVideos",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0014"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "WatchVideos"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Function }}",
+                    "rightValue": "RefreshWatches",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2769c4-0015"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "RefreshWatches"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -2320,
+        1728
+      ],
+      "id": "2b6cfe16-2c12-4500-abcc-ba6512df8320",
+      "name": "Switch2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.216.75:2000/watches",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_id",
+              "value": "1"
+            },
+            {
+              "name": "query",
+              "value": "Стройка"
+            },
+            {
+              "name": "video_limit",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1424,
+        3120
+      ],
+      "id": "c3130183-15cb-40f0-9393-91975683442f",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.216.75:2000/watches/refresh",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1424,
+        2944
+      ],
+      "id": "2386a4e4-4d79-4b5b-9359-e8676848360a",
+      "name": "HTTP Request1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/search/users",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "Стройка"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2576,
+        2304
+      ],
+      "id": "fcaac69c-0f96-43c1-9f5b-875713c5c169",
+      "name": "HTTP Request2",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "Стройка"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1248,
+        2288
+      ],
+      "id": "d2d3bb30-3b03-4416-9afa-cebd594ec3ca",
+      "name": "TikTok Search Authors (GET /search)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://159.194.216.75:2000/search/users",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "Стройка"
+            },
+            {
+              "name": "count",
+              "value": "10"
+            },
+            {
+              "name": "max_retries",
+              "value": "3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1248,
+        2496
+      ],
+      "id": "909d57bd-08fc-4ab0-bff5-de0a26ce2cbd",
+      "name": "TikTok Search Users (GET /search/users)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "G8YKnWZHBYgE0MZ0",
+          "name": "TikTokCreds"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Настройки функции": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Health",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Создать сессию ТикТок",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Поиск каналов в ТикТок",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Настройки функции2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Настройки функции1": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Health1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Создать сессию",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Список сессий",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Деактивировать сессию",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Поиск каналов",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Создать слушатель",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Список слушателей",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Получить слушатель",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Обновить каналы слушателя",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Деактивировать слушатель",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Настройки функции2": {
+      "main": [
+        [
+          {
+            "node": "Switch2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch2": {
+      "main": [
+        [
+          {
+            "node": "Health2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Создать сессию1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Список сессий1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Деактивировать сессию1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Поиск каналов1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Создать слушатель1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Список слушателей1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Получить слушатель1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Обновить каналы слушателя1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Деактивировать слушатель1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Создать watch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Список watches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Деактивировать watch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Видео по watch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refresh watches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

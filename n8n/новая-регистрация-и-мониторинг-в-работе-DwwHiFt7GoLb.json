@@ -1,0 +1,375 @@
+{
+  "name": "Новая регистрация и мониторинг (в работе)",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "Client"
+            },
+            {
+              "name": "Action"
+            },
+            {
+              "name": "Wall"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1040,
+        144
+      ],
+      "id": "cf95ef2c-68e1-4f21-91e5-7aec3764f379",
+      "name": "Получаем параметры"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "3kG2vmGLTHN9ACXs",
+          "mode": "list",
+          "cachedResultName": "Клиент->Вебхук",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/3kG2vmGLTHN9ACXs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Client",
+              "keyValue": "={{ $json.Client }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -816,
+        144
+      ],
+      "id": "68249fbe-a4b9-4673-8742-ecb3db5bb6a6",
+      "name": "Получаем вебхук клиента"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "z9maAvjRPMd4O3ik",
+          "mode": "list",
+          "cachedResultName": "Группы клиента",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/z9maAvjRPMd4O3ik"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Client_id",
+              "keyValue": "={{ $('Получаем параметры').item.json.Client }}"
+            },
+            {
+              "keyName": "Active",
+              "condition": "isTrue"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -608,
+        144
+      ],
+      "id": "a81d4d58-1666-4fd9-b16a-eec49dcf2c8a",
+      "name": "Находим активные группы"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": ""
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Получаем параметры').item.json.Action }}",
+                    "rightValue": "start",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "start"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": ""
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Получаем параметры').item.json.Action }}",
+                    "rightValue": "update_posts",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "update_posts"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": ""
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Получаем параметры').item.json.Action }}",
+                    "rightValue": "add_wall",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "add_wall"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -384,
+        128
+      ],
+      "id": "0c784704-3adb-4cb4-a307-7bbc38e2bf8e",
+      "name": "Выбираем действие"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst walls = items.map(item => {\n  const g = parseInt(item.json.Group);\n  return g > 0 ? -g : g;\n});\nconst webhook = $('Получаем вебхук клиента').first().json.Webhook;\nconst client = $('Получаем параметры').first().json.Client;\n\nreturn [{\n  json: {\n    client,\n    webhook_url: webhook,\n    watch_walls: walls,\n    wall_posts_count: 10,\n    poll_interval: 30\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        -64
+      ],
+      "id": "9a49df25-bb28-4101-9075-3878755d6f7c",
+      "name": "Собираем все стены"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/{{ $json.client }}/start",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ webhook_url: $json.webhook_url, watch_walls: $json.watch_walls, wall_posts_count: $json.wall_posts_count, poll_interval: $json.poll_interval }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        64,
+        -64
+      ],
+      "id": "7cb4f345-e7eb-456b-b209-e1a72ba06292",
+      "name": "Запускаем мониторинг"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -160,
+        144
+      ],
+      "id": "68d591b6-fb30-4140-8883-8d062e054977",
+      "name": "По каждой группе"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const g = parseInt($json.Group);\nconst owner_id = g > 0 ? -g : g;\nreturn { json: { owner_id, count: 20 } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        160
+      ],
+      "id": "94d3ae81-f980-4624-900e-090923701180",
+      "name": "Готовим owner_id"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/{{ $('Получаем параметры').first().json.Client }}/comments/add",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"owner_id\": {{ $json.owner_id }},\n  \"count\": {{ $json.count }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        288,
+        160
+      ],
+      "id": "44a8634f-a999-4bbe-baf7-16b7ff9329b2",
+      "name": "Обновляем посты группы"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/{{ $('Получаем параметры').first().json.Client }}/comments/add",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"owner_id\": {{ parseInt($('Получаем параметры').first().json.Wall) > 0 ? -parseInt($('Получаем параметры').first().json.Wall) : parseInt($('Получаем параметры').first().json.Wall) }},\n  \"count\": 20\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -160,
+        352
+      ],
+      "id": "e5a620cc-ec22-4195-8eef-8e51f210f602",
+      "name": "Добавляем стену"
+    }
+  ],
+  "connections": {
+    "Получаем параметры": {
+      "main": [
+        [
+          {
+            "node": "Получаем вебхук клиента",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем вебхук клиента": {
+      "main": [
+        [
+          {
+            "node": "Находим активные группы",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Находим активные группы": {
+      "main": [
+        [
+          {
+            "node": "Выбираем действие",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Выбираем действие": {
+      "main": [
+        [
+          {
+            "node": "Собираем все стены",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "По каждой группе",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Добавляем стену",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Собираем все стены": {
+      "main": [
+        [
+          {
+            "node": "Запускаем мониторинг",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "По каждой группе": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Готовим owner_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Готовим owner_id": {
+      "main": [
+        [
+          {
+            "node": "Обновляем посты группы",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Обновляем посты группы": {
+      "main": [
+        [
+          {
+            "node": "По каждой группе",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

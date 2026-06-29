@@ -1,0 +1,29 @@
+{
+  "name": "Вебхук принимаем изменения в message_ai_screening",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ai-runs-reciever",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "c00abed2-e768-446b-9bff-a8082a924eaa",
+      "name": "Webhook",
+      "webhookId": "a37e87ba-fbd9-4856-aac6-a850996c3b35"
+    }
+  ],
+  "connections": {},
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

@@ -1,0 +1,131 @@
+{
+  "name": "TikTok_entrypoint",
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "294d149a-dc8c-4512-8501-5b0175701e30",
+              "name": "source_channel_id",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "8fa9b264-08f2-4e0f-8134-54d0c13aeb41",
+              "name": "external_message_id",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "50a217bc-c732-4acf-9a4d-16dca31f5a47",
+              "name": "published_at",
+              "value": "",
+              "type": "object"
+            },
+            {
+              "id": "3417a930-2952-4afb-a621-d9601f4a8bb6",
+              "name": "ingested_at",
+              "value": "",
+              "type": "object"
+            },
+            {
+              "id": "325ad23e-8ec2-4ddd-a497-90d71cae2636",
+              "name": "edited_at",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "841e8dcb-ab56-42f5-94aa-0402149db767",
+              "name": "deleted_at",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "1d13310d-6a98-476a-bfb3-9152e16c70de",
+              "name": "message_text",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c72d5805-b380-48ec-840f-ecb523f24e8c",
+              "name": "message_url",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "08e48149-9ddd-4fd2-a6c5-f7f565f2c9f2",
+              "name": "raw_message_payload",
+              "value": "",
+              "type": "object"
+            },
+            {
+              "id": "2bdc5f36-4d2d-45fd-b36d-fe6d5a0368ed",
+              "name": "sender_external_id",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "081cd079-e75d-4e0f-97b0-21b74c5acc43",
+              "name": "created_at",
+              "value": "",
+              "type": "object"
+            },
+            {
+              "id": "b338d2ff-9b1b-4d3a-9239-71caf36f2f43",
+              "name": "updated_at",
+              "value": "",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        64,
+        0
+      ],
+      "id": "3eccebd4-957a-4e45-a71c-18beb00b542e",
+      "name": "source_messages"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "TikTok-entrypoint",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -144,
+        0
+      ],
+      "id": "cb2c1b83-7a8d-43d5-888f-be8aafc31362",
+      "name": "TikTok_entrypoint",
+      "webhookId": "ab493401-3385-4afc-aa4a-9e2b1beed736"
+    }
+  ],
+  "connections": {
+    "TikTok_entrypoint": {
+      "main": [
+        [
+          {
+            "node": "source_messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

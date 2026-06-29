@@ -1,0 +1,1434 @@
+{
+  "name": "Новый ТГ парсер эндпойнты (новый prod API)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "0ca3ce53-ade8-44b2-a5bf-929d225fa3f5",
+      "name": "Старт вручную",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        1728
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a00000000",
+              "name": "endpoint",
+              "value": "health",
+              "type": "string"
+            },
+            {
+              "id": "a00000001",
+              "name": "baseUrl",
+              "value": "https://lidogen-balancer-tg-prod.web.oboyma.ai",
+              "type": "string"
+            },
+            {
+              "id": "a00000002",
+              "name": "apiKey",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "a00000003",
+              "name": "sessionName",
+              "value": "Client1",
+              "type": "string"
+            },
+            {
+              "id": "a00000004",
+              "name": "newSessionName",
+              "value": "Client3",
+              "type": "string"
+            },
+            {
+              "id": "a00000005",
+              "name": "sessionList",
+              "value": "Client1,Client2",
+              "type": "string"
+            },
+            {
+              "id": "a00000006",
+              "name": "channels",
+              "value": "@telegram,@durov",
+              "type": "string"
+            },
+            {
+              "id": "a00000007",
+              "name": "webhookUrl",
+              "value": "https://webhook.site/ЗАМЕНИ-НА-СВОЙ-UUID",
+              "type": "string"
+            },
+            {
+              "id": "a00000008",
+              "name": "parserId",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "a00000009",
+              "name": "qrSessionId",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "a00000010",
+              "name": "query",
+              "value": "крипта инвестиции",
+              "type": "string"
+            },
+            {
+              "id": "a00000011",
+              "name": "link",
+              "value": "https://t.me/durov",
+              "type": "string"
+            },
+            {
+              "id": "a00000012",
+              "name": "displayName",
+              "value": "Основной аккаунт",
+              "type": "string"
+            },
+            {
+              "id": "a00000013",
+              "name": "description",
+              "value": "тестовое описание",
+              "type": "string"
+            },
+            {
+              "id": "a00000014",
+              "name": "chatId",
+              "value": 123456789,
+              "type": "number"
+            },
+            {
+              "id": "a00000015",
+              "name": "messageText",
+              "value": "Привет из n8n",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6e0b1efa-7807-457c-beaf-b68ef4eeadf6",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        208,
+        1728
+      ],
+      "notes": "endpoint = какой эндпойнт вызвать (см. Switch). Остальные поля — данные для запросов. apiKey нужен только при прямом доступе на :8100."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-health",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "health",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "health"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-qr_create",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "qr_create",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qr_create"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-qr_status",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "qr_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qr_status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-qr_delete",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "qr_delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qr_delete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-discover",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "discover",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "discover"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-discover_groups",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "discover_groups",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "discover_groups"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-add_channel_by_link",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "add_channel_by_link",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add_channel_by_link"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-add_channel_by_link_file",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "add_channel_by_link_file",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add_channel_by_link_file"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-bot_send_message",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "bot_send_message",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "bot_send_message"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_start",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_start",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_start"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_list",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_list",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_list"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_status",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_stop",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_stop",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_stop"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parser_delete",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "parser_delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parser_delete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-channels_list",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "channels_list",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "channels_list"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-add_channels",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "add_channels",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add_channels"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-remove_channels",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "remove_channels",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "remove_channels"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-config_get",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "config_get",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "config_get"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-config_patch",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "config_patch",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "config_patch"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-add_session",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "add_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add_session"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-remove_session",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "remove_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "remove_session"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-accounts",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "accounts",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "accounts"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-account_detail",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "account_detail",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "account_detail"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-account_channels",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "account_channels",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "account_channels"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-account_meta",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "account_meta",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "account_meta"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-settings",
+                    "leftValue": "={{ $json.endpoint }}",
+                    "rightValue": "settings",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "settings"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "57a0af52-3b1b-44ae-a4d4-3f862808345c",
+      "name": "Switch: endpoint",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        480,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/health",
+        "options": {}
+      },
+      "id": "55dce640-c731-4c10-b1a7-3443b05a0815",
+      "name": "00 Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        -160
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/auth/qr",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.newSessionName }}\"\n}",
+        "options": {}
+      },
+      "id": "6a601c3c-aef5-4c91-a34a-7fc24af13fe5",
+      "name": "01 QR: создать сессию",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        -32
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/auth/qr/{{ $('Config').item.json.qrSessionId }}/status",
+        "options": {}
+      },
+      "id": "3c672b0f-7090-4e41-bee7-032ca0680311",
+      "name": "02 QR: статус",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        112
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/auth/qr/{{ $('Config').item.json.qrSessionId }}",
+        "options": {}
+      },
+      "id": "8bae0538-f8dc-4884-94d9-7edd50a08722",
+      "name": "03 QR: удалить",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        240
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/discover",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"query\": \"{{ $('Config').item.json.query }}\",\n  \"first_pass_limit\": 5,\n  \"similarity_depth\": 1,\n  \"include_global_search\": true,\n  \"include_groups\": false\n}",
+        "options": {}
+      },
+      "id": "7c770f94-f60d-49d8-897e-f42f3c6735cb",
+      "name": "04 Discover каналы",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        368
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/discover-groups",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"word\": \"{{ $('Config').item.json.query }}\",\n  \"limit\": 20,\n  \"depth\": 2\n}",
+        "options": {}
+      },
+      "id": "c44d7f40-6ed0-41e1-b2c1-bda91ca4b729",
+      "name": "05 Discover группы",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        496
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/add-channel-by-link",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"link\": \"{{ $('Config').item.json.link }}\"\n}",
+        "options": {}
+      },
+      "id": "5d15bb8c-edde-4a1b-b0dc-a31187e02099",
+      "name": "06 Канал по ссылке",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        624
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/add-channel-by-link-session-file",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_file\": \"{{ $('Config').item.json.sessionName }}\",\n  \"link\": \"{{ $('Config').item.json.link }}\"\n}",
+        "options": {}
+      },
+      "id": "e69ffe2a-5875-47e7-b867-33ed6e098325",
+      "name": "07 Канал по ссылке (session file)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        752
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/bot/send-message",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": {{ $('Config').item.json.chatId }},\n  \"text\": \"{{ $('Config').item.json.messageText }}\"\n}",
+        "options": {}
+      },
+      "id": "65215e8d-7eb7-4a3b-9f63-18b4485c2287",
+      "name": "08 Бот: отправить сообщение",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        880
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/start",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name_list\": {{ JSON.stringify($('Config').item.json.sessionList.split(',').map(s => s.trim())) }},\n  \"clump_name\": \"n8n-test\",\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim())) }},\n  \"webhook_url\": \"{{ $('Config').item.json.webhookUrl }}\"\n}",
+        "options": {}
+      },
+      "id": "4b854cb1-4d72-4e0a-8378-a09842d3e784",
+      "name": "09 Parser: start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        1024
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/list",
+        "options": {}
+      },
+      "id": "6caeb3b8-432b-4348-a6ae-f47f4d3cb0e7",
+      "name": "10 Parser: list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        1152
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/status/{{ $('Config').item.json.parserId }}",
+        "options": {}
+      },
+      "id": "102f6566-afcb-489b-8450-f5a74f7db839",
+      "name": "11 Parser: status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        1280
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/stop/{{ $('Config').item.json.parserId }}",
+        "options": {}
+      },
+      "id": "61e13f02-88b0-4a76-8492-d175bf2eab8e",
+      "name": "12 Parser: stop",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        1408
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}",
+        "options": {}
+      },
+      "id": "6240b949-eb6a-4dfb-86af-72b735b4bcd0",
+      "name": "13 Parser: delete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        1536
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/channels",
+        "options": {}
+      },
+      "id": "cd22db5b-9d52-4d78-ab94-b1497a4cce8a",
+      "name": "14 Channels: list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        1664
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/add-channels",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim())) }}\n}",
+        "options": {}
+      },
+      "id": "2f8caaa8-cf90-4e6d-9e2c-e3444d993e1a",
+      "name": "15 Channels: add",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        1792
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/remove-channels",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim())) }}\n}",
+        "options": {}
+      },
+      "id": "ff886453-1f41-416e-be33-a1d2c399e45e",
+      "name": "16 Channels: remove",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        1920
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/config",
+        "options": {}
+      },
+      "id": "66227e65-d897-4540-a003-3a7bd8edccf1",
+      "name": "17 Config: get",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        2064
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/config",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"max_channels_per_session\": 300,\n  \"max_reconnects\": 5,\n  \"flood_migrate_threshold_seconds\": 3600,\n  \"resolve_min_interval\": 1.5,\n  \"auto_migrate\": true\n}",
+        "options": {}
+      },
+      "id": "b5accb12-de52-49b6-9045-1ea9dc1767a5",
+      "name": "18 Config: patch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        2192
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/add-session",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.newSessionName }}\"\n}",
+        "options": {}
+      },
+      "id": "fb8228dd-59b2-42ce-ace9-61abc4a43108",
+      "name": "19 Session: add в clump",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        2320
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('Config').item.json.parserId }}/remove-session",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.newSessionName }}\"\n}",
+        "options": {}
+      },
+      "id": "b732a436-3bc6-4e72-8901-bff0a1e0b570",
+      "name": "20 Session: remove из clump",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        2448
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/accounts",
+        "options": {}
+      },
+      "id": "1a205af0-ca9a-4609-9329-219392a1110c",
+      "name": "21 Accounts: список",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        2576
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/account-detail?session_name={{ encodeURIComponent($('Config').item.json.sessionName) }}",
+        "options": {}
+      },
+      "id": "48976e69-6373-4ef0-84ab-f255db0dfe60",
+      "name": "22 Account: карточка",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        2704
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/account-channels?session_name={{ encodeURIComponent($('Config').item.json.sessionName) }}",
+        "options": {}
+      },
+      "id": "1b3e210f-96b7-428a-b14b-00ec6eee2ef1",
+      "name": "23 Account: каналы",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        2832
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/account-meta",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"parser_id\": \"{{ $('Config').item.json.parserId }}\",\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"display_name\": \"{{ $('Config').item.json.displayName }}\",\n  \"description\": \"{{ $('Config').item.json.description }}\"\n}",
+        "options": {}
+      },
+      "id": "7cf03ebc-4337-4d52-98d9-aaddc547b719",
+      "name": "24 Account: изменить meta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        2960
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/settings",
+        "options": {}
+      },
+      "id": "1b1ac39b-6e19-439e-8fa3-c3e50e7194a1",
+      "name": "25 Settings (глобальные)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        3104
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Старт вручную": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Switch: endpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: endpoint": {
+      "main": [
+        [
+          {
+            "node": "00 Health",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "01 QR: создать сессию",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "02 QR: статус",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "03 QR: удалить",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "04 Discover каналы",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "05 Discover группы",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "06 Канал по ссылке",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "07 Канал по ссылке (session file)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "08 Бот: отправить сообщение",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "09 Parser: start",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "10 Parser: list",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "11 Parser: status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "12 Parser: stop",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "13 Parser: delete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "14 Channels: list",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "15 Channels: add",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "16 Channels: remove",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "17 Config: get",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "18 Config: patch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "19 Session: add в clump",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "20 Session: remove из clump",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "21 Accounts: список",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "22 Account: карточка",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "23 Account: каналы",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "24 Account: изменить meta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "25 Settings (глобальные)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

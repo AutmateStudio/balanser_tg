@@ -1,0 +1,964 @@
+{
+  "name": "Прием комментариев под постами группы",
+  "nodes": [
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"headers\": {\n      \"host\": \"mokuegopasan.beget.app\",\n      \"user-agent\": \"Python-urllib/3.12\",\n      \"content-length\": \"468\",\n      \"accept-encoding\": \"identity\",\n      \"content-type\": \"application/json\",\n      \"x-forwarded-for\": \"217.26.24.119\",\n      \"x-forwarded-host\": \"mokuegopasan.beget.app\",\n      \"x-forwarded-port\": \"443\",\n      \"x-forwarded-proto\": \"https\",\n      \"x-forwarded-server\": \"ed84361b6596\",\n      \"x-real-ip\": \"217.26.24.119\"\n    },\n    \"params\": {},\n    \"query\": {},\n    \"body\": {\n      \"channel\": \"vk\",\n      \"source_type\": \"user_monitor\",\n      \"event_type\": \"wall_comment\",\n      \"client\": \"vk_user_Server_account_3_comments\",\n      \"owner_id\": -51632793,\n      \"post_id\": 725464,\n      \"comment_id\": 726651,\n      \"sender_id\": 1102466863,\n      \"sender_name\": \"Алексей Груздев\",\n      \"text\": \"В \\\" Дикси \\\"давно уже 120₽ за десяток\",\n      \"date\": \"2026-04-07T07:10:20\",\n      \"reply_to_user\": null,\n      \"reply_to_comment\": null,\n      \"has_media\": false,\n      \"media\": [],\n      \"likes_count\": 0\n    },\n    \"webhookUrl\": \"https://mokuegopasan.beget.app/webhook/comment-reciever\",\n    \"executionMode\": \"production\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -240,
+        160
+      ],
+      "id": "3d54510e-a700-4bcc-82fe-ed1155fe3fab",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "channel_messages",
+          "mode": "list",
+          "cachedResultName": "channel_messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "created_at": "={{ $now }}",
+            "chenal_id": "={{ $('Общие данные').item.json.channel_id }}",
+            "chenal_name": "=",
+            "message_url": "={{ $('Общие данные').item.json.link }}",
+            "message_text": "={{ $('Общие данные').item.json.text }}",
+            "message_types": "={{ $('Общие данные').item.json.message_type }}",
+            "sender_id": "={{ $('Общие данные').item.json.comment_id }}",
+            "sender_name": "=",
+            "sender_username": "={{ $('Общие данные').item.json.sender_name }}",
+            "top1_label": "={{ $json.predictions[0].label }}",
+            "top2_label": "={{ $json.predictions[1].label }}",
+            "top1_prob": "={{ $json.predictions[0].score }}",
+            "top2_prob": "={{ $json.predictions[1].score }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "chenal_id",
+              "displayName": "chenal_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "chenal_name",
+              "displayName": "chenal_name",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message_url",
+              "displayName": "message_url",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message_text",
+              "displayName": "message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message_types",
+              "displayName": "message_types",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sender_id",
+              "displayName": "sender_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sender_name",
+              "displayName": "sender_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sender_username",
+              "displayName": "sender_username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sender_phone",
+              "displayName": "sender_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "top1_label",
+              "displayName": "top1_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "top1_prob",
+              "displayName": "top1_prob",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "top2_label",
+              "displayName": "top2_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "top2_prob",
+              "displayName": "top2_prob",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        608,
+        -32
+      ],
+      "id": "4e2df81f-07aa-4e73-b8fd-2b510e2e46b4",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "nJLtOwEA1dAE4Pjt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -464,
+        160
+      ],
+      "id": "c10984d7-9c95-4e0f-9d38-bfe8dcfd0ea9",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DO $$\nBEGIN\n  EXECUTE 'DROP TABLE IF EXISTS public.channel_messages';\n\n  EXECUTE '\n    CREATE TABLE public.channel_messages (\n      id              bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n      created_at      timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\n      chenal_id       bigint NOT NULL,\n      chenal_name     text   NOT NULL,\n\n      message_url     text   NOT NULL UNIQUE,\n      message_text    text,\n      message_types   text   NOT NULL,\n\n      -- sender (может отсутствовать)\n      sender_id       bigint,\n      sender_name     text,\n      sender_username text,\n      sender_phone    text,\n\n      -- классификация (может отсутствовать)\n      top1_label      text,\n      top1_prob       double precision,\n      top2_label      text,\n      top2_prob       double precision,\n\n      CONSTRAINT chk_top1_prob_0_1 CHECK (top1_prob IS NULL OR (top1_prob >= 0 AND top1_prob <= 1)),\n      CONSTRAINT chk_top2_prob_0_1 CHECK (top2_prob IS NULL OR (top2_prob >= 0 AND top2_prob <= 1))\n    )\n  ';\nEND $$;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -464,
+        352
+      ],
+      "id": "aca45705-2a56-429f-842c-829ded758257",
+      "name": "Создание таблицы комментариев",
+      "credentials": {
+        "postgres": {
+          "id": "nJLtOwEA1dAE4Pjt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"text\":  \"{{ $json.body.text }}\",\n  \"link\":  \"https://vk.com/wall{{ $json.body.owner_id }}_{{ $json.body.post_id }}?reply={{ $json.body.comment_id }}\",\n  \"channel_id\": {{ $json.body.owner_id }},\n  \"post_id\": {{ $json.body.post_id }},\n  \"comment_id\": {{ $json.body.comment_id }},\n  \"sender_name\": {{ $json.body.sender_name }},\n  \"sender_id\": {{ $json.body.sender_id }},\n  \"message_type\": {{ $json.body.event_type }}\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -16,
+        -16
+      ],
+      "id": "b1493493-9844-42b8-98e4-d7607226bc1e",
+      "name": "Общие данные"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "comment-reciever",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -432,
+        0
+      ],
+      "id": "f8cbd760-2e65-4f8f-a468-5a51335248fe",
+      "name": "Принимаем комментарий",
+      "webhookId": "8965b8ce-7ea9-46ac-a94d-cd09549ce305"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.221.16:8000/classify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            },
+            {
+              "name": "k",
+              "value": "2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        368,
+        -32
+      ],
+      "id": "f4510be3-df87-4ee9-b31a-356160647195",
+      "name": "Фильтр 1 Уровня (реальный)",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 10,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "byN2WpQidQrEAKPk",
+          "name": "Фильтр 1 Уровня"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.221.16:8000/classify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "Всем привет! Я ищу ассистента таргетолога в  международное агентство по лидогенерации в сфере недвижимости.  Задачи: писать офферы и тексты для рекламы, собирать кампании под руководством, писать ТЗ для дизайнеров/видеографов, согласование и контроль задач  Ищу человека с опытом в сфере маркетинга, с хорошей насмотренностью, который круто чувствует себя в условиях многозадачности  Удалёнка, 4+ ч/день (на связи 9:00–18:00 CET, 5/2), $90–110 за проект (5-10 проектов/мес). Есть тестовое  Если интересно, заполняйте анкету: https://docs.google.com/forms/d/e/1FAIpQLSdlbwp2FjDztjP4IwjADmqeNuF0grxjYRiCGhF20jHr-DDZtQ/viewform"
+            },
+            {
+              "name": "k",
+              "value": "2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        272,
+        -208
+      ],
+      "id": "aea9804d-4341-4d2b-b071-77448f138b71",
+      "name": "Фильтр 1 Уровня (пример пропускает)",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "byN2WpQidQrEAKPk",
+          "name": "Фильтр 1 Уровня"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.221.16:8000/classify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "бред бредок бредятина"
+            },
+            {
+              "name": "k",
+              "value": "2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        272,
+        -400
+      ],
+      "id": "69ead9c3-b37e-4dc6-8a99-ed534eb6aff6",
+      "name": "Фильтр 1 Уровня (пример не пропускает)",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "byN2WpQidQrEAKPk",
+          "name": "Фильтр 1 Уровня"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f78dd462-e49a-4767-8952-d9437ccae19b",
+              "leftValue": "={{ $json.text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        176,
+        -16
+      ],
+      "id": "02e18242-2aa9-4a3f-817d-8ce215aa78d3",
+      "name": "Текст не пустой"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1416e03f-c5f3-427d-916b-e5ed011383d0",
+              "leftValue": "={{$json.body.event_type}}",
+              "rightValue": "wall_comment",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -240,
+        0
+      ],
+      "id": "e5a1e6ab-25a9-4bee-98fe-b59c82a63ca6",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "http://217.26.24.119:3000/clients/vk-user/Server_account_2",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -112,
+        -288
+      ],
+      "id": "3a5820a9-dfe1-4ed7-91e2-594f7b2a3b76",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "294d149a-dc8c-4512-8501-5b0175701e30",
+              "name": "source_channel_id",
+              "value": "={{ $json.channel_id }}",
+              "type": "number"
+            },
+            {
+              "id": "8fa9b264-08f2-4e0f-8134-54d0c13aeb41",
+              "name": "external_message_id",
+              "value": "={{ $json.comment_id }}",
+              "type": "number"
+            },
+            {
+              "id": "50a217bc-c732-4acf-9a4d-16dca31f5a47",
+              "name": "published_at",
+              "value": "={{ $('Принимаем комментарий').item.json.body.date }}",
+              "type": "string"
+            },
+            {
+              "id": "3417a930-2952-4afb-a621-d9601f4a8bb6",
+              "name": "ingested_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "325ad23e-8ec2-4ddd-a497-90d71cae2636",
+              "name": "edited_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "841e8dcb-ab56-42f5-94aa-0402149db767",
+              "name": "deleted_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "1d13310d-6a98-476a-bfb3-9152e16c70de",
+              "name": "message_text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "c72d5805-b380-48ec-840f-ecb523f24e8c",
+              "name": "message_url",
+              "value": "=https://vk.com/wall{{ $json.channel_id }}_{{ $json.post_id }}?reply={{ $json.comment_id }}",
+              "type": "string"
+            },
+            {
+              "id": "08e48149-9ddd-4fd2-a6c5-f7f565f2c9f2",
+              "name": "raw_message_payload",
+              "value": "={{ $('Принимаем комментарий').item.json.body }}",
+              "type": "object"
+            },
+            {
+              "id": "2bdc5f36-4d2d-45fd-b36d-fe6d5a0368ed",
+              "name": "sender_external_id",
+              "value": "={{ $json.sender_id }}",
+              "type": "number"
+            },
+            {
+              "id": "081cd079-e75d-4e0f-97b0-21b74c5acc43",
+              "name": "created_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "b338d2ff-9b1b-4d3a-9239-71caf36f2f43",
+              "name": "updated_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        544,
+        160
+      ],
+      "id": "4d38397f-e686-4ead-9b3e-f971332a5c20",
+      "name": "Формируем запись source_messages"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "external_channel_id",
+              "value": "={{ String($json.raw_message_payload.owner_id) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        752,
+        160
+      ],
+      "id": "0d339e96-123e-414a-a9d3-5ffa0f998ede",
+      "name": "Получаем канал",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_messages",
+          "mode": "list",
+          "cachedResultName": "source_messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_channel_id": "={{ $json.id }}",
+            "external_message_id": "={{ $('Текст не пустой').item.json.comment_id }}",
+            "published_at": "={{ $('Принимаем комментарий').item.json.body.date }}",
+            "ingested_at": "={{ $now.plus({ hours: 3 }) }}",
+            "message_text": "={{ $('Текст не пустой').item.json.text }}",
+            "message_url": "={{ $('Текст не пустой').item.json.link }}",
+            "raw_message_payload": "={{ $('Принимаем комментарий').item.json.body }}",
+            "sender_external_id": "={{ $('Текст не пустой').item.json.sender_id }}",
+            "created_at": "={{ $json.created_at }}",
+            "sender_payload": "={{ {\n  \"sender_name\": $('Текст не пустой').item.json.sender_name,\n  \"sender_id\": $('Текст не пустой').item.json.sender_id\n} }}",
+            "filter1_top1_score": "={{ $('Фильтр 1 Уровня (реальный)').item.json.predictions[0].score }}",
+            "filter1_top2_score": "={{ $('Фильтр 1 Уровня (реальный)').item.json.predictions[1].score }}",
+            "filter1_top1_label": "={{ $('Фильтр 1 Уровня (реальный)').item.json.predictions[0].label }}",
+            "filter1_top2_label": "={{ $('Фильтр 1 Уровня (реальный)').item.json.predictions[1].label }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "source_channel_id",
+              "displayName": "source_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_message_id",
+              "displayName": "external_message_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ingested_at",
+              "displayName": "ingested_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "edited_at",
+              "displayName": "edited_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "deleted_at",
+              "displayName": "deleted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "message_text",
+              "displayName": "message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_url",
+              "displayName": "message_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "raw_message_payload",
+              "displayName": "raw_message_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender_external_id",
+              "displayName": "sender_external_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender_payload",
+              "displayName": "sender_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "filter1_top1_label",
+              "displayName": "filter1_top1_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "filter1_top1_score",
+              "displayName": "filter1_top1_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "filter1_top2_label",
+              "displayName": "filter1_top2_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "filter1_top2_score",
+              "displayName": "filter1_top2_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        976,
+        160
+      ],
+      "id": "b3c7bbfa-497e-4b17-9448-4ef389e731b6",
+      "name": "Создаём строку в очереди",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Создание таблицы комментариев": {
+      "main": [
+        []
+      ]
+    },
+    "Общие данные": {
+      "main": [
+        [
+          {
+            "node": "Текст не пустой",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Принимаем комментарий": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Фильтр 1 Уровня (реальный)": {
+      "main": [
+        [
+          {
+            "node": "Формируем запись source_messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Фильтр 1 Уровня (пример не пропускает)": {
+      "main": [
+        []
+      ]
+    },
+    "Фильтр 1 Уровня (пример пропускает)": {
+      "main": [
+        []
+      ]
+    },
+    "Текст не пустой": {
+      "main": [
+        [
+          {
+            "node": "Фильтр 1 Уровня (реальный)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Формируем запись source_messages": {
+      "main": [
+        [
+          {
+            "node": "Получаем канал",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем канал": {
+      "main": [
+        [
+          {
+            "node": "Создаём строку в очереди",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

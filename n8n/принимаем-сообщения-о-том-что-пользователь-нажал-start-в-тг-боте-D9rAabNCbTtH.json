@@ -1,0 +1,223 @@
+{
+  "name": "Принимаем сообщения о том что пользователь нажал start в ТГ боте",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recieve_message_start_tg",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "afd25301-9834-4dfe-8b33-c85e147021ba",
+      "name": "Webhook",
+      "webhookId": "02af55e4-b925-404c-b835-5154c3647f12"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"headers\": {\n      \"host\": \"mokuegopasan.beget.app\",\n      \"user-agent\": \"Python/3.11 aiohttp/3.13.5\",\n      \"content-length\": \"549\",\n      \"accept\": \"*/*\",\n      \"accept-encoding\": \"gzip, deflate\",\n      \"content-type\": \"application/json\",\n      \"x-forwarded-for\": \"194.156.117.160\",\n      \"x-forwarded-host\": \"mokuegopasan.beget.app\",\n      \"x-forwarded-port\": \"443\",\n      \"x-forwarded-proto\": \"https\",\n      \"x-forwarded-server\": \"ed84361b6596\",\n      \"x-real-ip\": \"194.156.117.160\"\n    },\n    \"params\": {},\n    \"query\": {},\n    \"body\": {\n      \"event\": \"telegram_bot_start\",\n      \"start_payload\": \"test123\",\n      \"message\": {\n        \"message_id\": 4,\n        \"from\": {\n          \"id\": 816740390,\n          \"is_bot\": false,\n          \"first_name\": \"Фадеев\",\n          \"last_name\": \"Глеб\",\n          \"username\": \"Fgsh123\",\n          \"language_code\": \"ru\"\n        },\n        \"chat\": {\n          \"id\": 816740390,\n          \"first_name\": \"Фадеев\",\n          \"last_name\": \"Глеб\",\n          \"username\": \"Fgsh123\",\n          \"type\": \"private\"\n        },\n        \"date\": 1779270828,\n        \"text\": \"/start test123\",\n        \"entities\": [\n          {\n            \"offset\": 0,\n            \"length\": 6,\n            \"type\": \"bot_command\"\n          }\n        ]\n      }\n    },\n    \"webhookUrl\": \"https://mokuegopasan.beget.app/webhook/recieve_message_start_tg\",\n    \"executionMode\": \"production\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        176
+      ],
+      "id": "9b53df50-3847-4602-91c4-132c3699dcc8",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        176
+      ],
+      "id": "f39b172e-aad4-46b4-9436-fdb90d7b79c6",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "35d5b19b-5848-4876-9570-3dc777406303",
+              "name": "platform",
+              "value": "={{ $json.body.event === \"telegram_bot_start\" ? \"tg\" : \"vk\" }}",
+              "type": "string"
+            },
+            {
+              "id": "fe84d9c2-0767-4f3e-a764-1d2fbc65af96",
+              "name": "token",
+              "value": "={{ $json.body.start_payload }}",
+              "type": "string"
+            },
+            {
+              "id": "9df6a631-f0e4-4d20-a348-ed7b767066ea",
+              "name": "profile",
+              "value": "={{ $json.body.message.from }}",
+              "type": "object"
+            },
+            {
+              "id": "249eddd3-1d7e-42cc-8777-7a76ef39fcca",
+              "name": "external_recipient_id",
+              "value": "={{ $json.body.message.chat.id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        256,
+        80
+      ],
+      "id": "cfe6b553-ee2d-4b50-a890-e857358885df",
+      "name": "Собиравем поля для запроса"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gragipemuse.beget.app/api/internal/contact-bind/consume",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "platform",
+              "value": "={{ $json.platform }}"
+            },
+            {
+              "name": "token",
+              "value": "={{ $json.token }}"
+            },
+            {
+              "name": "externalRecipientId",
+              "value": "={{ $json.external_recipient_id }}"
+            },
+            {
+              "name": "displayName",
+              "value": "={{ $json.profile.username }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        464,
+        80
+      ],
+      "id": "4ac4a91d-e96c-483b-8e1b-7646ac713473",
+      "name": "Consume",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "V3AmVcZS4pkuo9Eb",
+          "name": "Авторизация для добавления канала"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://194.156.117.160:8100/discovery-api/bot/send-message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": {{ $('Собиравем поля для запроса').item.json.external_recipient_id }},\n  \"text\": \"Уведомления в Телеграм включены, вы можете вернуться на сайт!\",\n  \"layout\": \"inline\",\n  \"buttons\": [\n    [\n      {\n        \"text\": \"Вернуться на сайт\",\n        \"url\": \"https://gragipemuse.beget.app/notifications\"\n      }\n    ]\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        80
+      ],
+      "id": "7acc58ff-6edd-4b87-b6e2-cb3ac8bbdfc6",
+      "name": "Отправка телеграм",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Собиравем поля для запроса",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Собиравем поля для запроса",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Собиравем поля для запроса": {
+      "main": [
+        [
+          {
+            "node": "Consume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consume": {
+      "main": [
+        [
+          {
+            "node": "Отправка телеграм",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

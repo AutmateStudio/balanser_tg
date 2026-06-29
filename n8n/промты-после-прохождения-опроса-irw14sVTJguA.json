@@ -1,0 +1,850 @@
+{
+  "name": "Промты после прохождения опроса",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "project-new-data",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "f36edbde-6fab-46ee-8859-fca5b3de0434",
+      "name": "Webhook",
+      "webhookId": "c8f18375-44eb-4b64-b479-15c6392f0371"
+    },
+    {
+      "parameters": {
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        192,
+        0
+      ],
+      "id": "0a1efc09-05fb-4af1-8d08-57ca8e586d9e",
+      "name": "Общие данные"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Чем занимается:\n\"\"\"\n{{ $('Webhook').item.json.body.business_description }}\n\"\"\"\n\nЧто продают:\n\"\"\"\n{{ $('Webhook').item.json.body.offer_type }}\n\"\"\"\n\nУслуги:\n\"\"\"\n{{ $('Webhook').item.json.body.offer_type }}\n{{ $('Webhook').item.json.body.offer_type_other }}\n\"\"\"\n\nКто целивой клиент:\n\"\"\"\n{{ $('Webhook').item.json.body.target_lead_roles }}\n{{ $('Webhook').item.json.body.target_lead_roles_other }}\n\"\"\"\n\nГеография:\n\"\"\"\n{{ $('Webhook').item.json.body.geography }}\n\"\"\"\n\nМинимальный бюджет/чек:\n\"\"\"\n{{ $('Webhook').item.json.body.budget_threshold }}\n\"\"\"\n\nКакие запросы хотят получать:\n\"\"\"\n{{ $('Webhook').item.json.body.core_lead_requests }}\n\"\"\"\n\nСамые приоритетные из них:\n\"\"\"\n{{ $('Webhook').item.json.body.priority_lead_requests }}\n\"\"\"\n\nЕсть ли смежные лиды, которых тоже можно брать:\n\"\"\"\n{{ $('Webhook').item.json.body.has_adjacent_leads }}\n{{ $('Webhook').item.json.body.adjacent_lead_requests }}\n\"\"\"\n\nПризнаки хорошего лида:\n\"\"\"\n{{ $('Webhook').item.json.body.quality_signals }}\n{{ $('Webhook').item.json.body.quality_signals_other }}\n\"\"\"\n\nКого точно не брать:\n\"\"\"\n{{ $('Webhook').item.json.body.hard_exclusions }}\n{{ $('Webhook').item.json.body.hard_exclusions_other }}\n\"\"\"\n\nКак работать со спорными лидами:\n\"\"\"\n{{ JSON.stringify($('Webhook').item.json.body.borderline_rules) }}\n\"\"\"\n\nФразы целевых лидов:\n\"\"\"\n{{ $('Webhook').item.json.body.positive_markers }}\n\"\"\"\n\nФразы не целевых лидов:\n\"\"\"\n{{ $('Webhook').item.json.body.negative_markers }}\n\"\"\"\n\nПример идеального лида — реальное сообщение:\n\"\"\"\n{{ $('Webhook').item.json.body.good_lead_example }}\n\"\"\"\n\nПример нецелевого лида — реальное сообщение:\n\"\"\"\n{{ $('Webhook').item.json.body.bad_lead_example }}\n\"\"\"",
+        "options": {
+          "systemMessage": "Ты создаёшь структурированные данные для записи в БД.\n\nВерни строго валидный JSON без markdown, без пояснений, без лишнего текста.\n\nФормат ответа строго такой:\n\n{\n  \"lead_search_prompt\": \"string\",\n  \"outreach_message_template\": \"string\",\n  \"search_filters\": {\n    \"aiKeywords\": [\"string\"],\n    \"aiExcludeKeywords\": [\"string\"],\n    \"aiPromptText\": \"string\",\n    \"aiCompanyContext\": \"string\",\n    \"aiServicesContext\": \"string\"\n  },\n  \"score_filters\": [\n    {\n      \"label\": \"string\",\n      \"min_prob\": 0.0\n    },\n    {\n      \"label\": \"string\",\n      \"min_prob\": 0.0\n    }\n  ]\n}\n\nКритически важно:\n- search_filters должен быть JSON-объектом;\n- aiKeywords должен быть JSON-массивом строк;\n- aiExcludeKeywords должен быть JSON-массивом строк;\n- aiPromptText должен быть строкой;\n- aiCompanyContext должен быть строкой;\n- aiServicesContext должен быть строкой;\n- score_filters должен быть JSON-массивом объектов;\n- score_filters должен содержать РОВНО 2 объекта;\n- каждый объект в score_filters должен иметь поля:\n  - \"label\": строка\n  - \"min_prob\": число от 0 до 1\n- НЕ превращай массивы в строки;\n- НЕ экранируй JSON внутри строк;\n- НЕ возвращай SQL;\n- НЕ добавляй комментарии;\n- НЕ добавляй поля вне схемы.\n\nРазрешённые label для score_filters:\n- \"chat_misc\"\n- \"info_content\"\n- \"job_hr\"\n- \"lead_request\"\n- \"service_offer\"\n\nКритически важно по score_filters:\n- выбирай только label из списка выше;\n- нужно вернуть ровно 2 наиболее полезных label для поиска валидных лидов;\n- первый объект в score_filters должен быть главным фильтром;\n- второй объект в score_filters должен быть дополнительным фильтром;\n- главный фильтр должен быть более широким и пропускать больше сообщений;\n- дополнительный фильтр должен быть более точным и более строгим;\n- для главного фильтра нужно ставить пониженный порог, чтобы сообщения чаще проходили;\n- для главного фильтра по умолчанию ставь min_prob около 0.2;\n- допустимый рабочий диапазон для главного фильтра: 0.15–0.35;\n- для второго фильтра ставь min_prob выше, чем у главного;\n- для второго фильтра обычно используй диапазон 0.45–0.85;\n- не делай у обоих фильтров одинаковый min_prob;\n- не добавляй лишние label \"на всякий случай\";\n- чем выше min_prob, тем строже фильтр и тем меньше сообщений пройдёт;\n- чем ниже min_prob, тем шире фильтр и тем больше сообщений пройдёт;\n- min_prob подбирай осознанно под задачу компании;\n- если целевые лиды — это прямые запросы на услугу / подрядчика / специалиста, главным фильтром обычно должен быть \"lead_request\";\n- если для компании релевантны вакансии, найм, поиск исполнителя в формате HR/вакансий, вторым фильтром может быть \"job_hr\";\n- \"service_offer\" используй только если для компании реально полезны сообщения, где кто-то предлагает услуги;\n- \"info_content\" используй только если это действительно может приводить к релевантным лидам;\n- \"chat_misc\" обычно не используй для score_filters, если цель — отбирать более валидные лиды;\n- если по данным видно, что нужен строгий фильтр, повышай min_prob у второго фильтра;\n- если по данным видно, что важно не терять потенциальные лиды, главный фильтр всё равно оставляй более широким;\n- score_filters должен быть пригоден именно для пост-фильтрации по score в классификации.\n\nТребования к полям:\n\n1) lead_search_prompt\nСоздай подробный промпт для AI, который будет оценивать входящие сообщения на целевой лид.\nОн должен учитывать:\n- чем занимается компания;\n- что продаёт;\n- какие услуги оказывает;\n- кто целевой клиент;\n- географию;\n- минимальный бюджет;\n- какие запросы считаются целевыми;\n- какие приоритетны;\n- какие смежные лиды допустимы;\n- признаки хорошего лида;\n- кого точно не брать;\n- правила обработки спорных лидов;\n- фразы целевых и нецелевых лидов;\n- примеры хорошего и плохого лида.\n\nПромпт должен:\n- быть на русском языке;\n- быть практичным и конкретным;\n- описывать, какие лиды брать, какие не брать и как трактовать спорные случаи.\n\n2) outreach_message_template\nСоздай короткий шаблон первого ответа лиду.\nОн должен быть:\n- на русском языке;\n- деловым;\n- коротким;\n- без навязчивых продаж;\n- пригодным для автоответа;\n- без выдуманных фактов и неподтвержденных обещаний.\n\n3) search_filters.aiKeywords\nСгенерируй массив релевантных ключевых слов и фраз для поиска целевых лидов.\nИспользуй:\n- реальные формулировки из запросов;\n- разговорные варианты;\n- синонимы;\n- формулировки из анкеты;\n- positive_markers;\n- пример хорошего лида;\n- core_lead_requests;\n- priority_lead_requests;\n- adjacent_lead_requests;\n- business_description;\n- offer_type.\n\nТребования:\n- не добавляй слишком общие мусорные слова;\n- убирай дубли;\n- возвращай массив строк;\n- по возможности используй формулировки, которыми люди реально пишут в сообщениях.\n\n4) search_filters.aiExcludeKeywords\nСгенерируй массив слов и фраз для исключения нецелевых лидов.\nИспользуй:\n- hard_exclusions;\n- negative_markers;\n- bad_lead_example;\n- типовые паттерны нецелевых сообщений: вакансии, поиск работы, реклама, самопиар, предложения услуг и прочее.\n\nТребования:\n- убирай дубли;\n- возвращай массив строк;\n- включай только реально полезные исключающие формулировки.\n\n5) search_filters.aiPromptText\nСоздай короткое описание логики, по которой были собраны aiKeywords и aiExcludeKeywords.\nТребования:\n- 2–6 предложений;\n- на русском языке;\n- кратко объясняет, на основе каких данных и логики были собраны поисковые AI-фильтры.\n\n6) search_filters.aiCompanyContext\nСгенерируй краткое описание компании для AI-контекста поиска каналов.\nТребования:\n- 2–4 предложения;\n- на русском языке;\n- кратко и понятно объясняет, чем занимается компания;\n- используется как AI-контекст для поиска каналов;\n- формируется на основе business_description, offer_type, geography;\n- без лишней воды, без маркетинговых обещаний.\n\n7) search_filters.aiServicesContext\nСгенерируй краткое описание услуг, продуктов или направлений компании для AI-контекста поиска каналов.\nТребования:\n- 2–4 предложения;\n- на русском языке;\n- кратко описывает основные услуги, направления и типы запросов, с которыми работает компания;\n- формируется на основе core_lead_requests, priority_lead_requests, adjacent_lead_requests;\n- без лишней воды и без выдуманных фактов.\n\n8) score_filters\nСгенерируй массив из ровно 2 правил для score-фильтрации результатов классификации.\n\nКаждое правило должно иметь вид:\n\n{\n  \"label\": \"один из разрешённых label\",\n  \"min_prob\": число от 0 до 1\n}\n\nПравила выбора:\n- выбери ровно 2 самых полезных label для отбора валидных лидов;\n- ориентируйся на то, какие типы сообщений действительно должны проходить в выдачу;\n- первый объект должен быть главным и более широким;\n- второй объект должен быть дополнительным и более строгим;\n- главный фильтр должен пропускать больше потенциально полезных сообщений;\n- поэтому у главного фильтра min_prob должен быть пониже, по умолчанию около 0.2;\n- если нет сильной причины, старайся держать min_prob главного фильтра в диапазоне 0.15–0.35;\n- второй фильтр должен усиливать точность и отсекать лишнее;\n- поэтому у второго фильтра min_prob должен быть заметно выше, чем у главного;\n- если нет сильной причины, старайся держать min_prob второго фильтра в диапазоне 0.45–0.85;\n- не добавляй label, которые будут только засорять поток;\n- не используй min_prob меньше 0.1 без сильной причины;\n- не используй min_prob больше 0.95 без сильной причины;\n- по умолчанию выбирай рабочие и практичные пороги, а не экстремальные;\n- если данных недостаточно, всё равно верни 2 осмысленных правила, а не пустой массив;\n- если наиболее вероятный тип целевого сообщения — прямой запрос на услугу, подрядчика, исполнителя или специалиста, главным фильтром обычно должен быть \"lead_request\".\n\nОбщие правила:\n- Верни только JSON.\n- Все массивы должны быть настоящими JSON-массивами.\n- Все значения массивов должны быть строками.\n- Сохраняй смысл анкеты.\n- Не выдумывай факты.\n- Если данных мало, всё равно верни полезный результат.\n- search_filters.aiCompanyContext и search_filters.aiServicesContext должны быть непустыми строками, если во входных данных достаточно информации.\n- Не возвращай ручные поля companyContext, servicesContext, includeKeywords, excludeKeywords.\n- Не добавляй никакие дополнительные поля.\n- score_filters должен содержать только разрешённые label.\n- score_filters не должен быть строкой.\n- min_prob должен быть числом, а не строкой."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        400,
+        0
+      ],
+      "id": "b3ebd2fb-8c1a-43b9-b8fb-d469c0448c3d",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-5.4-mini",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        400,
+        192
+      ],
+      "id": "4e25ff75-a707-401f-bb11-be1183b4d9b6",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "hwaDdGPn5HFuYp7N",
+          "name": "Лидоген ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1888,
+        0
+      ],
+      "id": "9f91d185-3b02-4c01-82d5-04864aaecdfd",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const rawOutput = item.json.output;\n\n  let parsed = null;\n  let ok = false;\n  let error = null;\n\n  try {\n    parsed = typeof rawOutput === 'string' ? JSON.parse(rawOutput) : rawOutput;\n\n    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {\n      ok = true;\n    } else {\n      parsed = null;\n      error = 'Parsed value is not a JSON object';\n    }\n  } catch (e) {\n    error = e.message;\n  }\n\n  const scoreFilters = ok && Array.isArray(parsed.score_filters)\n    ? parsed.score_filters\n    : null;\n\n  return {\n    json: {\n      ok,\n      rawOutput,\n      error,\n\n      lead_search_prompt: ok ? parsed.lead_search_prompt ?? null : null,\n      outreach_message_template: ok ? parsed.outreach_message_template ?? null : null,\n      search_filters: ok ? parsed.search_filters ?? null : null,\n      score_filters: scoreFilters\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        0
+      ],
+      "id": "eb54472b-7e66-4cd6-862d-94cdd7c4452c",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "67b51cd8-18f7-4a44-9dd4-26ffffde75fb",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        0
+      ],
+      "id": "f0aeab7d-1418-4d25-9db0-a12a34580731",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  id,\n  name,\n  search_filters->>'companyContext'  AS company_context,\n  search_filters->>'servicesContext' AS services_context,\n  search_filters->'includeKeywords'  AS include_keywords,\n  search_filters->'excludeKeywords'  AS exclude_keywords\nFROM monitoring_projects\nWHERE id = {{ $('Webhook').item.json.body.projectId }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1280,
+        -16
+      ],
+      "id": "3f5007fc-26d4-4cb1-9b1b-e9f9fcdad635",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "67b51cd8-18f7-4a44-9dd4-26ffffde75fb",
+              "leftValue": "={{ $json.company_context == \"\" || $json.company_context == null }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "3a6cbcae-4efd-46e2-adce-2aff18e8ac46",
+              "leftValue": "={{ $json.services_context == \"\" || $json.services_context == null }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "262eb546-6fe3-45a0-8c10-ee90c3b366ab",
+              "leftValue": "={{ $json.include_keywords == null || $json.include_keywords.length === 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "90914d1f-2299-484d-beb6-a21a7bc23747",
+              "leftValue": "={{ $json.exclude_keywords == null || $json.exclude_keywords.length === 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1472,
+        -16
+      ],
+      "id": "76dcfa1d-d0e6-4f3b-89a1-f4deb3a9ae8c",
+      "name": "Если поля ручного ввода пустые, заполним их"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE monitoring_projects\nSET\n  search_filters = COALESCE(search_filters, '{}'::jsonb)\n    || jsonb_strip_nulls(\n      jsonb_build_object(\n        'companyContext',\n        CASE\n          WHEN NULLIF(BTRIM(search_filters->>'companyContext'), '') IS NULL\n            AND NULLIF(\n              BTRIM(($n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiCompanyContext || '') }}$n8n$::jsonb #>> '{}')),\n              ''\n            ) IS NOT NULL\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiCompanyContext || '') }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'servicesContext',\n        CASE\n          WHEN NULLIF(BTRIM(search_filters->>'servicesContext'), '') IS NULL\n            AND NULLIF(\n              BTRIM(($n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiServicesContext || '') }}$n8n$::jsonb #>> '{}')),\n              ''\n            ) IS NOT NULL\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiServicesContext || '') }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'includeKeywords',\n        CASE\n          WHEN (\n            jsonb_typeof(search_filters->'includeKeywords') IS DISTINCT FROM 'array'\n            OR COALESCE(jsonb_array_length(search_filters->'includeKeywords'), 0) = 0\n          )\n          AND COALESCE(\n            jsonb_array_length(\n              $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiKeywords || []) }}$n8n$::jsonb\n            ),\n            0\n          ) > 0\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiKeywords || []) }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'excludeKeywords',\n        CASE\n          WHEN (\n            jsonb_typeof(search_filters->'excludeKeywords') IS DISTINCT FROM 'array'\n            OR COALESCE(jsonb_array_length(search_filters->'excludeKeywords'), 0) = 0\n          )\n          AND COALESCE(\n            jsonb_array_length(\n              $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiExcludeKeywords || []) }}$n8n$::jsonb\n            ),\n            0\n          ) > 0\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiExcludeKeywords || []) }}$n8n$::jsonb\n          ELSE NULL\n        END\n      )\n    ),\n  filters_version = COALESCE(filters_version, 0) + 1\nWHERE id = {{ $('Webhook').item.json.body.projectId }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1664,
+        -80
+      ],
+      "id": "a2af159b-0246-4805-8721-8f4b5f5c2615",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "monitoring_projects",
+          "mode": "list",
+          "cachedResultName": "monitoring_projects"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Webhook').item.json.body.projectId }}",
+            "lead_search_prompt": "={{ $('Code in JavaScript').item.json.lead_search_prompt }}",
+            "outreach_message_template": "={{ $('Code in JavaScript').item.json.outreach_message_template }}",
+            "search_filters": "={{ (() => {\n  const sf = $('Code in JavaScript').item.json.search_filters ?? {};\n  const patch = {};\n\n  if (Array.isArray(sf.aiKeywords) && sf.aiKeywords.length > 0) {\n    patch.aiKeywords = sf.aiKeywords;\n  }\n\n  if (Array.isArray(sf.aiExcludeKeywords) && sf.aiExcludeKeywords.length > 0) {\n    patch.aiExcludeKeywords = sf.aiExcludeKeywords;\n  }\n\n  if (typeof sf.aiPromptText === 'string' && sf.aiPromptText.trim() !== '') {\n    patch.aiPromptText = sf.aiPromptText;\n  }\n\n  if (typeof sf.aiCompanyContext === 'string' && sf.aiCompanyContext.trim() !== '') {\n    patch.aiCompanyContext = sf.aiCompanyContext;\n  }\n\n  if (typeof sf.aiServicesContext === 'string' && sf.aiServicesContext.trim() !== '') {\n    patch.aiServicesContext = sf.aiServicesContext;\n  }\n\n  return patch;\n})() }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "owner_user_id",
+              "displayName": "owner_user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "options",
+              "canBeUsedToMatch": true,
+              "options": [
+                {
+                  "name": "active",
+                  "value": "active"
+                },
+                {
+                  "name": "archived",
+                  "value": "archived"
+                },
+                {
+                  "name": "deleted",
+                  "value": "deleted"
+                }
+              ],
+              "removed": true
+            },
+            {
+              "id": "lead_search_prompt",
+              "displayName": "lead_search_prompt",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_search_prompt_version",
+              "displayName": "lead_search_prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "outreach_message_template",
+              "displayName": "outreach_message_template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "outreach_message_template_version",
+              "displayName": "outreach_message_template_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "filters_version",
+              "displayName": "filters_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "search_filters",
+              "displayName": "search_filters",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "archived_at",
+              "displayName": "archived_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "deleted_at",
+              "displayName": "deleted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "last_message_id",
+              "displayName": "last_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1072,
+        -208
+      ],
+      "id": "52e6564f-3ccb-4f8d-b1e6-20bc090a6a40",
+      "name": "Update rows in a table1",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        176,
+        528
+      ],
+      "id": "96a833de-127b-458a-87f3-9ac9268907cc",
+      "name": "Общие данные1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Чем занимается:\n\"\"\"\n{{ $('Webhook2').item.json.body.business_description }}\n\"\"\"\n\nЧто продают:\n\"\"\"\n{{ $('Webhook2').item.json.body.offer_type }}\n\"\"\"\n\nУслуги:\n\"\"\"\n{{ $('Webhook2').item.json.body.offer_type }}\n{{ $('Webhook2').item.json.body.offer_type_other }}\n\"\"\"\n\nКто целивой клиент:\n\"\"\"\n{{ $('Webhook2').item.json.body.target_lead_roles }}\n{{ $('Webhook2').item.json.body.target_lead_roles_other }}\n\"\"\"\n\nГеография:\n\"\"\"\n{{ $('Webhook2').item.json.body.geography }}\n\"\"\"\n\nМинимальный бюджет/чек:\n\"\"\"\n{{ $('Webhook2').item.json.body.budget_threshold }}\n\"\"\"\n\nКакие запросы хотят получать:\n\"\"\"\n{{ $('Webhook2').item.json.body.core_lead_requests }}\n\"\"\"\n\nСамые приоритетные из них:\n\"\"\"\n{{ $('Webhook2').item.json.body.priority_lead_requests }}\n\"\"\"\n\nЕсть ли смежные лиды, которых тоже можно брать:\n\"\"\"\n{{ $('Webhook2').item.json.body.has_adjacent_leads }}\n{{ $('Webhook2').item.json.body.adjacent_lead_requests }}\n\"\"\"\n\nПризнаки хорошего лида:\n\"\"\"\n{{ $('Webhook2').item.json.body.quality_signals }}\n{{ $('Webhook2').item.json.body.quality_signals_other }}\n\"\"\"\n\nКого точно не брать:\n\"\"\"\n{{ $('Webhook2').item.json.body.hard_exclusions }}\n{{ $('Webhook2').item.json.body.hard_exclusions_other }}\n\"\"\"\n\nКак работать со спорными лидами:\n\"\"\"\n{{ JSON.stringify($('Webhook2').item.json.body.borderline_rules) }}\n\"\"\"\n\nФразы целевых лидов:\n\"\"\"\n{{ $('Webhook2').item.json.body.positive_markers }}\n\"\"\"\n\nФразы не целевых лидов:\n\"\"\"\n{{ $('Webhook2').item.json.body.negative_markers }}\n\"\"\"\n\nПример идеального лида — реальное сообщение:\n\"\"\"\n{{ $('Webhook2').item.json.body.good_lead_example }}\n\"\"\"\n\nПример нецелевого лида — реальное сообщение:\n\"\"\"\n{{ $('Webhook2').item.json.body.bad_lead_example }}\n\"\"\"",
+        "options": {
+          "systemMessage": "Ты создаёшь структурированные данные для записи в БД.\n\nВерни строго валидный JSON без markdown, без пояснений, без лишнего текста.\n\nФормат ответа строго такой:\n\n{\n  \"lead_search_prompt\": \"string\",\n  \"outreach_message_template\": \"string\",\n  \"search_filters\": {\n    \"aiKeywords\": [\"string\"],\n    \"aiExcludeKeywords\": [\"string\"],\n    \"aiPromptText\": \"string\",\n    \"aiCompanyContext\": \"string\",\n    \"aiServicesContext\": \"string\"\n  }\n}\n\nКритически важно:\n- search_filters должен быть JSON-объектом;\n- aiKeywords должен быть JSON-массивом строк;\n- aiExcludeKeywords должен быть JSON-массивом строк;\n- aiPromptText должен быть строкой;\n- aiCompanyContext должен быть строкой;\n- aiServicesContext должен быть строкой;\n- НЕ превращай массивы в строки;\n- НЕ экранируй JSON внутри строк;\n- НЕ возвращай SQL;\n- НЕ добавляй комментарии;\n- НЕ добавляй поля вне схемы.\n\nТребования к полям:\n\n1) lead_search_prompt\nСоздай подробный промпт для AI, который будет оценивать входящие сообщения на целевой лид.\nОн должен учитывать:\n- чем занимается компания;\n- что продаёт;\n- какие услуги оказывает;\n- кто целевой клиент;\n- географию;\n- минимальный бюджет;\n- какие запросы считаются целевыми;\n- какие приоритетны;\n- какие смежные лиды допустимы;\n- признаки хорошего лида;\n- кого точно не брать;\n- правила обработки спорных лидов;\n- фразы целевых и нецелевых лидов;\n- примеры хорошего и плохого лида.\n\nПромпт должен:\n- быть на русском языке;\n- быть практичным и конкретным;\n- описывать, какие лиды брать, какие не брать и как трактовать спорные случаи.\n\n2) outreach_message_template\nСоздай короткий шаблон первого ответа лиду.\nОн должен быть:\n- на русском языке;\n- деловым;\n- коротким;\n- без навязчивых продаж;\n- пригодным для автоответа;\n- без выдуманных фактов и неподтвержденных обещаний.\n\n3) search_filters.aiKeywords\nСгенерируй массив релевантных ключевых слов и фраз для поиска целевых лидов.\nИспользуй:\n- реальные формулировки из запросов;\n- разговорные варианты;\n- синонимы;\n- формулировки из анкеты;\n- positive_markers;\n- пример хорошего лида;\n- core_lead_requests;\n- priority_lead_requests;\n- adjacent_lead_requests;\n- business_description;\n- offer_type.\n\nТребования:\n- не добавляй слишком общие мусорные слова;\n- убирай дубли;\n- возвращай массив строк;\n- по возможности используй формулировки, которыми люди реально пишут в сообщениях.\n\n4) search_filters.aiExcludeKeywords\nСгенерируй массив слов и фраз для исключения нецелевых лидов.\nИспользуй:\n- hard_exclusions;\n- negative_markers;\n- bad_lead_example;\n- типовые паттерны нецелевых сообщений: вакансии, поиск работы, реклама, самопиар, предложения услуг и прочее.\n\nТребования:\n- убирай дубли;\n- возвращай массив строк;\n- включай только реально полезные исключающие формулировки.\n\n5) search_filters.aiPromptText\nСоздай короткое описание логики, по которой были собраны aiKeywords и aiExcludeKeywords.\nТребования:\n- 2–6 предложений;\n- на русском языке;\n- кратко объясняет, на основе каких данных и логики были собраны поисковые AI-фильтры.\n\n6) search_filters.aiCompanyContext\nСгенерируй краткое описание компании для AI-контекста поиска каналов.\nТребования:\n- 2–4 предложения;\n- на русском языке;\n- кратко и понятно объясняет, чем занимается компания;\n- используется как AI-контекст для поиска каналов;\n- формируется на основе business_description, offer_type, geography;\n- без лишней воды, без маркетинговых обещаний.\n\n7) search_filters.aiServicesContext\nСгенерируй краткое описание услуг, продуктов или направлений компании для AI-контекста поиска каналов.\nТребования:\n- 2–4 предложения;\n- на русском языке;\n- кратко описывает основные услуги, направления и типы запросов, с которыми работает компания;\n- формируется на основе core_lead_requests, priority_lead_requests, adjacent_lead_requests;\n- без лишней воды и без выдуманных фактов.\n\nОбщие правила:\n- Верни только JSON.\n- Все массивы должны быть настоящими JSON-массивами.\n- Все значения массивов должны быть строками.\n- Сохраняй смысл анкеты.\n- Не выдумывай факты.\n- Если данных мало, всё равно верни полезный результат.\n- search_filters.aiCompanyContext и search_filters.aiServicesContext должны быть непустыми строками, если во входных данных достаточно информации.\n- Не возвращай ручные поля companyContext, servicesContext, includeKeywords, excludeKeywords.\n- Не добавляй никакие дополнительные поля."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        384,
+        528
+      ],
+      "id": "7bfc6e5c-bf2a-4d50-b1a3-28988ba6a3ab",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-5.4-mini",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        384,
+        720
+      ],
+      "id": "47352b22-f8ba-425d-bd68-0278c79a1fb3",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "hwaDdGPn5HFuYp7N",
+          "name": "Лидоген ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const rawOutput = item.json.output;\n\n  let parsed = null;\n  let ok = false;\n  let error = null;\n\n  try {\n    parsed = typeof rawOutput === 'string' ? JSON.parse(rawOutput) : rawOutput;\n\n    // дополнительная проверка, что это именно объект JSON\n    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {\n      ok = true;\n    } else {\n      parsed = null;\n      error = 'Parsed value is not a JSON object';\n    }\n  } catch (e) {\n    error = e.message;\n  }\n\n  return {\n    json: {\n      ok,\n      rawOutput,\n      error,\n\n      lead_search_prompt: ok ? parsed.lead_search_prompt ?? null : null,\n      outreach_message_template: ok ? parsed.outreach_message_template ?? null : null,\n      search_filters: ok ? parsed.search_filters ?? null : null\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        528
+      ],
+      "id": "049a28aa-b0ea-41bf-8a5b-183dab3ac0be",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "67b51cd8-18f7-4a44-9dd4-26ffffde75fb",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        880,
+        528
+      ],
+      "id": "175d036e-e90c-41ba-961c-2716e1d72a31",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n  SELECT\n    {{ Number($('Webhook2').item.json.body.projectId) }}::bigint AS project_id,\n\n    NULLIF(\n      BTRIM(\n        ($n8n${{ JSON.stringify($('Code in JavaScript1').item.json.lead_search_prompt || '') }}$n8n$::jsonb #>> '{}')\n      ),\n      ''\n    ) AS lead_search_prompt,\n\n    NULLIF(\n      BTRIM(\n        ($n8n${{ JSON.stringify($('Code in JavaScript1').item.json.outreach_message_template || '') }}$n8n$::jsonb #>> '{}')\n      ),\n      ''\n    ) AS outreach_message_template,\n\n    jsonb_strip_nulls(\n      jsonb_build_object(\n        'aiKeywords',\n        CASE\n          WHEN COALESCE(\n            jsonb_array_length(\n              $n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiKeywords || []) }}$n8n$::jsonb\n            ),\n            0\n          ) > 0\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiKeywords || []) }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'aiExcludeKeywords',\n        CASE\n          WHEN COALESCE(\n            jsonb_array_length(\n              $n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiExcludeKeywords || []) }}$n8n$::jsonb\n            ),\n            0\n          ) > 0\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiExcludeKeywords || []) }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'aiPromptText',\n        CASE\n          WHEN NULLIF(\n            BTRIM(\n              ($n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiPromptText || '') }}$n8n$::jsonb #>> '{}')\n            ),\n            ''\n          ) IS NOT NULL\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiPromptText || '') }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'aiCompanyContext',\n        CASE\n          WHEN NULLIF(\n            BTRIM(\n              ($n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiCompanyContext || '') }}$n8n$::jsonb #>> '{}')\n            ),\n            ''\n          ) IS NOT NULL\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiCompanyContext || '') }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'aiServicesContext',\n        CASE\n          WHEN NULLIF(\n            BTRIM(\n              ($n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiServicesContext || '') }}$n8n$::jsonb #>> '{}')\n            ),\n            ''\n          ) IS NOT NULL\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript1').item.json.search_filters?.aiServicesContext || '') }}$n8n$::jsonb\n          ELSE NULL\n        END\n      )\n    ) AS search_filters_patch\n)\n\nUPDATE monitoring_projects mp\nSET\n  lead_search_prompt = COALESCE(input.lead_search_prompt, mp.lead_search_prompt),\n  outreach_message_template = COALESCE(input.outreach_message_template, mp.outreach_message_template),\n  search_filters = COALESCE(mp.search_filters, '{}'::jsonb) || input.search_filters_patch,\n  filters_version = CASE\n    WHEN input.search_filters_patch <> '{}'::jsonb\n    THEN COALESCE(mp.filters_version, 0) + 1\n    ELSE mp.filters_version\n  END\nFROM input\nWHERE mp.id = input.project_id\nRETURNING mp.*;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1072,
+        512
+      ],
+      "id": "5fae2347-93e4-4141-919b-dd5de5741596",
+      "name": "Execute a SQL query3",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"ok\": \"true\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1248,
+        512
+      ],
+      "id": "b6137e67-6dc1-4f54-9548-26a807dad571",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "project-update-data",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -16,
+        528
+      ],
+      "id": "f6d3bf48-d63e-49bf-af35-e99218bef461",
+      "name": "Webhook2",
+      "webhookId": "c8f18375-44eb-4b64-b479-15c6392f0371"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n  SELECT\n    {{ Number($('Webhook').item.json.body.projectId) }}::bigint AS project_id,\n\n    NULLIF(\n      BTRIM(\n        ($n8n${{ JSON.stringify($('Code in JavaScript').item.json.lead_search_prompt || '') }}$n8n$::jsonb #>> '{}')\n      ),\n      ''\n    ) AS lead_search_prompt,\n\n    NULLIF(\n      BTRIM(\n        ($n8n${{ JSON.stringify($('Code in JavaScript').item.json.outreach_message_template || '') }}$n8n$::jsonb #>> '{}')\n      ),\n      ''\n    ) AS outreach_message_template,\n\n    jsonb_strip_nulls(\n      jsonb_build_object(\n        'aiKeywords',\n        CASE\n          WHEN COALESCE(\n            jsonb_array_length(\n              $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiKeywords || []) }}$n8n$::jsonb\n            ),\n            0\n          ) > 0\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiKeywords || []) }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'aiExcludeKeywords',\n        CASE\n          WHEN COALESCE(\n            jsonb_array_length(\n              $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiExcludeKeywords || []) }}$n8n$::jsonb\n            ),\n            0\n          ) > 0\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiExcludeKeywords || []) }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'aiPromptText',\n        CASE\n          WHEN NULLIF(\n            BTRIM(\n              ($n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiPromptText || '') }}$n8n$::jsonb #>> '{}')\n            ),\n            ''\n          ) IS NOT NULL\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiPromptText || '') }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'aiCompanyContext',\n        CASE\n          WHEN NULLIF(\n            BTRIM(\n              ($n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiCompanyContext || '') }}$n8n$::jsonb #>> '{}')\n            ),\n            ''\n          ) IS NOT NULL\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiCompanyContext || '') }}$n8n$::jsonb\n          ELSE NULL\n        END,\n\n        'aiServicesContext',\n        CASE\n          WHEN NULLIF(\n            BTRIM(\n              ($n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiServicesContext || '') }}$n8n$::jsonb #>> '{}')\n            ),\n            ''\n          ) IS NOT NULL\n          THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.search_filters?.aiServicesContext || '') }}$n8n$::jsonb\n          ELSE NULL\n        END\n      )\n    ) AS search_filters_patch,\n\n    CASE\n      WHEN jsonb_typeof(\n        $n8n${{ JSON.stringify($('Code in JavaScript').item.json.score_filters || []) }}$n8n$::jsonb\n      ) = 'array'\n      AND COALESCE(\n        jsonb_array_length(\n          $n8n${{ JSON.stringify($('Code in JavaScript').item.json.score_filters || []) }}$n8n$::jsonb\n        ),\n        0\n      ) > 0\n      THEN $n8n${{ JSON.stringify($('Code in JavaScript').item.json.score_filters || []) }}$n8n$::jsonb\n      ELSE NULL\n    END AS score_filters_patch\n)\n\nUPDATE monitoring_projects mp\nSET\n  lead_search_prompt = COALESCE(input.lead_search_prompt, mp.lead_search_prompt),\n  outreach_message_template = COALESCE(input.outreach_message_template, mp.outreach_message_template),\n  search_filters = COALESCE(mp.search_filters, '{}'::jsonb) || input.search_filters_patch,\n  score_filters = COALESCE(input.score_filters_patch, mp.score_filters),\n  filters_version = CASE\n    WHEN input.search_filters_patch <> '{}'::jsonb\n      OR input.score_filters_patch IS NOT NULL\n    THEN COALESCE(mp.filters_version, 0) + 1\n    ELSE mp.filters_version\n  END\nFROM input\nWHERE mp.id = input.project_id\nRETURNING mp.*;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1088,
+        -16
+      ],
+      "id": "cd333e1b-7d8a-439b-8762-a29a4ffbd07c",
+      "name": "Записываем поля",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Общие данные": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Записываем поля",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Если поля ручного ввода пустые, заполним их",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Если поля ручного ввода пустые, заполним их": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Общие данные1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query3": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook2": {
+      "main": [
+        [
+          {
+            "node": "Общие данные1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Записываем поля": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

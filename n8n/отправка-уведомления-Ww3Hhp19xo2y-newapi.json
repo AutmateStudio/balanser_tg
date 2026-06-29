@@ -1,0 +1,521 @@
+{
+  "name": "отправка уведомления (новый prod API)",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "data",
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "7ba1f63b-97aa-4598-9ddf-1704fa00f383",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{$json}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "5979845a-c923-44f8-9ba0-012963107f96",
+      "name": "Общие данные"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"data\": {\n      \"data\": [\n        {\n          \"id\": \"3\",\n          \"user_id\": \"2\",\n          \"platform_id\": \"2\",\n          \"external_recipient_id\": \"816740390\",\n          \"handle\": null,\n          \"display_name\": \"Fgsh123\",\n          \"profile_url\": null,\n          \"metadata\": null,\n          \"is_primary\": false,\n          \"is_active\": true,\n          \"created_at\": \"2026-05-20T21:53:09.405Z\",\n          \"updated_at\": \"2026-05-21T07:36:34.344Z\",\n          \"verified_at\": \"2026-05-21T07:36:34.345Z\"\n        },\n        {\n          \"id\": \"1\",\n          \"user_id\": \"2\",\n          \"platform_id\": \"1\",\n          \"external_recipient_id\": \"616589052\",\n          \"handle\": null,\n          \"display_name\": \"Алкесек Келардун\",\n          \"profile_url\": null,\n          \"metadata\": null,\n          \"is_primary\": false,\n          \"is_active\": true,\n          \"created_at\": \"2026-05-20T20:45:42.752Z\",\n          \"updated_at\": \"2026-05-21T07:39:19.976Z\",\n          \"verified_at\": \"2026-05-21T07:39:19.976Z\"\n        }\n      ],\n      \"notif_type\": \"billing_paid\",\n      \"title\": \"Оплата прошла успешно\",\n      \"body\": \"Тариф «Старт» оплачен. Баланс списан: 1 490 ₽.\",\n      \"notif_id\": \"74\"\n    }\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        176
+      ],
+      "id": "a26cb15d-3f74-45cd-8629-995283c31152",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        176
+      ],
+      "id": "6f20ecf3-eba1-4b39-8d9c-4926ec0a8de5",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        608,
+        0
+      ],
+      "id": "d0b5a4d3-fb29-4fae-b376-73e054be38dc",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data.data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        416,
+        0
+      ],
+      "id": "0a6019a9-dff3-4635-920e-4e86d0c51993",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "87ef00cd-5765-433e-a993-ae5b3e20aebc",
+              "leftValue": "={{ $('Loop Over Items').item.json.platform_id }}",
+              "rightValue": "1",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        992,
+        16
+      ],
+      "id": "387312ba-2138-41bb-87cb-81cbb343ab25",
+      "name": "If vk"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/bot/send-message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": {{ $('Loop Over Items').item.json.external_recipient_id }},\n  \"text\": \"{{ $('Формируем текст').item.json.text.replace(/\\n/g, '\\\\n') }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1184,
+        112
+      ],
+      "id": "4fb0757f-6ce3-4782-8878-b240ac13a54b",
+      "name": "Отправка телеграм",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/messages/vk/send",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"client_id\": \"vk_get_start\",\n  \"chat_id\": {{ $('Loop Over Items').item.json.external_recipient_id }},\n  \"text\": \"{{ $('Формируем текст').item.json.text.replace(/\\n/g, '\\\\n') }}\",\n  \"keyboard\": {\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1184,
+        -96
+      ],
+      "id": "91999504-a5ad-44e4-bd3b-720d95b7ff1e",
+      "name": "Отправка ВК"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0fc7db08-44ac-47c6-aead-8dad133a77eb",
+              "name": "text",
+              "value": "={{ $('Общие данные').item.json.data.title }}!\n{{ $('Общие данные').item.json.data.body }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        832,
+        16
+      ],
+      "id": "8623d79c-1391-462d-a12e-e4503877c5ba",
+      "name": "Формируем текст"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "in_app_notifications",
+          "mode": "list",
+          "cachedResultName": "in_app_notifications"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_read": true,
+            "id": "={{ $('Общие данные').item.json.data.notif_id }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "options",
+              "canBeUsedToMatch": true,
+              "options": [
+                {
+                  "name": "new_lead",
+                  "value": "new_lead"
+                },
+                {
+                  "name": "system_report",
+                  "value": "system_report"
+                },
+                {
+                  "name": "billing_paid",
+                  "value": "billing_paid"
+                },
+                {
+                  "name": "billing_failed",
+                  "value": "billing_failed"
+                },
+                {
+                  "name": "subscription_expiring",
+                  "value": "subscription_expiring"
+                },
+                {
+                  "name": "channel_request_approved",
+                  "value": "channel_request_approved"
+                },
+                {
+                  "name": "channel_request_rejected",
+                  "value": "channel_request_rejected"
+                },
+                {
+                  "name": "subscription_renewed",
+                  "value": "subscription_renewed"
+                },
+                {
+                  "name": "balance_topup_reminder",
+                  "value": "balance_topup_reminder"
+                }
+              ],
+              "removed": true
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "entity_type",
+              "displayName": "entity_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "entity_id",
+              "displayName": "entity_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "metadata",
+              "displayName": "metadata",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "is_read",
+              "displayName": "is_read",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "read_at",
+              "displayName": "read_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "project_id",
+              "displayName": "project_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        864,
+        -144
+      ],
+      "id": "d42a164f-f72e-4f33-86f0-3b674e5889cb",
+      "name": "Update rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Общие данные": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Update rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Формируем текст",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If vk": {
+      "main": [
+        [
+          {
+            "node": "Отправка ВК",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Отправка телеграм",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправка ВК": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправка телеграм": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Формируем текст": {
+      "main": [
+        [
+          {
+            "node": "If vk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

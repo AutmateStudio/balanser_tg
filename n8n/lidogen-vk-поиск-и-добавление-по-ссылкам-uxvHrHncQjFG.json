@@ -1,0 +1,469 @@
+{
+  "name": "Lidogen VK — поиск и добавление по ссылкам",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vk/search",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d7a0ec58-cb3a-4b09-8d1b-04ea1babcfa9",
+      "name": "Webhook /vk/search",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -288
+      ],
+      "webhookId": "lidogen-vk-search",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:8000/groups/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "response": {
+            "response": {}
+          }
+        }
+      },
+      "id": "2f6e4918-0446-4b83-9d1f-f5251af44657",
+      "name": "POST /groups/search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        688,
+        -288
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QZxEpjB2O8iPdiP0",
+          "name": "Авторизация поиск ВК"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "9f1c96c1-336b-4d60-af05-d9f5a8b78ed4",
+      "name": "Respond search",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        928,
+        -288
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vk/resolve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "0ba07a15-19bc-4bd8-981d-67fa7d603808",
+      "name": "Webhook /vk/resolve",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "webhookId": "lidogen-vk-resolve"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:8000/groups/resolve",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ target: $json.body.target }) }}",
+        "options": {}
+      },
+      "id": "f9fde641-a049-4e3c-8fbf-e7a3ec386a3d",
+      "name": "POST /groups/resolve",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        688,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QZxEpjB2O8iPdiP0",
+          "name": "Авторизация поиск ВК"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "4c1485e5-3d5f-4815-bc7b-875619ca19f1",
+      "name": "Respond resolve",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1152,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vk/add-by-link",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "4280687d-96f6-468b-b407-ef3b0d64ede9",
+      "name": "Webhook /vk/add-by-link",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        448,
+        288
+      ],
+      "webhookId": "lidogen-vk-add-by-link"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:8000/groups/resolve",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ target: $('Webhook /vk/add-by-link').item.json.body.target }) }}",
+        "options": {}
+      },
+      "id": "cda7123c-75bc-42b3-bf66-d8a0db00c279",
+      "name": "Resolve link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        688,
+        288
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QZxEpjB2O8iPdiP0",
+          "name": "Авторизация поиск ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:8000/groups/{{ $json.vk_id }}/score",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "wall_posts_count",
+              "value": "={{ $('Webhook /vk/add-by-link').item.json.body.wall_posts_count || 20 }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "id": "34f7c127-b4d1-4e11-b1e8-af64c8ea45ff",
+      "name": "Score group",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        928,
+        288
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QZxEpjB2O8iPdiP0",
+          "name": "Авторизация поиск ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "x1",
+              "name": "vk_id",
+              "type": "number",
+              "value": "={{ $('Resolve link').item.json.vk_id }}"
+            },
+            {
+              "id": "x2",
+              "name": "vk_object_type",
+              "type": "string",
+              "value": "={{ $('Resolve link').item.json.vk_object_type }}"
+            },
+            {
+              "id": "x3",
+              "name": "resolved_via",
+              "type": "string",
+              "value": "={{ $('Resolve link').item.json.resolved_via }}"
+            },
+            {
+              "id": "x4",
+              "name": "screen_name_fragment",
+              "type": "string",
+              "value": "={{ $('Resolve link').item.json.screen_name_fragment }}"
+            },
+            {
+              "id": "x5",
+              "name": "score",
+              "type": "object",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7775d7e0-d9f0-4ab8-b88d-baef26e92552",
+      "name": "Combine",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1168,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "4d29b9de-9858-4738-88e0-42fae8a716a3",
+      "name": "Respond add-by-link",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:8000/groups/resolve",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ target: \"https://vk.com/club102246790\" }) }}",
+        "options": {}
+      },
+      "id": "aa2e7dcb-a49e-472b-9016-32841766d797",
+      "name": "POST /groups/resolve1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        144
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QZxEpjB2O8iPdiP0",
+          "name": "Авторизация поиск ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        896,
+        0
+      ],
+      "id": "a1825272-dfa0-460b-b251-3bb3c5bf06c6",
+      "name": "Insert or update rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "nJLtOwEA1dAE4Pjt",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook /vk/search": {
+      "main": [
+        [
+          {
+            "node": "POST /groups/search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /groups/search": {
+      "main": [
+        [
+          {
+            "node": "Respond search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook /vk/resolve": {
+      "main": [
+        [
+          {
+            "node": "POST /groups/resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /groups/resolve": {
+      "main": [
+        [
+          {
+            "node": "Insert or update rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook /vk/add-by-link": {
+      "main": [
+        [
+          {
+            "node": "Resolve link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve link": {
+      "main": [
+        [
+          {
+            "node": "Score group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score group": {
+      "main": [
+        [
+          {
+            "node": "Combine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine": {
+      "main": [
+        [
+          {
+            "node": "Respond add-by-link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
