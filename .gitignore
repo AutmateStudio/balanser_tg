@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 *.env.local
+n8n/n8n_api.txt
 
 # Python
 __pycache__/
