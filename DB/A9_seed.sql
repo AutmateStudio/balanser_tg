@@ -13,9 +13,12 @@
 INSERT INTO resource_op_types (code, name, rph_limit, is_enabled) VALUES
   -- Auth (задачи 1, 3, 25)
   ('auth.qr_login', 'QR: qr_login + wait + recreate + get_me + save', 3, true),
-  ('connect_disconnect', 'Connect / disconnect сессии', 1, true),
-  ('get_me', 'Текущий пользователь (валидация сессии)', 1, true),
-  ('is_user_authorized', 'Проверка авторизации', 1, true),
+  -- rph_limit=30 (effective_rph=27): раньше было 1 → effective_rph=floor(1×0.9)=0,
+  -- из-за чего аккаунт навсегда числился any_op_exhausted в сводных VIEW.
+  -- Эти op вне task_type_ops очереди и не пишутся в account_resource_usage.
+  ('connect_disconnect', 'Connect / disconnect сессии', 30, true),
+  ('get_me', 'Текущий пользователь (валидация сессии)', 30, true),
+  ('is_user_authorized', 'Проверка авторизации', 30, true),
   -- Resolve / entity (6, 8, 12, 19, 23, 24)
   ('get_entity', 'Resolve username / ссылки / peer', 7, true),
   ('get_input_entity', 'get_input_entity() для InputPeer', 7, true),

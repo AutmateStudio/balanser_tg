@@ -41,20 +41,25 @@ RESOURCE_OPS: dict[str, ResourceOpDefinition] = {
         name="QR: qr_login + wait + recreate + get_me + save",
         rph_limit=3,
     ),
+    # rph_limit=30 (effective_rph=27): lifecycle/health-op'ы сессии. Раньше было 1,
+    # из-за чего effective_rph = floor(1×0.9) = 0 → аккаунт навсегда числился
+    # any_op_exhausted в сводках. Эти op не входят в task_type_ops очереди и не
+    # пишутся в account_resource_usage, поэтому конкретное значение не лимитирует
+    # диспетчер — важно лишь, чтобы effective_rph был > 0.
     "connect_disconnect": ResourceOpDefinition(
         code="connect_disconnect",
         name="Connect / disconnect сессии",
-        rph_limit=1,
+        rph_limit=30,
     ),
     "get_me": ResourceOpDefinition(
         code="get_me",
         name="Текущий пользователь (валидация сессии)",
-        rph_limit=1,
+        rph_limit=30,
     ),
     "is_user_authorized": ResourceOpDefinition(
         code="is_user_authorized",
         name="Проверка авторизации",
-        rph_limit=1,
+        rph_limit=30,
     ),
     "get_entity": ResourceOpDefinition(
         code="get_entity",
