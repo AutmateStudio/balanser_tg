@@ -239,6 +239,7 @@ services:
       - ./standalone_discovery/sessions:/app/standalone_discovery/sessions
       - ./standalone_discovery/discovery_api/data:/app/standalone_discovery/discovery_api/data
       - ./scripts:/app/scripts
+      - ./DB:/app/DB:ro
     command: ["bash", "scripts/run_docker_tests.sh"]
 
   test-local:
