@@ -136,7 +136,7 @@ async def _join_channel_entity(
         return True
     except InviteRequestSentError as e:
         log.warning(
-            "resolve ref=%s: отправлена заявка на вступление role=%s chat=%s: %s",
+            "resolve ref=%s: join_pending role=%s chat=%s (заявка отправлена): %s",
             raw_ref,
             role,
             title,

@@ -45,6 +45,7 @@ class ErrorCode(StrEnum):
 
     # --- зарезервировано под E2 (Telethon) ---
     CHANNEL_PRIVATE = "channel_private"
+    JOIN_PENDING = "join_pending"
     BANNED = "banned"
     PEER_FLOOD = "peer_flood"
     TRANSIENT_ERROR = "transient_error"

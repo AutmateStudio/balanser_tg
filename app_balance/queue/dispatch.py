@@ -223,7 +223,12 @@ class TaskDispatcher:
             await self._finish_attempt(attempt_id, status="success")
 
             if await self._queue.complete(task.id):
-
+                if task.task_type_code == "parser_add_channel":
+                    logger.info(
+                        "dispatch: parser_add_channel completed task_id=%s session=%s",
+                        task.id,
+                        execute_account.session_name,
+                    )
                 return DispatchResult.COMPLETED
 
             return DispatchResult.RETRIED

@@ -5,6 +5,8 @@ E2 расширит маппинг Telethon через classify_telethon_error.
 """
 from __future__ import annotations
 
+import os
+
 from app_balance.queue.error_codes import ErrorCode
 
 FLOOD_WAIT = ErrorCode.FLOOD_WAIT
@@ -95,6 +97,15 @@ def map_telethon_exception(exc: BaseException) -> QueueTaskError:
     return PermanentError(FATAL, message)
 
 
+def join_pending_retry_seconds() -> int:
+    """Интервал retry для join_pending (env JOIN_PENDING_RETRY_SECONDS, default 1800)."""
+    raw = os.getenv("JOIN_PENDING_RETRY_SECONDS", "1800").strip()
+    try:
+        return max(60, int(raw))
+    except ValueError:
+        return 1800
+
+
 def map_clump_error_message(err: str) -> QueueTaskError:
     """Маппинг строки ошибки clump → typed error (E2)."""
     text = str(err).strip()
@@ -142,6 +153,23 @@ def map_clump_error_message(err: str) -> QueueTaskError:
         )
     ):
         return PermanentError(ErrorCode.BANNED, text)
+
+    if "нет чата обсуждений" in lowered:
+        return PermanentError(ErrorCode.CHANNEL_PRIVATE, text)
+
+    join_pending_markers = (
+        "не участник",
+        "нет доступа к чату",
+        "не удалось вступить",
+        "заявка на вступление",
+        "ожидает_одобрения_заявки",
+    )
+    if any(marker in lowered for marker in join_pending_markers):
+        return RetryableError(
+            ErrorCode.JOIN_PENDING,
+            text,
+            retry_after_seconds=join_pending_retry_seconds(),
+        )
 
     return RetryableError(ErrorCode.CLUMP_ERROR, text)
 
