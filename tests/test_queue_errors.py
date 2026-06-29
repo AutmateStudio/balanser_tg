@@ -59,6 +59,24 @@ def test_map_clump_error_ban_string() -> None:
     assert mapped.code == ACCOUNT_BANNED
 
 
+def test_map_clump_error_no_discussion_is_permanent() -> None:
+    msg = "У канала «Test» нет чата обсуждений — прослушивание невозможно"
+    mapped = map_clump_error_message(msg)
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "channel_private"
+
+
+def test_map_clump_error_join_pending_retries_in_30_min() -> None:
+    msg = (
+        "Нет доступа к чату для прослушивания «Chat» "
+        "(ref=@ch, listen_peer_id=-1001): не участник"
+    )
+    mapped = map_clump_error_message(msg)
+    assert isinstance(mapped, RetryableError)
+    assert mapped.code == "join_pending"
+    assert mapped.retry_after_seconds == 1800
+
+
 def test_map_telethon_exception_flood_wait() -> None:
     exc = te.FloodWaitError(None)
     exc.seconds = 12

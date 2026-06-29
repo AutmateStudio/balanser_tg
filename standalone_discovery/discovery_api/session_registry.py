@@ -697,6 +697,13 @@ class Parser_client:
 
         if wh and not self.is_running():
             await self.start(wh)
+        log.info(
+            "parser add_channel OK session=%s ref=%s chat_id=%s listener_running=%s",
+            self.session_name,
+            raw,
+            cid,
+            self.is_running(),
+        )
         return cid, None
 
     async def remove_channel(self, raw: str) -> bool:
@@ -1039,8 +1046,17 @@ class SessionClump:
 
         existing_ids = self.all_allowed_chat_ids()
         chat_id, err = await pc.add_channel(ref, webhook_url=wh)
+        already_present = False
         if chat_id is not None and err is None:
             if int(chat_id) in existing_ids:
+                already_present = True
+                log.info(
+                    "clump add_channel_on_session OK parser=%s session=%s ref=%s chat_id=%s already_present=true",
+                    self.clump_name,
+                    session_name,
+                    ref,
+                    chat_id,
+                )
                 return {
                     "channel": ref,
                     "session_name": session_name,
@@ -1049,13 +1065,20 @@ class SessionClump:
                     "already_present": True,
                 }
             self.assignments[ref] = session_name
+            log.info(
+                "clump add_channel_on_session OK parser=%s session=%s ref=%s chat_id=%s already_present=false",
+                self.clump_name,
+                session_name,
+                ref,
+                chat_id,
+            )
 
         return {
             "channel": ref,
             "session_name": session_name,
             "chat_id": chat_id,
             "error": err,
-            "already_present": False,
+            "already_present": already_present,
         }
 
     @staticmethod

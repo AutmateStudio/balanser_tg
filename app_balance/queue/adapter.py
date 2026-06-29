@@ -173,6 +173,14 @@ async def _execute_parser_add_channel(
     if error:
         raise map_clump_error_message(str(error))
 
+    log.info(
+        "execute_task: parser_add_channel OK task_id=%s ref=%s session=%s chat_id=%s",
+        task.id,
+        channel_ref,
+        session_name,
+        result.get("chat_id"),
+    )
+
     await sync_after_add(task, account, clump)
     await _start_clump_after_execute(parser_id=parser_id, clump=clump)
 

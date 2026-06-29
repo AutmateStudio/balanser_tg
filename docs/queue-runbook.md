@@ -27,6 +27,7 @@
 |-----|---------|-----------------|----------------------|
 | `flood_wait` | FloodWait от Telegram / clump | retry с задержкой из ошибки | Подождать; при частых срабатываниях снизить RPH op |
 | `clump_error` | Прочая ошибка clump (не классифицирована) | retry | Проверить логи clump; при повторении — эскалация |
+| `join_pending` | Заявка на вступление / ещё не участник чата | retry через 30 мин (`JOIN_PENDING_RETRY_SECONDS`) | Одобрить заявку в Telegram или дождаться retry |
 | `clump_not_loaded` | Parser clump не загружен | retry | Убедиться, что парсер запущен (`/parser/start`) |
 | `transient_error` | Timeout / временный сбой сети | retry | Обычно проходит сам; при массовости — проверить сеть/сервер |
 | `unknown_task_type:*` | Тип задачи не найден или выключен | retry → failed | Проверить seed `task_types`, включить тип |
@@ -63,7 +64,8 @@
 
 | Код | Ожидаемое поведение |
 |-----|---------------------|
-| `channel_private` | permanent — канал недоступен |
+| `channel_private` | permanent — канал недоступен, нет discussion, join-request без одобрения |
+| `join_pending` | retry через 30 мин — заявка на вступление, ожидание membership |
 | `banned` | permanent + sync health — аккаунт заблокирован |
 | `peer_flood` | retry + cooldown |
 
@@ -81,6 +83,15 @@
 ```
 
 Для мониторинга и алертов (G4, G6) используйте **`last_error_code`**.
+
+### Диагностика без API (psql)
+
+```bash
+export PGURL="$(grep ^QUEUE_DATABASE_URL= standalone_discovery/.env | cut -d= -f2- | tr -d '\r')"
+psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
+```
+
+См. также `python scripts/diag_worker_rph.py` (docker compose run --rm test).
 
 ---
 
