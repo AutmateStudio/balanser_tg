@@ -11,6 +11,7 @@ import telethon
 from telethon import TelegramClient
 from telethon.errors import (
     ChannelPrivateError,
+    FloodWaitError,
     InviteHashExpiredError,
     InviteRequestSentError,
     UserAlreadyParticipantError,
@@ -155,6 +156,14 @@ async def _join_channel_entity(
     except InviteHashExpiredError as e:
         log.warning("resolve ref=%s: invite истёк role=%s: %s", raw_ref, role, e)
         return False
+    except FloodWaitError:
+        log.warning(
+            "resolve ref=%s: FloodWait на join role=%s chat=%s",
+            raw_ref,
+            role,
+            title,
+        )
+        raise
     except Exception:
         log.exception(
             "resolve ref=%s: JoinChannel FAIL role=%s chat=%s",

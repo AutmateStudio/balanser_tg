@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import telethon
+from telethon.errors import FloodWaitError
 from telethon.tl import types
 
 from discovery_api.chat_resolve import (
@@ -161,6 +162,36 @@ class ResolveListenTargetTests(unittest.TestCase):
         ):
             with self.assertRaises(ChatAccessError):
                 _run(resolve_listen_target(client, "@closed_group"))
+
+    def test_join_flood_wait_propagates_not_join_pending(self) -> None:
+        channel = _make_channel(broadcast=True, channel_id=111)
+        discussion = _make_channel(megagroup=True, channel_id=222, title="Discuss")
+
+        full_chat = MagicMock()
+        full_chat.linked_chat_id = 222
+        full_info = MagicMock()
+        full_info.full_chat = full_chat
+
+        flood = FloodWaitError(request=None, capture=270)
+
+        client = AsyncMock()
+        client.get_entity = AsyncMock(side_effect=[channel, discussion])
+        client.side_effect = [full_info]
+
+        async def join_side_effect(*args, **kwargs):
+            raise flood
+
+        with patch.object(telethon.utils, "get_peer_id", side_effect=[-100111, -100222]), patch(
+            "discovery_api.chat_resolve._join_channel_entity",
+            new_callable=AsyncMock,
+            side_effect=join_side_effect,
+        ), patch(
+            "discovery_api.chat_resolve._check_listen_access",
+            new_callable=AsyncMock,
+            return_value=(True, "участник"),
+        ):
+            with self.assertRaises(FloodWaitError):
+                _run(resolve_listen_target(client, "https://t.me/news"))
 
 
 if __name__ == "__main__":
