@@ -33,6 +33,26 @@ dotenv.load_dotenv()
 
 log = logging.getLogger(__name__)
 
+
+def _log_resolve_error(
+    message: str,
+    *,
+    error_type: str,
+    exc: BaseException | None = None,
+) -> None:
+    try:
+        from app_balance.queue.task_error_log import log_task_error
+
+        log_task_error(
+            log,
+            message,
+            exc=exc,
+            error_type=error_type,
+            skip_if_queued=True,
+        )
+    except ImportError:
+        log.warning(message)
+
 _message_queue: asyncio.Queue[dict[str, Any]] | None = None
 _webhook_senders: dict[str, "AsyncSender"] = {}
 _worker_tasks: list[asyncio.Task[None]] = []
@@ -518,17 +538,31 @@ async def resolve_channel_to_chat_id(
         )
         return listen_peer_id, None
     except ChannelHasNoDiscussionError as e:
-        log.warning("parser resolve skip (no discussion) ref=%s: %s", raw, e)
-        return None, str(e)
+        msg = str(e)
+        _log_resolve_error(
+            f"parser resolve skip (no discussion) ref={raw}: {msg}",
+            error_type="FATAL",
+        )
+        return None, msg
     except ChatAccessError as e:
-        log.warning("parser resolve skip (no access) ref=%s: %s", raw, e)
-        return None, str(e)
+        msg = str(e)
+        _log_resolve_error(
+            f"parser resolve skip (no access) ref={raw}: {msg}",
+            error_type="RETRYABLE",
+        )
+        return None, msg
     except ValueError as e:
-        log.warning("parser resolve skip ref=%s: %s", raw, e)
-        return None, str(e)
+        msg = str(e)
+        _log_resolve_error(
+            f"parser resolve skip ref={raw}: {msg}",
+            error_type="FATAL",
+        )
+        return None, msg
     except FloodWaitError as e:
         seconds = int(getattr(e, "seconds", 1) or 1)
-        return None, f"FloodWait {seconds}s при resolve '{normalized}'"
+        msg = f"FloodWait {seconds}s при resolve '{normalized}'"
+        _log_resolve_error(msg, error_type="RETRYABLE", exc=e)
+        return None, msg
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -568,18 +602,31 @@ async def _resolve_pending_usernames(
                 target.listen_joined,
             )
         except ChannelHasNoDiscussionError as e:
-            log.warning("Пропуск канала без обсуждений %s: %s", raw_ref, e)
+            _log_resolve_error(
+                f"parser pending resolve skip (no discussion) ref={raw_ref}: {e}",
+                error_type="FATAL",
+            )
         except ChatAccessError as e:
-            log.warning("Пропуск: нет доступа %s: %s", raw_ref, e)
+            _log_resolve_error(
+                f"parser pending resolve skip (no access) ref={raw_ref}: {e}",
+                error_type="RETRYABLE",
+            )
         except FloodWaitError as e:
             seconds = int(getattr(e, "seconds", 1) or 1)
-            log.warning("FloodWait при resolve %s: %s сек", raw_ref, seconds)
+            _log_resolve_error(
+                f"FloodWait {seconds}s при pending resolve ref={raw_ref}",
+                error_type="RETRYABLE",
+                exc=e,
+            )
             await asyncio.sleep(seconds)
             continue
         except asyncio.CancelledError:
             raise
-        except Exception:
-            log.exception("Не удалось resolve ref=%s", raw_ref)
+        except Exception as e:
+            _log_resolve_error(
+                f"parser pending resolve fail ref={raw_ref}: {e!s}",
+                error_type="UNEXPECTED",
+            )
         if delay > 0:
             await asyncio.sleep(delay)
 

@@ -31,6 +31,11 @@ from app_balance.queue.resource_usage import ResourceUsageRepo
 
 from app_balance.queue.task_attempts import AttemptFinishStatus, TaskAttemptsRepo
 
+from app_balance.queue.task_error_log import (
+    bind_task_error_context,
+    clear_task_error_context,
+    log_queue_task_error,
+)
 from app_balance.queue.task_queue import ClaimedTask, TaskQueueRepo
 
 
@@ -175,7 +180,10 @@ class TaskDispatcher:
 
                 execute_account = account
 
-
+            bind_task_error_context(
+                task_id=task.id,
+                account=execute_account.session_name,
+            )
 
             attempt_number = await self._queue.begin_execution_attempt(task.id)
 
@@ -234,10 +242,12 @@ class TaskDispatcher:
             return DispatchResult.RETRIED
 
         except ResourceError as exc:
-            logger.warning(
-                "dispatch: недостаток ресурса задачи id=%s code=%s",
-                task.id,
-                exc.code,
+            account_name = execute_account.session_name if execute_account else "-"
+            log_queue_task_error(
+                logger,
+                exc,
+                task_id=task.id,
+                account=account_name,
             )
             await self._handle_execute_error(
                 task.id,
@@ -249,10 +259,12 @@ class TaskDispatcher:
             return DispatchResult.POSTPONED
 
         except PermanentError as exc:
-            logger.error(
-                "dispatch: permanent ошибка задачи id=%s code=%s",
-                task.id,
-                exc.code,
+            account_name = execute_account.session_name if execute_account else "-"
+            log_queue_task_error(
+                logger,
+                exc,
+                task_id=task.id,
+                account=account_name,
             )
             await self._sync_account_health_on_error(execute_account, exc)
             await self._handle_execute_error(
@@ -264,10 +276,12 @@ class TaskDispatcher:
             return DispatchResult.FAILED
 
         except RetryableError as exc:
-            logger.warning(
-                "dispatch: retryable ошибка задачи id=%s code=%s",
-                task.id,
-                exc.code,
+            account_name = execute_account.session_name if execute_account else "-"
+            log_queue_task_error(
+                logger,
+                exc,
+                task_id=task.id,
+                account=account_name,
             )
             await self._sync_account_health_on_error(execute_account, exc)
             delay = (
@@ -289,7 +303,13 @@ class TaskDispatcher:
 
         except Exception as exc:  # noqa: BLE001 — фиксируем любую ошибку попытки
 
-            logger.exception("dispatch: ошибка задачи id=%s", task.id)
+            account_name = execute_account.session_name if execute_account else "-"
+            log_queue_task_error(
+                logger,
+                exc,
+                task_id=task.id,
+                account=account_name,
+            )
 
             result = await self._handle_execute_error(
                 task.id,
@@ -304,6 +324,8 @@ class TaskDispatcher:
             return result
 
         finally:
+
+            clear_task_error_context()
 
             for account_id in reserved_ids:
 

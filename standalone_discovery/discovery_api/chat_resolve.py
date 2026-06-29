@@ -136,7 +136,7 @@ async def _join_channel_entity(
         )
         return True
     except InviteRequestSentError as e:
-        log.warning(
+        log.debug(
             "resolve ref=%s: join_pending role=%s chat=%s (заявка отправлена): %s",
             raw_ref,
             role,
@@ -145,7 +145,7 @@ async def _join_channel_entity(
         )
         return False
     except ChannelPrivateError as e:
-        log.warning(
+        log.debug(
             "resolve ref=%s: приватный чат role=%s chat=%s: %s",
             raw_ref,
             role,
@@ -154,22 +154,24 @@ async def _join_channel_entity(
         )
         return False
     except InviteHashExpiredError as e:
-        log.warning("resolve ref=%s: invite истёк role=%s: %s", raw_ref, role, e)
+        log.debug("resolve ref=%s: invite истёк role=%s: %s", raw_ref, role, e)
         return False
-    except FloodWaitError:
-        log.warning(
-            "resolve ref=%s: FloodWait на join role=%s chat=%s",
+    except FloodWaitError as e:
+        log.debug(
+            "resolve ref=%s: FloodWait role=%s chat=%s seconds=%s",
             raw_ref,
             role,
             title,
+            getattr(e, "seconds", 0),
         )
         raise
-    except Exception:
-        log.exception(
-            "resolve ref=%s: JoinChannel FAIL role=%s chat=%s",
+    except Exception as e:
+        log.debug(
+            "resolve ref=%s: JoinChannel FAIL role=%s chat=%s: %s",
             raw_ref,
             role,
             title,
+            e,
         )
         return False
 
@@ -200,7 +202,7 @@ async def _check_listen_access(
             )
             return True, "участник"
         except UserNotParticipantError:
-            log.warning(
+            log.debug(
                 "resolve ref=%s: нет доступа role=%s chat=%s — не участник",
                 raw_ref,
                 role,
@@ -208,7 +210,7 @@ async def _check_listen_access(
             )
             return False, "не участник"
         except ChannelPrivateError as e:
-            log.warning(
+            log.debug(
                 "resolve ref=%s: нет доступа role=%s chat=%s — приватный: %s",
                 raw_ref,
                 role,
@@ -217,7 +219,7 @@ async def _check_listen_access(
             )
             return False, "приватный канал/группа"
         except Exception as e:
-            log.warning(
+            log.debug(
                 "resolve ref=%s: проверка доступа role=%s chat=%s: %s",
                 raw_ref,
                 role,
@@ -237,7 +239,7 @@ async def _check_listen_access(
             )
             return True, "участник"
         except Exception as e:
-            log.warning(
+            log.debug(
                 "resolve ref=%s: нет доступа role=%s chat=%s: %s",
                 raw_ref,
                 role,
