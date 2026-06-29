@@ -111,3 +111,7 @@ docker-e2e-d12-preflight:
 docker-e2e-d12-run:
 	@test -f $(E2E_ENV_FILE) || (echo "Создайте $(E2E_ENV_FILE) из env.d12.example" && exit 1)
 	docker compose run --rm --env-file $(E2E_ENV_FILE) test python scripts/e2e_d12/run_e2e_d12.py
+
+## apply-inprocess-colocated: D12 Вариант A на co-located хосте (напр. vps-104)
+apply-inprocess-colocated:
+	bash scripts/apply_inprocess_worker_colocated.sh

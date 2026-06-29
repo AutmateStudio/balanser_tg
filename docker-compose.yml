@@ -62,8 +62,14 @@ services:
     command: ["bash", "scripts/migrate_queue.sh", "--mode", "greenfield"]
 
   # Z4 — процесс воркера очереди (C1: claim_next loop + graceful SIGTERM).
+  # Telethon → Telegram через WireGuard (тот же network namespace, что discovery-api).
+  #
+  # Co-located prod (API + worker на одном хосте, напр. vps-104): используйте D12 Вариант A —
+  # DISCOVERY_INPROCESS_WORKER=true в standalone_discovery/.env и НЕ запускайте этот сервис
+  # параллельно с discovery-api (два claimer'а + конфликт .session SQLite).
   queue-worker:
     <<: *balancer-image
+    network_mode: "container:standalone-discovery-vpn"
     restart: unless-stopped
     env_file:
       - path: .env
@@ -83,12 +89,13 @@ services:
       API_ID: ${API_ID:-}
       API_HASH: ${API_HASH:-}
       # Пути внутри контейнера (не путать с HOST_SESSIONS_DIR — bind mount на хосте).
+      # PARSER_STORE_PATH = тот же файл, что пишет standalone_discovery (./data → /app/discovery_api/data).
       SESSIONS_DIR: /app/sessions
-      PARSER_STORE_PATH: /app/standalone_discovery/discovery_api/data/parser_jobs.json
+      PARSER_STORE_PATH: /app/discovery_api/data/parser_jobs.json
     volumes:
       # Bind mount: путь на хосте должен начинаться с ./ или / (Compose иначе считает volume name).
       - ${HOST_SESSIONS_DIR:-./standalone_discovery/sessions}:/app/sessions
-      - ./standalone_discovery/discovery_api/data:/app/standalone_discovery/discovery_api/data
+      - ./standalone_discovery/data:/app/discovery_api/data
     stop_signal: SIGTERM
     stop_grace_period: 30s
     command: ["python", "-m", "app_balance.queue_worker"]
@@ -132,6 +139,8 @@ services:
     <<: *balancer-image
     profiles: [producers]
     restart: unless-stopped
+    # Co-located prod с in-process worker: не запускать параллельно с discovery-api —
+    # restore_all_clumps_from_store() поднимает listener'ы и конфликтует с .session (см. queue-runbook).
     env_file:
       - path: .env
         required: false
@@ -143,10 +152,10 @@ services:
       API_ID: ${API_ID:-}
       API_HASH: ${API_HASH:-}
       SESSIONS_DIR: /app/sessions
-      PARSER_STORE_PATH: /app/standalone_discovery/discovery_api/data/parser_jobs.json
+      PARSER_STORE_PATH: /app/discovery_api/data/parser_jobs.json
     volumes:
       - ${HOST_SESSIONS_DIR:-./standalone_discovery/sessions}:/app/sessions
-      - ./standalone_discovery/discovery_api/data:/app/standalone_discovery/discovery_api/data
+      - ./standalone_discovery/data:/app/discovery_api/data
     stop_signal: SIGTERM
     stop_grace_period: 30s
     command: ["python", "-m", "app_balance.queue_scheduler", "balancer"]
