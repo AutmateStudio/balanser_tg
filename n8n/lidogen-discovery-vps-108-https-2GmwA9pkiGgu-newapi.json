@@ -1232,7 +1232,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Config1').item.json.baseUrl }}/discovery-api/parser/{{ $('Config1').item.json.parserId }}/add-channels",
+        "url": "={{ $('Config1').item.json.baseUrl }}/discovery-api/parser/{{ $('Config1').item.json.parserId }}/add-channels?async=true",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -1256,12 +1256,12 @@
         4208
       ],
       "continueOnFail": true,
-      "notes": "POST add-channels без query — ставит задачу в action queue, в ответе action_id."
+      "notes": "POST add-channels?async=true — задачи кладутся в PG task_queue (по одной на канал), в ответе action_id и task_ids."
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Config1').item.json.baseUrl }}/discovery-api/parser/{{ $('Config1').item.json.parserId }}/remove-channels",
+        "url": "={{ $('Config1').item.json.baseUrl }}/discovery-api/parser/{{ $('Config1').item.json.parserId }}/remove-channels?async=true",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -1284,7 +1284,8 @@
         2000,
         4368
       ],
-      "continueOnFail": true
+      "continueOnFail": true,
+      "notes": "POST remove-channels?async=true — при USE_PG_QUEUE=true задачи parser_remove_channel кладутся в PG task_queue (по одной на канал)."
     },
     {
       "parameters": {
@@ -1521,7 +1522,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Config1').item.json.baseUrl }}/discovery-api/parser/{{ $('Config1').item.json.parserId }}/add-channels?async=0",
+        "url": "={{ $('Config1').item.json.baseUrl }}/discovery-api/parser/{{ $('Config1').item.json.parserId }}/add-channels?async=true",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -1537,7 +1538,7 @@
         "options": {}
       },
       "id": "ee51f493-f4ac-4811-b8e5-24e656836b66",
-      "name": "26 Channels: add sync1",
+      "name": "26 Channels: add (очередь async)1",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -1545,7 +1546,7 @@
         5760
       ],
       "continueOnFail": true,
-      "notes": "Синхронное добавление каналов (?async=0), без очереди."
+      "notes": "Добавление каналов через очередь (?async=true) — задачи parser_add_channel кладутся в PG task_queue."
     },
     {
       "parameters": {
@@ -2133,7 +2134,7 @@
         ],
         [
           {
-            "node": "26 Channels: add sync1",
+            "node": "26 Channels: add (очередь async)1",
             "type": "main",
             "index": 0
           }
