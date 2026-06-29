@@ -1,6 +1,8 @@
 -- A9: seed справочников PG Queue Balancer (полное ТЗ + карта Telethon ops из discovery)
 -- Порядок: после BD_schema.sql
--- effective_rph = rph_limit * (1 - reserve_percent / 100), reserve_percent = 10 по умолчанию
+-- effective_rph = floor(rph_limit × (1 − reserve_percent/100)), reserve_percent = 10
+-- Политика RPH (A14): parser_add_channel = 20 кан/ч на аккаунт (get_entity/Join=223,
+-- GetFull=112); все прочие op — ×5 от исходного базового seed.
 --
 -- HTTP/фоновые задачи discovery (1–30) → resource_op_types ниже;
 -- PG-очередь (task_types) — только типы §8 ТЗ + parser_remove_channel (D9);
@@ -12,33 +14,25 @@
 
 INSERT INTO resource_op_types (code, name, rph_limit, is_enabled) VALUES
   -- Auth (задачи 1, 3, 25)
-  ('auth.qr_login', 'QR: qr_login + wait + recreate + get_me + save', 3, true),
-  -- rph_limit=30 (effective_rph=27): раньше было 1 → effective_rph=floor(1×0.9)=0,
-  -- из-за чего аккаунт навсегда числился any_op_exhausted в сводных VIEW.
-  -- Эти op вне task_type_ops очереди и не пишутся в account_resource_usage.
-  ('connect_disconnect', 'Connect / disconnect сессии', 30, true),
-  ('get_me', 'Текущий пользователь (валидация сессии)', 30, true),
-  ('is_user_authorized', 'Проверка авторизации', 30, true),
-  -- Resolve / entity (6, 8, 12, 19, 23, 24)
-  ('get_entity', 'Resolve username / ссылки / peer', 7, true),
-  ('get_input_entity', 'get_input_entity() для InputPeer', 7, true),
-  -- Discovery search (4, 5)
-  ('contacts.Search', 'Поиск контактов / каналов', 2, true),
-  ('messages.SearchGlobal', 'Глобальный поиск сообщений', 120, true),
-  ('channels.GetChannelRecommendations', 'Рекомендации каналов', 30, true),
-  -- Channel metadata & join (6, 8, 12, 19, 23)
-  ('channels.GetFullChannel', 'Полные данные канала', 80, true),
-  ('channels.JoinChannel', 'Подписка / join канала или discussion', 30, true),
-  ('channels.LeaveChannel', 'Выход из канала или discussion', 30, true),
-  ('channels.GetParticipant', 'Проверка участника (InputPeerSelf)', 6000, true),
-  ('channels.GetParticipants', 'Список участников (megagroup / lidgen)', 500, true),
-  ('get_permissions', 'get_permissions() для legacy Chat', 30, true),
-  -- Messages & users (4–6, 21)
-  ('iter_messages', 'Итерация сообщений (скоринг / collect)', 450, true),
-  ('users.GetFullUser', 'Полные данные пользователя (NewMessage sender)', 1500, true),
-  -- Bot API (7, 26) — не MTProto; учёт отдельно, лимиты завышены
-  ('bot.send_message', 'Bot API: send_message', 1000, true),
-  ('bot.send_photo', 'Bot API: send_photo', 500, true)
+  ('auth.qr_login', 'QR: qr_login + wait + recreate + get_me + save', 15, true),
+  ('connect_disconnect', 'Connect / disconnect сессии', 150, true),
+  ('get_me', 'Текущий пользователь (валидация сессии)', 150, true),
+  ('is_user_authorized', 'Проверка авторизации', 150, true),
+  ('get_entity', 'Resolve username / ссылки / peer', 223, true),
+  ('get_input_entity', 'get_input_entity() для InputPeer', 35, true),
+  ('contacts.Search', 'Поиск контактов / каналов', 10, true),
+  ('messages.SearchGlobal', 'Глобальный поиск сообщений', 600, true),
+  ('channels.GetChannelRecommendations', 'Рекомендации каналов', 150, true),
+  ('channels.GetFullChannel', 'Полные данные канала', 112, true),
+  ('channels.JoinChannel', 'Подписка / join канала или discussion', 223, true),
+  ('channels.LeaveChannel', 'Выход из канала или discussion', 150, true),
+  ('channels.GetParticipant', 'Проверка участника (InputPeerSelf)', 30000, true),
+  ('channels.GetParticipants', 'Список участников (megagroup / lidgen)', 2500, true),
+  ('get_permissions', 'get_permissions() для legacy Chat', 150, true),
+  ('iter_messages', 'Итерация сообщений (скоринг / collect)', 2250, true),
+  ('users.GetFullUser', 'Полные данные пользователя (NewMessage sender)', 7500, true),
+  ('bot.send_message', 'Bot API: send_message', 5000, true),
+  ('bot.send_photo', 'Bot API: send_photo', 2500, true)
 ON CONFLICT (code) DO UPDATE SET
   name = EXCLUDED.name,
   rph_limit = EXCLUDED.rph_limit,
@@ -56,7 +50,7 @@ INSERT INTO task_types (
   (
     'parser_add_channel',
     'Добавить канал на parser-сессию',
-    'HTTP #12/#19: resolve_listen_target() — join source + discussion, проверка доступа. Одна строка task_queue = один канал.',
+    'HTTP #12/#19: resolve_listen_target() — join source + discussion, проверка доступа. Одна строка task_queue = один канал. RPH seed: до 20 кан/ч на аккаунт (get_entity/Join rph=223, GetFull rph=112, threshold 80%).',
     true, 500, 80, false, NULL
   ),
   (

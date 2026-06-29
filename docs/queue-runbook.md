@@ -92,12 +92,14 @@
 
 Ключевые op (полный список — в [`docs/ops-catalog.md`](ops-catalog.md)):
 
-| op_code | rph_limit | effective_rph |
-|---------|-----------|---------------|
-| `get_entity` | 7 | 6 |
-| `channels.JoinChannel` | 30 | 27 |
-| `channels.GetFullChannel` | 80 | 72 |
-| `channels.GetParticipants` | 500 | 450 |
+| op_code | rph_limit | effective_rph | parser_add_channel |
+|---------|-----------|---------------|--------------------|
+| `get_entity` | 223 | 200 | 20 кан/ч (фикс.) |
+| `channels.JoinChannel` | 223 | 200 | 20 кан/ч (фикс.) |
+| `channels.GetFullChannel` | 112 | 100 | 20 кан/ч (фикс.) |
+| `iter_messages` | 2250 | 2025 | ×5 (collect/discover) |
+| `channels.GetParticipants` | 2500 | 2250 | ×5 |
+| `channels.LeaveChannel` | 150 | 135 | ×5 |
 | `iter_messages` | 450 | 405 |
 | `channels.LeaveChannel` | 30 | 27 |
 
@@ -674,9 +676,9 @@ LIMIT 20;
 Восстановить RPH и включить op по последнему audit или канону `ops_catalog.py`:
 
 ```sql
--- Пример: вернуть get_entity к каталогу (rph_limit=7)
+-- Пример: вернуть get_entity к каталогу (rph_limit=223, A14)
 UPDATE resource_op_types
-SET rph_limit = 7, is_enabled = true, updated_at = now()
+SET rph_limit = 223, is_enabled = true, updated_at = now()
 WHERE code = 'get_entity';
 
 -- Или из последнего audit reduce_rph:
