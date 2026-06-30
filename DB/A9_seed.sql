@@ -50,8 +50,8 @@ INSERT INTO task_types (
   (
     'parser_add_channel',
     'Добавить канал на parser-сессию',
-    'HTTP #12/#19: resolve_listen_target() — join source + discussion, проверка доступа. Одна строка task_queue = один канал. RPH seed: до 20 кан/ч на аккаунт (get_entity/Join rph=223, GetFull rph=112, threshold 80%).',
-    true, 500, 80, false, NULL
+    'HTTP #12/#19: resolve_listen_target() — join source + discussion, проверка доступа. Одна строка task_queue = один канал. RPH seed A14 + порог 20% (использовать до 80% effective, резерв 20%).',
+    true, 500, 20, false, NULL
   ),
   (
     'move_channel',

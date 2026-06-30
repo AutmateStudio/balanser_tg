@@ -1,6 +1,6 @@
 -- A14: RPH — parser_add_channel 20 кан/ч; прочие op ×5 от базового seed
 --
--- parser_add_channel (threshold 80%, reserve 10%):
+-- parser_add_channel (reserve_percent 10% в resource_op_types; порог dispatch — A15, 20%):
 --   get_entity/JoinChannel: 2 units/канал → rph_limit=223 (effective=200)
 --   GetFullChannel: 1 unit/канал → rph_limit=112 (effective=100)
 --

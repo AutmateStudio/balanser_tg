@@ -49,8 +49,10 @@ effective_rph = floor(rph_limit × (1 − reserve_percent / 100))
 
 ### `parser_add_channel`
 
-Целевая пропускная способность seed (A14): **20 каналов/час на аккаунт** при
-`min_available_resource_percent = 80%`. Прочие op — **×5** от базового seed
+Пропускная способность `parser_add_channel` (A14 RPH + A15 порог): до **~80% effective
+RPH** на аккаунт (`min_available_resource_percent = 20%`, резерв 20%). При A14
+GetFull effective=100 — до ~80 GetFull/ч (~80 кан/ч), пока не упрётесь в Telegram.
+Прочие op — **×5** от базового seed
 (discovery, collect, bot и т.д.).
 
 | # | op_code | units | role |

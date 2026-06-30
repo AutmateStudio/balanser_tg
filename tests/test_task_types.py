@@ -17,7 +17,7 @@ async def test_get_by_code_parser_add_channel(pg_pool) -> None:
     assert task_type is not None
     assert task_type.is_enabled is True
     assert task_type.default_priority == 500
-    assert task_type.min_available_resource_percent == 80
+    assert task_type.min_available_resource_percent == 20
     assert task_type.uses_two_accounts is False
     assert len(task_type.ops) == 4
     assert all(op.account_role == "primary" for op in task_type.ops)

@@ -105,9 +105,9 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 
 | op_code | rph_limit | effective_rph | parser_add_channel |
 |---------|-----------|---------------|--------------------|
-| `get_entity` | 223 | 200 | 20 кан/ч (фикс.) |
-| `channels.JoinChannel` | 223 | 200 | 20 кан/ч (фикс.) |
-| `channels.GetFullChannel` | 112 | 100 | 20 кан/ч (фикс.) |
+| `get_entity` | 223 | 200 | до ~80% effective (порог 20%) |
+| `channels.JoinChannel` | 223 | 200 | до ~80% effective (порог 20%) |
+| `channels.GetFullChannel` | 112 | 100 | до ~80% effective (порог 20%) |
 | `iter_messages` | 2250 | 2025 | ×5 (collect/discover) |
 | `channels.GetParticipants` | 2500 | 2250 | ×5 |
 | `channels.LeaveChannel` | 150 | 135 | ×5 |
