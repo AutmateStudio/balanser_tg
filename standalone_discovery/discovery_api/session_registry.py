@@ -268,6 +268,24 @@ def reset_for_tests() -> None:
         pass
 
 
+_UNAUTHORIZED_MSG = (
+    "Сессия '{session_name}' не авторизована; войдите в аккаунт для этой session"
+)
+
+
+def _unauthorized_message(session_name: str) -> str:
+    return _UNAUTHORIZED_MSG.format(session_name=session_name)
+
+
+def find_parser_client(session_name: str) -> Optional["Parser_client"]:
+    """Parser_client в загруженных clump'ах (для обновления in-memory health)."""
+    for clump in _clumps.values():
+        pc = clump._session_index.get(session_name)
+        if pc is not None:
+            return pc
+    return None
+
+
 async def get_or_create_client(session_name: str) -> TelegramClient:
     """Возвращает единственный подключённый клиент для данного `session_name`."""
     async with _lock_for(session_name):
@@ -276,18 +294,18 @@ async def get_or_create_client(session_name: str) -> TelegramClient:
             if not client.is_connected():
                 await client.connect()
             if not await client.is_user_authorized():
-                raise RuntimeError(
-                    f"Сессия '{session_name}' не авторизована; войдите в аккаунт для этой session"
-                )
+                msg = _unauthorized_message(session_name)
+                await notify_session_unauthorized(session_name, msg)
+                raise RuntimeError(msg)
             return client
 
         client = TelegramClient(session_name, int(get_api_id()), get_api_hash())
         await client.connect()
         if not await client.is_user_authorized():
             await client.disconnect()
-            raise RuntimeError(
-                f"Сессия '{session_name}' не авторизована; войдите в аккаунт для этой session"
-            )
+            msg = _unauthorized_message(session_name)
+            await notify_session_unauthorized(session_name, msg)
+            raise RuntimeError(msg)
         _clients[session_name] = client
         log.info("Telethon-клиент подключён и зарегистрирован: %s", session_name)
         return client
@@ -391,6 +409,8 @@ async def _health_check_once() -> None:
             health.clear_flood_if_expired()
             if health.banned:
                 continue
+            if health.status == SessionStatus.ERROR:
+                continue
             client = _clients.get(pc.session_name)
             if client is None:
                 continue
@@ -482,6 +502,23 @@ async def _persist_banned_pg(session_name: str, reason: str) -> None:
     except ImportError:
         return
     await persist_banned(session_name, reason)
+
+
+async def _persist_unauthorized_pg(session_name: str, reason: str) -> None:
+    """D6: неавторизованная сессия → PG accounts.status=error."""
+    try:
+        from app_balance.queue.account_health_sync import persist_unauthorized
+    except ImportError:
+        return
+    await persist_unauthorized(session_name, reason)
+
+
+async def notify_session_unauthorized(session_name: str, message: str) -> None:
+    """In-memory health clump + PG accounts для неавторизованной сессии."""
+    pc = find_parser_client(session_name)
+    if pc is not None:
+        pc.health.mark_unauthorized(message)
+    await _persist_unauthorized_pg(session_name, message)
 
 
 class Parser_client:
@@ -601,6 +638,12 @@ class Parser_client:
                     self.health.mark_banned(str(exc))
                     await _persist_banned_pg(self.session_name, str(exc))
                     await self._trigger_down(f"banned: {exc}")
+                    break
+                if kind == "unauthorized":
+                    msg = str(exc)
+                    self.health.mark_unauthorized(msg)
+                    await _persist_unauthorized_pg(self.session_name, msg)
+                    await self._trigger_down(f"unauthorized: {exc}")
                     break
                 # transient / fatal — наращиваем счётчик и идём в backoff
                 self.health.mark_disconnected()
@@ -832,6 +875,7 @@ class SessionClump:
             "status": h.status,
             "banned": h.banned,
             "ban_reason": h.ban_reason,
+            "last_error": h.last_error,
             "flood_remaining_seconds": flood_remaining,
             "connected": h.connected,
             "running": pc.is_running(),

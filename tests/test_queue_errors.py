@@ -102,3 +102,17 @@ def test_map_telethon_exception_fatal() -> None:
     mapped = map_telethon_exception(RuntimeError("boom"))
     assert isinstance(mapped, PermanentError)
     assert mapped.code == FATAL
+
+
+def test_map_telethon_exception_unauthorized_runtime() -> None:
+    msg = "Сессия '/app/sessions/test4' не авторизована; войдите в аккаунт"
+    mapped = map_telethon_exception(RuntimeError(msg))
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "account_unauthorized"
+
+
+def test_map_clump_error_unauthorized_russian() -> None:
+    msg = "Сессия '/app/sessions/Test3' не авторизована; войдите в аккаунт"
+    mapped = map_clump_error_message(msg)
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "account_unauthorized"

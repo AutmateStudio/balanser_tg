@@ -142,5 +142,47 @@ class SessionRegistryReleaseTests(unittest.IsolatedAsyncioTestCase):
         disconnect_mock.assert_awaited()
 
 
+class SessionRegistryUnauthorizedTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        from discovery_api import session_registry as sr
+
+        sr.reset_for_tests()
+
+    async def asyncTearDown(self) -> None:
+        from discovery_api import session_registry as sr
+
+        await sr.release_all()
+        sr.reset_for_tests()
+
+    async def test_unauthorized_marks_clump_health_and_raises(self) -> None:
+        from discovery_api.session_health import SessionStatus
+        from discovery_api import session_registry as sr
+
+        class UnauthorizedClient(FakeTelegramClient):
+            async def is_user_authorized(self) -> bool:
+                return False
+
+        notify_mock = AsyncMock()
+        clump = sr.SessionClump(["/sess/u1"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+
+        with (
+            patch("discovery_api.session_registry.TelegramClient", UnauthorizedClient),
+            patch("discovery_api.session_registry.get_api_id", return_value=1),
+            patch("discovery_api.session_registry.get_api_hash", return_value="hash"),
+            patch(
+                "discovery_api.session_registry._persist_unauthorized_pg",
+                notify_mock,
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                await sr.get_or_create_client("/sess/u1")
+
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
+        self.assertIn("не авторизована", pc.health.last_error or "")
+        notify_mock.assert_awaited_once()
+
+
 if __name__ == "__main__":
     unittest.main()

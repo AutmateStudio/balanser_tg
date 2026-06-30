@@ -79,24 +79,6 @@ class ResourceError(QueueTaskError):
         return self.code
 
 
-def map_telethon_exception(exc: BaseException) -> QueueTaskError:
-    """Маппинг raw Telethon-исключений через classify_telethon_error (E2)."""
-    try:
-        from discovery_api.session_health import classify_telethon_error
-    except ImportError:
-        return RetryableError(TRANSIENT, str(exc) or TRANSIENT)
-
-    kind, seconds = classify_telethon_error(exc)
-    message = str(exc) or kind
-    if kind == "flood":
-        return RetryableError(FLOOD_WAIT, message, retry_after_seconds=seconds or None)
-    if kind == "banned":
-        return PermanentError(ACCOUNT_BANNED, message)
-    if kind == "transient":
-        return RetryableError(TRANSIENT, message)
-    return PermanentError(FATAL, message)
-
-
 def join_pending_retry_seconds() -> int:
     """Интервал retry для join_pending (env JOIN_PENDING_RETRY_SECONDS, default 1800)."""
     raw = os.getenv("JOIN_PENDING_RETRY_SECONDS", "1800").strip()
@@ -111,6 +93,17 @@ def map_clump_error_message(err: str) -> QueueTaskError:
     text = str(err).strip()
     if not text:
         return RetryableError(ErrorCode.CLUMP_ERROR, "empty clump error")
+
+    lowered = text.lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "не авторизована",
+            "not authorized",
+            "session not authorized",
+        )
+    ):
+        return PermanentError(ErrorCode.ACCOUNT_UNAUTHORIZED, text)
 
     normalized = text.lower().replace(" ", "")
     ban_markers = (
@@ -175,21 +168,33 @@ def map_clump_error_message(err: str) -> QueueTaskError:
 
 
 def map_telethon_exception(exc: BaseException) -> QueueTaskError:
-    """E2: Telethon/сеть → typed error через classify_telethon_error."""
+    """E2: Telethon/сеть/сессия → typed error через classify_telethon_error."""
     try:
-        from discovery_api.session_health import classify_telethon_error
+        from discovery_api.session_health import (
+            classify_telethon_error,
+            is_session_unauthorized_error,
+        )
     except ImportError:
         return PermanentError(FATAL, str(exc))
 
+    if is_session_unauthorized_error(exc):
+        return PermanentError(
+            ErrorCode.ACCOUNT_UNAUTHORIZED,
+            str(exc) or ErrorCode.ACCOUNT_UNAUTHORIZED,
+        )
+
     kind, seconds = classify_telethon_error(exc)
+    message = str(exc) or kind
     if kind == "flood":
         return RetryableError(
             FLOOD_WAIT,
-            str(exc),
+            message,
             retry_after_seconds=int(seconds or 0) or None,
         )
     if kind == "banned":
-        return PermanentError(ACCOUNT_BANNED, str(exc))
+        return PermanentError(ACCOUNT_BANNED, message)
+    if kind == "unauthorized":
+        return PermanentError(ErrorCode.ACCOUNT_UNAUTHORIZED, message)
     if kind == "transient":
-        return RetryableError(TRANSIENT, str(exc))
-    return PermanentError(FATAL, str(exc))
+        return RetryableError(TRANSIENT, message)
+    return PermanentError(FATAL, message)

@@ -156,6 +156,7 @@ def list_all_accounts_merged(
             "connected": rt[2].get("connected", False) if rt else False,
             "running": rt[2].get("running", False) if rt else False,
             "channel_count": rt[2].get("channel_count", 0) if rt else 0,
+            "last_error": rt[2].get("last_error") if rt else None,
         }
         result.append(row)
 
