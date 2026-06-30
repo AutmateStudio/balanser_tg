@@ -31,6 +31,26 @@ class DualReserveResult:
     target: Account
 
 
+@dataclass(frozen=True, slots=True)
+class AccountQueueState:
+    """Снимок PG accounts для дашборда (без pick/reserve)."""
+
+    id: int
+    session_name: str
+    status: str
+    is_enabled: bool
+    cooldown_until: datetime | None
+    current_task_id: int | None
+    last_error: str | None
+    last_error_at: datetime | None
+
+
+_LIST_QUEUE_STATES_SQL = """
+SELECT id, session_name, status, is_enabled, cooldown_until,
+       current_task_id, last_error, last_error_at
+FROM accounts
+"""
+
 _PICK_SQL = """
 SELECT id, session_name, status, is_enabled, current_task_id, cooldown_until, last_used_at
 FROM accounts
@@ -119,6 +139,19 @@ WHERE id IN ($1, $2)
   AND (cooldown_until IS NULL OR cooldown_until <= now())
 FOR UPDATE
 """
+
+
+def _row_to_queue_state(row) -> AccountQueueState:
+    return AccountQueueState(
+        id=row["id"],
+        session_name=row["session_name"],
+        status=str(row["status"]),
+        is_enabled=bool(row["is_enabled"]),
+        cooldown_until=row["cooldown_until"],
+        current_task_id=row["current_task_id"],
+        last_error=row["last_error"],
+        last_error_at=row["last_error_at"],
+    )
 
 
 def _row_to_account(row) -> Account:
@@ -234,6 +267,12 @@ class AccountsRepo:
                 name,
             )
             return int(val) if val is not None else None
+
+    async def list_queue_states(self) -> dict[str, AccountQueueState]:
+        """session_name → PG snapshot (один SELECT на весь парк)."""
+        async with acquire() as conn:
+            rows = await conn.fetch(_LIST_QUEUE_STATES_SQL)
+        return {row["session_name"]: _row_to_queue_state(row) for row in rows}
 
     async def set_cooldown(self, session_name: str, until: datetime) -> bool:
         """Flood/cooldown: продлевает cooldown_until, status → cooldown (кроме banned)."""

@@ -162,3 +162,59 @@ def log_queue_task_error(
         task_id=task_id,
         level=level,
     )
+
+
+def display_account_name(session_name: str | None) -> str:
+    """Короткое имя аккаунта для строк OK/POSTPONE (basename без пути)."""
+    raw = (session_name or "").strip()
+    if not raw:
+        return "-"
+    try:
+        from app_balance.queue.accounts_sync import normalize_session_name
+
+        return normalize_session_name(raw)
+    except ImportError:
+        base = raw.replace("\\", "/").rsplit("/", 1)[-1]
+        if base.endswith(".session"):
+            base = base[: -len(".session")]
+        return base or "-"
+
+
+def format_task_ok_line(
+    task_id: int,
+    task_type_name: str,
+    account: str | None = None,
+) -> str:
+    type_name = (task_type_name or "-").strip() or "-"
+    acc = display_account_name(account)
+    return f"OK {task_id} {type_name} {acc}"
+
+
+def format_task_postpone_line(
+    task_id: int,
+    task_type_name: str,
+    account: str | None,
+    delay_seconds: int,
+) -> str:
+    type_name = (task_type_name or "-").strip() or "-"
+    acc = display_account_name(account)
+    return f"POSTPONE {task_id} {type_name} {acc} {int(delay_seconds)}"
+
+
+def log_task_ok(
+    logger: logging.Logger,
+    task_id: int,
+    task_type_name: str,
+    account: str | None = None,
+) -> None:
+    logger.info(format_task_ok_line(task_id, task_type_name, account))
+
+
+def log_task_postpone(
+    logger: logging.Logger,
+    task_id: int,
+    task_type_name: str,
+    account: str | None,
+    delay_seconds: int,
+) -> None:
+    logger.info(format_task_postpone_line(task_id, task_type_name, account, delay_seconds))

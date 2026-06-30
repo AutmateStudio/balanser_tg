@@ -415,13 +415,26 @@ curl -sS "$BASE/discovery-api/parser/settings" -H "X-API-Key: $KEY"
 
 ### GET /discovery-api/parser/accounts/all
 
-Все аккаунты (из хранилища + активные clump). **Ответ** (`AccountAllListResponse`):
-`total` (int), `accounts` (array<AccountFullSummary>).
+Все аккаунты (из хранилища + активные clump + overlay PG очереди). **Ответ** (`AccountAllListResponse`):
+`total` (int), `accounts` (array<AccountFullSummary>), `generated_at` (ISO UTC, при `USE_PG_QUEUE=true`).
 
-`AccountFullSummary`: `session_name`, `display_name`, `description`, `max_channels`,
-`effective_max_channels`, `limit_source`, `admin_blocked`, `block_reason`, `source`,
-`session_file_exists`, `in_clump`, `parser_id`, `clump_name`, `status`, `banned`,
-`ban_reason`, `flood_remaining_seconds`, `connected`, `running`, `channel_count`.
+`AccountFullSummary`: поля runtime (`status`, `connected`, `running`, `flood_remaining_seconds`, …) плюс overlay PG:
+
+| Поле | Описание |
+|------|----------|
+| `queue_status` | PG `accounts.status`: `active` / `cooldown` / `disabled` / `banned` / `error` |
+| `cooldown_until` | ISO UTC, до когда PG cooldown (FloodWait dispatch) |
+| `cooldown_remaining_seconds` | Остаток PG cooldown |
+| `available_at` | ISO UTC, когда аккаунт снова доступен для dispatch = max(PG cooldown, runtime flood) |
+| `available_in_seconds` | Секунд до `available_at` |
+| `flood_until` | Runtime unix timestamp (in-memory SessionHealth) |
+| `current_task_id` | PG: текущая задача на аккаунте |
+| `last_error` / `last_error_at` | PG (приоритет над runtime для queue-ошибок) |
+| `is_enabled` | PG `is_enabled` |
+
+`status` — **runtime** clump (`healthy`, `flood_wait`, `offline`, …); для dispatch UI используйте `queue_status` + `available_at`.
+
+**Полная спецификация overlay (поля, сценарии, Zod, примеры JSON):** [`docs/account-cooldown-overlay-api.md`](account-cooldown-overlay-api.md).
 
 ```bash
 curl -sS "$BASE/discovery-api/parser/accounts/all" -H "X-API-Key: $KEY"
@@ -431,6 +444,8 @@ curl -sS "$BASE/discovery-api/parser/accounts/all" -H "X-API-Key: $KEY"
 
 Аккаунты только активных clump. **Ответ** (`AccountListResponse`): `total`, `accounts` (array<AccountSummary>).
 
+Те же поля overlay PG (`queue_status`, `cooldown_until`, `available_at`, …), что и в `AccountFullSummary`.
+
 ```bash
 curl -sS "$BASE/discovery-api/parser/accounts" -H "X-API-Key: $KEY"
 ```
@@ -438,7 +453,7 @@ curl -sS "$BASE/discovery-api/parser/accounts" -H "X-API-Key: $KEY"
 ### GET /discovery-api/parser/account-detail
 
 Деталь по аккаунту. **Query:** `session_name` (обяз.), `parser_id` (опц.).
-**Ответ:** `AccountDetail`. **Ошибки:** `404`.
+**Ответ:** `AccountDetail` — включает `health` (runtime) и overlay PG на верхнем уровне (`cooldown_until`, `available_at`, …). **Ошибки:** `404`.
 
 ```bash
 curl -sS "$BASE/discovery-api/parser/account-detail?session_name=acc1&parser_id=PARSER_ID" \

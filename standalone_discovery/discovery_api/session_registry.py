@@ -876,6 +876,7 @@ class SessionClump:
             "banned": h.banned,
             "ban_reason": h.ban_reason,
             "last_error": h.last_error,
+            "flood_until": h.flood_until,
             "flood_remaining_seconds": flood_remaining,
             "connected": h.connected,
             "running": pc.is_running(),

@@ -152,6 +152,7 @@ def list_all_accounts_merged(
             "status": rt[2].get("status", "offline") if rt else "offline",
             "banned": rt[2].get("banned", False) if rt else False,
             "ban_reason": rt[2].get("ban_reason") if rt else None,
+            "flood_until": rt[2].get("flood_until") if rt else None,
             "flood_remaining_seconds": rt[2].get("flood_remaining_seconds") if rt else None,
             "connected": rt[2].get("connected", False) if rt else False,
             "running": rt[2].get("running", False) if rt else False,
