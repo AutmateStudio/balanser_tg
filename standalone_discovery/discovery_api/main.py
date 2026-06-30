@@ -20,6 +20,25 @@ from discovery_api.account_registry import sync_accounts_from_disk
 
 log = logging.getLogger(__name__)
 
+
+def _configure_logging() -> None:
+    """LOG_LEVEL из окружения → stdout (discovery-api не использует queue_worker.main)."""
+    from discovery_api.config import _ensure_env_loaded
+
+    _ensure_env_loaded()
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        force=True,
+    )
+    logging.getLogger("telethon").setLevel(logging.WARNING)
+    logging.getLogger("asyncpg").setLevel(logging.WARNING)
+
+
+_configure_logging()
+
 # D12 — in-process worker pool: N параллельных asyncio-задач, общий clump.
 # Каждый worker независимо claim'ит задачи; PG-уровень (FOR UPDATE SKIP LOCKED
 # + pick_and_reserve) гарантирует, что разные воркеры берут разные задачи и
@@ -240,8 +259,14 @@ async def on_startup() -> None:
     await restore_persisted_parsers()
     setup_parser_services()
     start_health_monitor()
-    if get_use_pg_queue() and get_inprocess_worker():
-        await _start_inprocess_worker()
+    if get_use_pg_queue():
+        if get_inprocess_worker():
+            await _start_inprocess_worker()
+        else:
+            log.warning(
+                "D12: in-process worker НЕ запущен — задайте DISCOVERY_INPROCESS_WORKER=true "
+                "в .env и пересоздайте контейнер (docker compose up -d --force-recreate discovery-api)"
+            )
 
 
 @app.on_event("shutdown")
