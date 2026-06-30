@@ -189,3 +189,26 @@ async def test_expired_cooldown_pickable_with_cooldown_status(cooldown_account) 
             account_id,
         )
     assert pickable is True
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_list_queue_states_for_dashboard_overlay(cooldown_account) -> None:
+    from discovery_api.queue.account_queue_overlay import overlay_queue_state
+
+    session_name, _account_id = cooldown_account
+    repo = AccountsRepo()
+    until = datetime.now(timezone.utc) + timedelta(seconds=120)
+    await repo.set_cooldown(session_name, until)
+
+    states = await repo.list_queue_states()
+    assert session_name in states
+    pg = states[session_name]
+    assert pg.status == "cooldown"
+
+    row = overlay_queue_state({"session_name": session_name}, pg)
+    assert row["queue_status"] == "cooldown"
+    assert row["available_in_seconds"] is not None
+    assert row["available_in_seconds"] >= 110
+    assert row["cooldown_until"] is not None

@@ -12,8 +12,12 @@ from app_balance.queue.task_error_log import (
     bind_task_error_context,
     clear_task_error_context,
     format_task_error_line,
+    format_task_ok_line,
+    format_task_postpone_line,
     log_queue_task_error,
     log_task_error,
+    log_task_ok,
+    log_task_postpone,
 )
 
 
@@ -124,3 +128,32 @@ def test_error_type_labels() -> None:
 
     assert "TYPE - FATAL" in records[0]
     assert "TYPE - RESOURCE" in records[1]
+
+
+def test_format_task_ok_line() -> None:
+    line = format_task_ok_line(
+        16589,
+        "Добавить канал на parser-сессию",
+        "/app/sessions/Client1",
+    )
+    assert line == "OK 16589 Добавить канал на parser-сессию Client1"
+
+
+def test_format_task_postpone_line() -> None:
+    line = format_task_postpone_line(
+        16486,
+        "Добавить канал на parser-сессию",
+        "Test2",
+        300,
+    )
+    assert line == "POSTPONE 16486 Добавить канал на parser-сессию Test2 300"
+
+
+def test_log_task_ok_and_postpone_at_info(caplog: pytest.LogCaptureFixture) -> None:
+    logger = logging.getLogger("test.task_error_log.ok_postpone")
+    with caplog.at_level(logging.INFO, logger="test.task_error_log.ok_postpone"):
+        log_task_ok(logger, 1, "move_channel", "Client1")
+        log_task_postpone(logger, 2, "move_channel", None, 300)
+
+    assert format_task_ok_line(1, "move_channel", "Client1") in caplog.text
+    assert format_task_postpone_line(2, "move_channel", None, 300) in caplog.text

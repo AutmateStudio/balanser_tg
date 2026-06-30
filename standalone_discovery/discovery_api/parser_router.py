@@ -6,7 +6,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -53,6 +53,11 @@ from discovery_api.queue.producer import (
     enqueue_parser_remove_channels,
 )
 from discovery_api.queue.metrics import MetricsResponse, get_queue_metrics
+from discovery_api.queue.account_queue_overlay import (
+    fetch_pg_queue_states,
+    overlay_account_rows,
+    overlay_queue_state,
+)
 from discovery_api.queue.status import get_task_snapshot
 from discovery_api.parser_store import (
     clump_to_record,
@@ -177,7 +182,22 @@ class ClumpConfigResponse(BaseModel):
     config: dict[str, Any]
 
 
-class AccountSummary(BaseModel):
+class AccountQueueOverlayFields(BaseModel):
+    """PG cooldown + available_at для дашборда (merge с runtime flood)."""
+
+    queue_status: Optional[str] = None
+    cooldown_until: Optional[str] = None
+    cooldown_remaining_seconds: Optional[int] = None
+    available_at: Optional[str] = None
+    available_in_seconds: Optional[int] = None
+    flood_until: Optional[float] = None
+    current_task_id: Optional[int] = None
+    last_error: Optional[str] = None
+    last_error_at: Optional[str] = None
+    is_enabled: Optional[bool] = None
+
+
+class AccountSummary(AccountQueueOverlayFields):
     parser_id: str
     session_name: str
     display_name: str
@@ -197,7 +217,7 @@ class AccountListResponse(BaseModel):
     accounts: list[AccountSummary] = Field(default_factory=list)
 
 
-class AccountDetail(BaseModel):
+class AccountDetail(AccountQueueOverlayFields):
     parser_id: str
     session_name: str
     display_name: str
@@ -207,6 +227,7 @@ class AccountDetail(BaseModel):
     channel_count: int = 0
     limits: dict[str, Any] = Field(default_factory=dict)
     health: dict[str, Any] = Field(default_factory=dict)
+    flood_remaining_seconds: Optional[int] = None
 
 
 class AccountChannelsResponse(BaseModel):
@@ -224,7 +245,7 @@ class AccountMetaUpdate(BaseModel):
     max_channels: Optional[int] = Field(default=None, ge=1)
 
 
-class AccountFullSummary(BaseModel):
+class AccountFullSummary(AccountQueueOverlayFields):
     session_name: str
     display_name: str
     description: str = ""
@@ -250,6 +271,7 @@ class AccountFullSummary(BaseModel):
 class AccountAllListResponse(BaseModel):
     total: int
     accounts: list[AccountFullSummary] = Field(default_factory=list)
+    generated_at: Optional[str] = None
 
 
 class AccountBlockUpdate(BaseModel):
@@ -683,17 +705,40 @@ def _find_account_job(session_name: str, parser_id: Optional[str]) -> tuple[str,
 @parser_router.get("/accounts/all", response_model=AccountAllListResponse)
 async def parser_accounts_all() -> AccountAllListResponse:
     rows = list_all_accounts_merged(_jobs)
+    now = datetime.now(timezone.utc)
+    pg_states = await fetch_pg_queue_states()
+    rows = await overlay_account_rows(rows, pg_states=pg_states, now=now)
     accounts = [AccountFullSummary(**row) for row in rows]
-    return AccountAllListResponse(total=len(accounts), accounts=accounts)
+    generated_at = now.isoformat().replace("+00:00", "Z")
+    return AccountAllListResponse(
+        total=len(accounts), accounts=accounts, generated_at=generated_at
+    )
 
 
 @parser_router.get("/accounts", response_model=AccountListResponse)
 async def parser_accounts() -> AccountListResponse:
+    now = datetime.now(timezone.utc)
+    pg_states = await fetch_pg_queue_states()
     accounts: list[AccountSummary] = []
     for pid, job in list(_jobs.items()):
         for summary in job.clump.list_account_summaries():
-            accounts.append(AccountSummary(parser_id=pid, **summary))
+            row = overlay_queue_state(
+                dict(summary),
+                pg_states.get(summary["session_name"]),
+                now=now,
+            )
+            accounts.append(AccountSummary(parser_id=pid, **row))
     return AccountListResponse(total=len(accounts), accounts=accounts)
+
+
+def _detail_row_for_overlay(detail: dict[str, Any]) -> dict[str, Any]:
+    health = detail.get("health") or {}
+    row = dict(detail)
+    row.setdefault("flood_until", health.get("flood_until"))
+    row.setdefault("flood_remaining_seconds", health.get("flood_remaining_seconds"))
+    if row.get("last_error") is None:
+        row["last_error"] = health.get("last_error")
+    return row
 
 
 @parser_router.get("/account-detail", response_model=AccountDetail)
@@ -704,7 +749,15 @@ async def parser_account_detail(
     detail = job.clump.account_detail(session_name)
     if detail is None:
         raise HTTPException(status_code=404, detail="Аккаунт не найден")
-    return AccountDetail(parser_id=pid, **detail)
+    now = datetime.now(timezone.utc)
+    pg_states = await fetch_pg_queue_states()
+    norm = normalize_session_name(session_name)
+    row = overlay_queue_state(
+        _detail_row_for_overlay(detail),
+        pg_states.get(norm) or pg_states.get(session_name),
+        now=now,
+    )
+    return AccountDetail(parser_id=pid, **row)
 
 
 @parser_router.get("/account-channels", response_model=AccountChannelsResponse)

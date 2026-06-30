@@ -295,6 +295,41 @@ class AccountEndpointTests(unittest.TestCase):
         self.assertEqual(row["parser_id"], "pid")
         self.assertEqual(row["channel_count"], 1)
 
+    def test_accounts_all_includes_pg_cooldown_overlay(self) -> None:
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import AsyncMock, patch
+
+        from app_balance.queue.accounts import AccountQueueState
+
+        until = datetime.now(timezone.utc) + timedelta(seconds=180)
+        pg = {
+            "Client1": AccountQueueState(
+                id=99,
+                session_name="Client1",
+                status="cooldown",
+                is_enabled=True,
+                cooldown_until=until,
+                current_task_id=None,
+                last_error="flood_wait",
+                last_error_at=until - timedelta(seconds=10),
+            )
+        }
+        with patch(
+            "discovery_api.parser_router.fetch_pg_queue_states",
+            new_callable=AsyncMock,
+            return_value=pg,
+        ):
+            resp = self.client.get("/discovery-api/parser/accounts/all")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIsNotNone(data.get("generated_at"))
+        row = next(a for a in data["accounts"] if a["session_name"] == "Client1")
+        self.assertEqual(row["queue_status"], "cooldown")
+        self.assertGreaterEqual(row["cooldown_remaining_seconds"], 170)
+        self.assertIsNotNone(row["cooldown_until"])
+        self.assertGreaterEqual(row["available_in_seconds"], 170)
+        self.assertEqual(row["last_error"], "flood_wait")
+
     def test_delete_account_removes_file_and_store(self) -> None:
         from discovery_api.account_registry import session_file_exists
         from discovery_api.account_store import get_account, upsert_account

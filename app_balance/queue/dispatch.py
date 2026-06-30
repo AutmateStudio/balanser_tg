@@ -35,6 +35,8 @@ from app_balance.queue.task_error_log import (
     bind_task_error_context,
     clear_task_error_context,
     log_queue_task_error,
+    log_task_ok,
+    log_task_postpone,
 )
 from app_balance.queue.task_queue import ClaimedTask, TaskQueueRepo
 
@@ -231,12 +233,12 @@ class TaskDispatcher:
             await self._finish_attempt(attempt_id, status="success")
 
             if await self._queue.complete(task.id):
-                if task.task_type_code == "parser_add_channel":
-                    logger.info(
-                        "dispatch: parser_add_channel completed task_id=%s session=%s",
-                        task.id,
-                        execute_account.session_name,
-                    )
+                log_task_ok(
+                    logger,
+                    task.id,
+                    self._task_type_label(task, task_type),
+                    execute_account.session_name,
+                )
                 return DispatchResult.COMPLETED
 
             return DispatchResult.RETRIED
@@ -250,11 +252,13 @@ class TaskDispatcher:
                 account=account_name,
             )
             await self._handle_execute_error(
-                task.id,
+                task,
+                task_type,
                 attempt_id,
                 exc,
                 queue_op="postpone",
                 postpone_reason=exc.postpone_reason(),
+                account=execute_account,
             )
             return DispatchResult.POSTPONED
 
@@ -268,10 +272,12 @@ class TaskDispatcher:
             )
             await self._sync_account_health_on_error(execute_account, exc)
             await self._handle_execute_error(
-                task.id,
+                task,
+                task_type,
                 attempt_id,
                 exc,
                 queue_op="fail",
+                account=execute_account,
             )
             return DispatchResult.FAILED
 
@@ -293,11 +299,13 @@ class TaskDispatcher:
                 )
             )
             result = await self._handle_execute_error(
-                task.id,
+                task,
+                task_type,
                 attempt_id,
                 exc,
                 queue_op="retry",
                 retry_delay_seconds=delay,
+                account=execute_account,
             )
             return result
 
@@ -312,7 +320,8 @@ class TaskDispatcher:
             )
 
             result = await self._handle_execute_error(
-                task.id,
+                task,
+                task_type,
                 attempt_id,
                 exc,
                 queue_op="retry",
@@ -320,6 +329,7 @@ class TaskDispatcher:
                     task_type=task_type,
                     attempt_number=attempt_number,
                 ),
+                account=execute_account,
             )
             return result
 
@@ -335,7 +345,8 @@ class TaskDispatcher:
 
     async def _handle_execute_error(
         self,
-        task_id: int,
+        task: ClaimedTask,
+        task_type: TaskType | None,
         attempt_id: int | None,
         exc: Exception,
         *,
@@ -343,6 +354,7 @@ class TaskDispatcher:
         retry_delay_seconds: int | None = None,
         last_error: str | None = None,
         postpone_reason: str | None = None,
+        account: Account | None = None,
     ) -> DispatchResult:
         """E1: единая финализация попытки и перевод задачи в retry/fail/postpone."""
         attempt_status, error_code = self._classify_attempt_error(exc)
@@ -354,10 +366,11 @@ class TaskDispatcher:
         )
 
         if queue_op == "postpone":
-            await self._queue.postpone(
-                task_id,
-                self._postpone_delay_seconds,
-                postpone_reason or error_code,
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=postpone_reason or error_code,
+                account=account,
             )
             return DispatchResult.POSTPONED
 
@@ -368,14 +381,14 @@ class TaskDispatcher:
         )
 
         if queue_op == "fail":
-            status = await self._queue.fail(task_id, error_for_queue)
+            status = await self._queue.fail(task.id, error_for_queue)
             if status is None:
                 return DispatchResult.FAILED
             return DispatchResult.FAILED
 
         delay = retry_delay_seconds if retry_delay_seconds is not None else self._retry_delay_seconds
         status = await self._queue.reschedule_or_fail(
-            task_id,
+            task.id,
             error_for_queue,
             delay,
         )
@@ -386,6 +399,31 @@ class TaskDispatcher:
             if status == "failed"
             else DispatchResult.RETRIED
         )
+
+    @staticmethod
+    def _task_type_label(task: ClaimedTask, task_type: TaskType | None) -> str:
+        if task_type is not None and (task_type.name or "").strip():
+            return task_type.name.strip()
+        return task.task_type_code
+
+    async def _postpone_task(
+        self,
+        task: ClaimedTask,
+        *,
+        task_type: TaskType | None,
+        reason: str,
+        account: Account | None = None,
+        delay_seconds: int | None = None,
+    ) -> None:
+        delay = self._postpone_delay_seconds if delay_seconds is None else delay_seconds
+        log_task_postpone(
+            logger,
+            task.id,
+            self._task_type_label(task, task_type),
+            account.session_name if account is not None else None,
+            delay,
+        )
+        await self._queue.postpone(task.id, delay, reason)
 
     def _calc_retry_delay(
         self,
@@ -433,28 +471,20 @@ class TaskDispatcher:
 
         if source_id is None or target_id is None:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                ErrorCode.MISSING_DUAL_ACCOUNTS,
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=ErrorCode.MISSING_DUAL_ACCOUNTS,
             )
 
             return None
 
         if source_id == target_id:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                ErrorCode.DUAL_ACCOUNTS_SAME_ID,
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=ErrorCode.DUAL_ACCOUNTS_SAME_ID,
             )
 
             return None
@@ -469,14 +499,10 @@ class TaskDispatcher:
 
         if not source_check.ok:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                self._resource_postpone_reason(source_check),
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=self._resource_postpone_reason(source_check),
             )
 
             return None
@@ -491,14 +517,10 @@ class TaskDispatcher:
 
         if not target_check.ok:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                self._resource_postpone_reason(target_check),
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=self._resource_postpone_reason(target_check),
             )
 
             return None
@@ -509,14 +531,10 @@ class TaskDispatcher:
 
         if dual is None:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                f"{ErrorCode.DUAL_ACCOUNT_RESERVE_FAILED}:{source_id}:{target_id}",
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=f"{ErrorCode.DUAL_ACCOUNT_RESERVE_FAILED}:{source_id}:{target_id}",
             )
 
             return None
@@ -541,14 +559,10 @@ class TaskDispatcher:
 
         if not ok:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                f"{ErrorCode.ACCOUNT_RESERVE_FAILED}:{account_id}",
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=f"{ErrorCode.ACCOUNT_RESERVE_FAILED}:{account_id}",
             )
 
             return None
@@ -561,14 +575,10 @@ class TaskDispatcher:
 
             await self._accounts.release(account_id)
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                f"{ErrorCode.ACCOUNT_NOT_FOUND}:{account_id}",
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=f"{ErrorCode.ACCOUNT_NOT_FOUND}:{account_id}",
             )
 
             return None
@@ -585,14 +595,11 @@ class TaskDispatcher:
 
         await self._accounts.release(account.id)
 
-        await self._queue.postpone(
-
-            task.id,
-
-            self._postpone_delay_seconds,
-
-            self._resource_postpone_reason(check),
-
+        await self._postpone_task(
+            task,
+            task_type=task_type,
+            reason=self._resource_postpone_reason(check),
+            account=account,
         )
 
         return None
@@ -608,6 +615,7 @@ class TaskDispatcher:
         rejected_ids: set[int] = set()
 
         last_check: ResourceCheckResult | None = None
+        last_account: Account | None = None
 
         while True:
 
@@ -637,14 +645,11 @@ class TaskDispatcher:
 
                     reason = ErrorCode.NO_AVAILABLE_ACCOUNT
 
-                await self._queue.postpone(
-
-                    task.id,
-
-                    self._postpone_delay_seconds,
-
-                    reason,
-
+                await self._postpone_task(
+                    task,
+                    task_type=task_type,
+                    reason=reason,
+                    account=last_account,
                 )
 
                 return None
@@ -662,7 +667,7 @@ class TaskDispatcher:
             await self._accounts.release(account.id)
 
             rejected_ids.add(account.id)
-
+            last_account = account
             last_check = check
 
 

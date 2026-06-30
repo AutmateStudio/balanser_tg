@@ -484,6 +484,11 @@ curl -s -H "X-API-Key: $DISCOVERY_API_KEY" \
 Тесты приёмки G3: `tests/test_g3_queue_metrics_api.py`,
 `standalone_discovery/tests/test_pg_queue_metrics.py`.
 
+**Per-account cooldown для дашборда:** G3 даёт только агрегат `accounts.in_cooldown`.
+Время «освободится» по каждому аккаунту — в **`GET /discovery-api/parser/accounts/all`**
+(overlay `available_at`, `queue_status`, `cooldown_until`). Спецификация:
+[`docs/account-cooldown-overlay-api.md`](account-cooldown-overlay-api.md).
+
 ---
 
 ## G4 — Алерты §26.4
