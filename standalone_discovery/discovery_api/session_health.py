@@ -16,7 +16,13 @@ from typing import Any, Literal, Optional, Tuple
 
 import telethon.errors as te
 
-ErrorKind = Literal["flood", "banned", "transient", "fatal"]
+ErrorKind = Literal["flood", "banned", "transient", "fatal", "unauthorized"]
+
+_UNAUTHORIZED_MESSAGE_MARKERS = (
+    "не авторизована",
+    "not authorized",
+    "session not authorized",
+)
 
 # Текст FloodWait-ошибок из resolve-пути выглядит как "FloodWait 42s ...".
 _FLOOD_WAIT_RE = re.compile(r"FloodWait\s+(\d+)\s*s", re.IGNORECASE)
@@ -49,6 +55,7 @@ class SessionStatus:
     FLOOD_WAIT = "flood_wait"
     DISCONNECTED = "disconnected"
     BANNED = "banned"
+    ERROR = "error"
 
 
 # Ошибки, означающие, что аккаунт заблокирован/сессия отозвана — миграция каналов
@@ -77,6 +84,14 @@ _TRANSIENT_ERRORS: Tuple[type[BaseException], ...] = (
 )
 
 
+def is_session_unauthorized_error(exc: BaseException) -> bool:
+    """True, если .session есть, но login отсутствует (не путать с ban/revoke)."""
+    if isinstance(exc, _BANNED_ERRORS):
+        return False
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _UNAUTHORIZED_MESSAGE_MARKERS)
+
+
 def classify_telethon_error(exc: BaseException) -> Tuple[ErrorKind, Optional[int]]:
     """Классифицирует исключение Telethon/сети.
 
@@ -96,6 +111,8 @@ def classify_telethon_error(exc: BaseException) -> Tuple[ErrorKind, Optional[int
         return "banned", None
     if isinstance(exc, _TRANSIENT_ERRORS):
         return "transient", None
+    if is_session_unauthorized_error(exc):
+        return "unauthorized", None
     return "fatal", None
 
 
@@ -159,6 +176,14 @@ class SessionHealth:
         self.status = SessionStatus.BANNED
         self.connected = False
 
+    def mark_unauthorized(self, reason: str) -> None:
+        """Сессия на диске есть, но login отсутствует — нужен QR/auth."""
+        self.connected = False
+        self.status = SessionStatus.ERROR
+        self.last_error = reason
+        self.last_error_at = time.time()
+        self.error_count += 1
+
     def record_error(self, message: str) -> None:
         self.error_count += 1
         self.last_error = message
@@ -174,7 +199,7 @@ class SessionHealth:
         """Доступна ли сессия для приёма новых каналов (балансировка)."""
         if self.banned:
             return False
-        if self.status == SessionStatus.DISCONNECTED:
+        if self.status in (SessionStatus.DISCONNECTED, SessionStatus.ERROR):
             return False
         return not self.in_flood()
 

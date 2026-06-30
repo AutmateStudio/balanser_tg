@@ -84,3 +84,22 @@ async def test_persist_banned_calls_set_banned(
         await sync.persist_banned("/s2", "UserDeactivated")
 
     mock_ban.assert_awaited_once_with("/s2", reason="UserDeactivated")
+
+
+@pytest.mark.asyncio
+async def test_persist_unauthorized_calls_set_account_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/db")
+    with (
+        patch.object(sync, "_ensure_pool", new_callable=AsyncMock, return_value=True),
+        patch.object(
+            sync._repo,
+            "set_account_error",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_err,
+    ):
+        await sync.persist_unauthorized("/s3", "не авторизована")
+
+    mock_err.assert_awaited_once_with("/s3", reason="не авторизована")

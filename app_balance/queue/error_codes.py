@@ -47,6 +47,7 @@ class ErrorCode(StrEnum):
     CHANNEL_PRIVATE = "channel_private"
     JOIN_PENDING = "join_pending"
     BANNED = "banned"
+    ACCOUNT_UNAUTHORIZED = "account_unauthorized"
     PEER_FLOOD = "peer_flood"
     TRANSIENT_ERROR = "transient_error"
 

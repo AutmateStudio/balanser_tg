@@ -133,6 +133,40 @@ async def test_set_banned_excludes_from_pick(cooldown_account) -> None:
 @requires_pg
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_set_account_error_excludes_from_pick(cooldown_account) -> None:
+    session_name, account_id = cooldown_account
+    repo = AccountsRepo()
+    reason = "Сессия не авторизована; войдите в аккаунт"
+
+    assert await repo.set_account_error(session_name, reason=reason) is True
+
+    async with db.acquire() as conn:
+        pickable = await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM accounts
+                WHERE id = $1
+                  AND status IN ('active', 'cooldown')
+                  AND is_enabled = true
+                  AND current_task_id IS NULL
+                  AND (cooldown_until IS NULL OR cooldown_until <= now())
+            )
+            """,
+            account_id,
+        )
+        row = await conn.fetchrow(
+            "SELECT status, is_enabled, last_error FROM accounts WHERE id = $1",
+            account_id,
+        )
+    assert pickable is False
+    assert row["status"] == "error"
+    assert row["is_enabled"] is False
+    assert row["last_error"] == reason
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_expired_cooldown_pickable_with_cooldown_status(cooldown_account) -> None:
     session_name, account_id = cooldown_account
     repo = AccountsRepo()

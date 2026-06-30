@@ -95,6 +95,19 @@ WHERE session_name = $1
 RETURNING id
 """
 
+_SET_ACCOUNT_ERROR_SQL = """
+UPDATE accounts
+SET status = 'error',
+    is_enabled = false,
+    current_task_id = NULL,
+    last_error = $2,
+    last_error_at = now(),
+    updated_at = now()
+WHERE session_name = $1
+  AND status <> 'banned'
+RETURNING id
+"""
+
 # C4: блокировка пары аккаунтов перед атомарным dual reserve.
 _PAIR_LOCK_SQL = """
 SELECT id, session_name, status, is_enabled, current_task_id, cooldown_until, last_used_at
@@ -238,6 +251,20 @@ class AccountsRepo:
             return False
         async with acquire() as conn:
             row = await conn.fetchrow(_SET_BANNED_SQL, name, reason)
+            return row is not None
+
+    async def set_account_error(
+        self,
+        session_name: str,
+        *,
+        reason: str | None = None,
+    ) -> bool:
+        """Неавторизованная/сломанная сессия: status → error, is_enabled → false."""
+        name = (session_name or "").strip()
+        if not name:
+            return False
+        async with acquire() as conn:
+            row = await conn.fetchrow(_SET_ACCOUNT_ERROR_SQL, name, reason)
             return row is not None
 
     async def pick_and_reserve(

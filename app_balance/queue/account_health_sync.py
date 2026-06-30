@@ -75,3 +75,25 @@ async def persist_banned(session_name: str, reason: str = "") -> None:
             name,
             exc_info=True,
         )
+
+
+async def persist_unauthorized(session_name: str, reason: str = "") -> None:
+    """Неавторизованная сессия → accounts.status=error, is_enabled=false (D6)."""
+    name = (session_name or "").strip()
+    if not name:
+        return
+    if not await _ensure_pool():
+        return
+    try:
+        ok = await _repo.set_account_error(name, reason=(reason or None))
+        if not ok:
+            log.debug(
+                "account_health_sync: unauthorized для %s — строка accounts не найдена",
+                name,
+            )
+    except Exception:
+        log.warning(
+            "account_health_sync: не удалось записать error для %s",
+            name,
+            exc_info=True,
+        )

@@ -750,4 +750,27 @@ class TaskDispatcher:
                     account.session_name,
                     exc_info=True,
                 )
+        elif isinstance(exc, PermanentError) and code == ErrorCode.ACCOUNT_UNAUTHORIZED:
+            message = getattr(exc, "message", None) or str(exc)
+            try:
+                from discovery_api.session_registry import notify_session_unauthorized
+
+                await notify_session_unauthorized(account.session_name, message)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "dispatch: notify_session_unauthorized недоступен для %s, fallback PG",
+                    account.session_name,
+                    exc_info=True,
+                )
+                try:
+                    await self._accounts.set_account_error(
+                        account.session_name,
+                        reason=message,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "dispatch: не удалось set_account_error для %s",
+                        account.session_name,
+                        exc_info=True,
+                    )
 
