@@ -5,6 +5,11 @@
 *.env.local
 n8n/n8n_api.txt
 
+# WireGuard / VPN конфиги — содержат PrivateKey/PresharedKey (Правило Д).
+# Инфраструктурные *.conf без секретов (напр. nginx snippets) — исключение ниже.
+*.conf
+!standalone_discovery/deploy/nginx/**/*.conf
+
 # Python
 __pycache__/
 *.py[cod]
