@@ -53,6 +53,14 @@ from discovery_api.queue.producer import (
     enqueue_parser_remove_channels,
 )
 from discovery_api.queue.metrics import MetricsResponse, get_queue_metrics
+from discovery_api.queue.task_types import (
+    TaskTypeDetailResponse,
+    TaskTypeListItemResponse,
+    TaskTypePatchRequest,
+    get_task_type,
+    list_task_types,
+    patch_task_type,
+)
 from discovery_api.queue.account_queue_overlay import (
     fetch_pg_queue_states,
     overlay_account_rows,
@@ -932,6 +940,33 @@ async def parser_queue_task_get(task_id: int) -> TaskQueueItemResponse:
 @parser_router.get("/queue/metrics", response_model=MetricsResponse)
 async def parser_queue_metrics() -> MetricsResponse:
     return await get_queue_metrics()
+
+
+@parser_router.get(
+    "/queue/task-types",
+    response_model=list[TaskTypeListItemResponse],
+)
+async def parser_queue_task_types_list() -> list[TaskTypeListItemResponse]:
+    return await list_task_types()
+
+
+@parser_router.get(
+    "/queue/task-types/{code}",
+    response_model=TaskTypeDetailResponse,
+)
+async def parser_queue_task_type_get(code: str) -> TaskTypeDetailResponse:
+    return await get_task_type(code)
+
+
+@parser_router.patch(
+    "/queue/task-types/{code}",
+    response_model=TaskTypeDetailResponse,
+)
+async def parser_queue_task_type_patch(
+    code: str,
+    body: TaskTypePatchRequest,
+) -> TaskTypeDetailResponse:
+    return await patch_task_type(code, body)
 
 
 @parser_router.get("/settings", response_model=BalancerSettingsResponse)

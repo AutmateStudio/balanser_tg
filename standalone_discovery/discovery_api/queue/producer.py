@@ -86,6 +86,7 @@ async def enqueue_parser_add_channels(
 ) -> EnqueueAddChannelsResult:
     """Создаёт по одной задаче parser_add_channel на каждый канал (dedup по dedup_key)."""
     repo = TaskQueueRepo()
+    channels_repo = SourceChannelsRepo()
     task_ids: list[int] = []
     wh = (webhook_url or "").strip() or None
 
@@ -110,12 +111,15 @@ async def enqueue_parser_add_channels(
         if wh:
             payload["webhook_url"] = wh
 
+        channel_id = await channels_repo.find_id_by_ref(channel_ref)
+
         result = await repo.enqueue(
             EnqueueInput(
                 task_type_code=PARSER_ADD_CHANNEL,
                 payload=payload,
                 dedup_key=_dedup_key(PARSER_ADD_CHANNEL, parser_id, channel_ref),
                 created_by=CREATED_BY_ADD,
+                channel_id=channel_id,
             )
         )
         task_id = _task_id_from_enqueue(result)

@@ -99,12 +99,16 @@ class PgQueueAddChannelsApiTests(unittest.TestCase):
 
 class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
     async def test_enqueue_one_task_per_channel(self) -> None:
+        from app_balance.queue.source_channels import SourceChannelsRepo
         from app_balance.queue.task_queue import EnqueueInput, EnqueueResult, TaskQueueRepo
         from discovery_api.queue.producer import enqueue_parser_add_channels
 
         with patch.object(
             TaskQueueRepo, "enqueue", new_callable=AsyncMock
-        ) as mock_enqueue:
+        ) as mock_enqueue, patch.object(
+            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock
+        ) as mock_find:
+            mock_find.side_effect = [101, 102]
             mock_enqueue.side_effect = [
                 EnqueueResult(created=True, task_id=10),
                 EnqueueResult(created=False, task_id=None, existing_task_id=11),
@@ -120,10 +124,12 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.task_ids, [10, 11])
         self.assertEqual(result.action_id, "act-1")
         self.assertEqual(mock_enqueue.await_count, 2)
+        self.assertEqual(mock_find.await_count, 2)
 
         first_call: EnqueueInput = mock_enqueue.await_args_list[0].args[0]
         self.assertEqual(first_call.task_type_code, "parser_add_channel")
         self.assertEqual(first_call.dedup_key, "parser_add_channel:p1:a")
+        self.assertEqual(first_call.channel_id, 101)
         self.assertEqual(first_call.payload["parser_id"], "p1")
         self.assertEqual(first_call.payload["channel_ref"], "@a")
         self.assertEqual(first_call.payload["action_id"], "act-1")
@@ -131,12 +137,15 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_call.created_by, "discovery_api:add-channels")
 
     async def test_enqueue_skips_empty_channels(self) -> None:
+        from app_balance.queue.source_channels import SourceChannelsRepo
         from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
         from discovery_api.queue.producer import enqueue_parser_add_channels
 
         with patch.object(
             TaskQueueRepo, "enqueue", new_callable=AsyncMock
-        ) as mock_enqueue:
+        ) as mock_enqueue, patch.object(
+            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=999
+        ):
             mock_enqueue.return_value = EnqueueResult(created=True, task_id=7)
 
             result = await enqueue_parser_add_channels(

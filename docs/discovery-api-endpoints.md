@@ -602,6 +602,61 @@ curl -sS "$BASE/discovery-api/parser/queue/tasks/12345" -H "X-API-Key: $KEY"
 curl -sS "$BASE/discovery-api/parser/queue/metrics" -H "X-API-Key: $KEY"
 ```
 
+### GET /discovery-api/parser/queue/task-types
+
+Список типов задач PG-очереди с RPH-полями для вкладки «RPH». Требует `USE_PG_QUEUE=true`.
+
+**Ответ:** JSON-массив (`TaskTypeListItemResponse`):
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `code` | string | `task_types.code` |
+| `name` | string | Человекочитаемое имя |
+| `description` | string \| null | |
+| `rph_limit_effective` | int ≥ 1 | Текущий `rph_limit` primary op |
+| `rph_limit_default` | int ≥ 1 | Дефолт из `ops_catalog` |
+| `primary_op_code` | string | Op для PATCH RPH |
+| `rph_auto_reduced` | bool | G6 auto-снижение активно |
+| `rph_reduced_at` | string \| null | ISO8601 последнего G6-снижения |
+
+**Ошибки:** `503` (PG-очередь выключена).
+
+```bash
+curl -sS "$BASE/discovery-api/parser/queue/task-types" -H "X-API-Key: $KEY"
+```
+
+### GET /discovery-api/parser/queue/task-types/{code}
+
+Деталь одного типа. **Ответ:** `TaskTypeDetailResponse` — поля списка + read-only §6.3 (`is_enabled`, `default_priority`, retry-поля и т.д.). **Ошибки:** `404`, `503`.
+
+```bash
+curl -sS "$BASE/discovery-api/parser/queue/task-types/parser_add_channel" -H "X-API-Key: $KEY"
+```
+
+### PATCH /discovery-api/parser/queue/task-types/{code}
+
+Изменение RPH оператором (Phase 1 — только RPH и сброс).
+
+**Тело** (хотя бы одно поле):
+
+```json
+{ "rph_limit": 25 }
+```
+
+или
+
+```json
+{ "reset_rph_to_default": true }
+```
+
+**Ответ:** обновлённый `TaskTypeDetailResponse`. **Ошибки:** `400`, `404`, `503`.
+
+```bash
+curl -sS -X PATCH "$BASE/discovery-api/parser/queue/task-types/parser_add_channel" \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"rph_limit": 230}'
+```
+
 ---
 
 ## 10. Сводная таблица
@@ -643,6 +698,9 @@ curl -sS "$BASE/discovery-api/parser/queue/metrics" -H "X-API-Key: $KEY"
 | GET | `/discovery-api/parser/actions/{action_id}` | Задача по id |
 | GET | `/discovery-api/parser/queue/tasks/{task_id}` | Задача PG-очереди |
 | GET | `/discovery-api/parser/queue/metrics` | Метрики очереди (G3) |
+| GET | `/discovery-api/parser/queue/task-types` | Типы задач + RPH |
+| GET | `/discovery-api/parser/queue/task-types/{code}` | Деталь типа задачи |
+| PATCH | `/discovery-api/parser/queue/task-types/{code}` | Изменить RPH типа |
 
 ---
 

@@ -43,21 +43,45 @@ def _persist_clump_if_available(clump: Any) -> None:
         )
 
 
+def _channel_ref_from_payload(task: ClaimedTask) -> str | None:
+    payload = dict(task.payload or {})
+    channel_ref = payload.get("channel_ref") or payload.get("channel")
+    if channel_ref is None:
+        return None
+    ref = str(channel_ref).strip()
+    return ref or None
+
+
+async def _resolve_channel_id(
+    task: ClaimedTask,
+    repo: SourceChannelsRepo,
+) -> int | None:
+    """task.channel_id или поиск source_channels.id по payload.channel_ref."""
+    if task.channel_id is not None:
+        return task.channel_id
+    channel_ref = _channel_ref_from_payload(task)
+    if channel_ref is None:
+        return None
+    return await repo.find_id_by_ref(channel_ref)
+
+
 async def _write_pg_assignment(
     *,
     task: ClaimedTask,
     account_id: int,
     repo: SourceChannelsRepo,
 ) -> None:
-    if task.channel_id is None:
+    channel_id = await _resolve_channel_id(task, repo)
+    if channel_id is None:
         log.warning(
-            "channel_assignment_sync: channel_id отсутствует, PG dual-write пропущен (task_id=%s)",
+            "channel_assignment_sync: channel_id не удалось определить, "
+            "PG dual-write пропущен (task_id=%s)",
             task.id,
         )
         return
-    ok = await repo.set_assigned_account(task.channel_id, account_id)
+    ok = await repo.set_assigned_account(channel_id, account_id)
     if not ok:
-        raise RuntimeError(f"source_channel_not_found:{task.channel_id}")
+        raise RuntimeError(f"source_channel_not_found:{channel_id}")
 
 
 async def sync_after_parser_add_channel(
@@ -103,17 +127,19 @@ async def sync_after_parser_remove_channel(
 ) -> None:
     channels_repo = repo or _default_repo
     if pg_dual_write_enabled() and await _ensure_pool():
-        if task.channel_id is not None:
-            ok = await channels_repo.clear_assigned_account(task.channel_id)
+        channel_id = await _resolve_channel_id(task, channels_repo)
+        if channel_id is None:
+            log.warning(
+                "channel_assignment_sync: channel_id не удалось определить, "
+                "PG clear пропущен (task_id=%s)",
+                task.id,
+            )
+        else:
+            ok = await channels_repo.clear_assigned_account(channel_id)
             if not ok:
                 log.warning(
                     "channel_assignment_sync: source_channel id=%s не найден при remove (task_id=%s)",
-                    task.channel_id,
+                    channel_id,
                     task.id,
                 )
-        else:
-            log.warning(
-                "channel_assignment_sync: channel_id отсутствует, PG clear пропущен (task_id=%s)",
-                task.id,
-            )
     _persist_clump_if_available(clump)
