@@ -446,6 +446,9 @@ async def _health_check_once() -> None:
     """Один тик HealthMonitor: обновить health всех сессий и добить миграции."""
     reauth_enabled = get_account_auth_recheck_enabled()
     reauth_interval = get_account_auth_recheck_interval_seconds()
+    reauth_error_total = 0
+    reauth_checked = 0
+    reauth_recovered = 0
     for clump in list(_clumps.values()):
         for pc in list(clump.parser_client_list):
             health = pc.health
@@ -453,8 +456,11 @@ async def _health_check_once() -> None:
             if health.banned:
                 continue
             if health.status == SessionStatus.ERROR:
+                reauth_error_total += 1
                 if reauth_enabled and health.should_attempt_reauth(reauth_interval):
-                    await _attempt_session_reauth(pc)
+                    reauth_checked += 1
+                    if await _attempt_session_reauth(pc):
+                        reauth_recovered += 1
                 continue
             client = _clients.get(pc.session_name)
             if client is None:
@@ -486,6 +492,14 @@ async def _health_check_once() -> None:
                 log.exception(
                     "Ошибка idle-rebalance clump %s", clump.clump_name
                 )
+    if reauth_error_total:
+        log.info(
+            "account-auth-watchdog: тик завершён — ERROR-сессий=%d, "
+            "проверено=%d, восстановлено=%d",
+            reauth_error_total,
+            reauth_checked,
+            reauth_recovered,
+        )
 
 
 async def _health_monitor_loop() -> None:
