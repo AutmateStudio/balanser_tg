@@ -287,3 +287,52 @@ async def test_persist_unauthorized_writes_error_status() -> None:
         await sync.persist_unauthorized("/app/sessions/test4", _UNAUTH_MSG)
 
     mock_set.assert_awaited_once_with("/app/sessions/test4", reason=_UNAUTH_MSG)
+
+
+# --- 7. Round-trip unauthorized → reauthorized ---
+
+
+def test_mark_reauthorized_clears_unauthorized_error() -> None:
+    health = SessionHealth()
+    health.mark_unauthorized(_UNAUTH_MSG)
+    assert health.status == SessionStatus.ERROR
+
+    assert health.mark_reauthorized() is True
+    assert health.status == SessionStatus.HEALTHY
+    assert health.connected is True
+    assert health.last_error is None
+
+
+def test_mark_reauthorized_ignores_banned() -> None:
+    health = SessionHealth()
+    health.mark_banned("ban")
+    assert health.mark_reauthorized() is False
+    assert health.status == SessionStatus.BANNED
+
+
+@pytest.mark.asyncio
+async def test_notify_session_reauthorized_round_trip() -> None:
+    from discovery_api import session_registry as sr
+
+    sr.reset_for_tests()
+    try:
+        clump = sr.SessionClump(["/app/sessions/test4"], "prod-main", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        persist_unauth = AsyncMock()
+        persist_reauth = AsyncMock(return_value=True)
+
+        with (
+            patch.object(sr, "_persist_unauthorized_pg", persist_unauth),
+            patch.object(sr, "_persist_reauthorized_pg", persist_reauth),
+        ):
+            await sr.notify_session_unauthorized("/app/sessions/test4", _UNAUTH_MSG)
+            assert pc.health.status == SessionStatus.ERROR
+
+            ok = await sr.notify_session_reauthorized("/app/sessions/test4")
+            assert ok is True
+            assert pc.health.status == SessionStatus.HEALTHY
+            persist_reauth.assert_awaited_once()
+    finally:
+        await sr.release_all()
+        sr.reset_for_tests()

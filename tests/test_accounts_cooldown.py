@@ -167,6 +167,90 @@ async def test_set_account_error_excludes_from_pick(cooldown_account) -> None:
 @requires_pg
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_set_account_error_normalizes_session_path(cooldown_account) -> None:
+    session_name, account_id = cooldown_account
+    repo = AccountsRepo()
+    reason = "не авторизована"
+
+    assert await repo.set_account_error(f"/app/sessions/{session_name}", reason=reason) is True
+
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, last_error FROM accounts WHERE id = $1",
+            account_id,
+        )
+    assert row["status"] == "error"
+    assert row["last_error"] == reason
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_reactivate_from_unauthorized_restores_active(cooldown_account) -> None:
+    session_name, account_id = cooldown_account
+    repo = AccountsRepo()
+    reason = "Сессия не авторизована"
+
+    await repo.set_account_error(session_name, reason=reason)
+    assert await repo.reactivate_from_unauthorized(session_name) is True
+
+    async with db.acquire() as conn:
+        pickable = await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM accounts
+                WHERE id = $1
+                  AND status IN ('active', 'cooldown')
+                  AND is_enabled = true
+                  AND current_task_id IS NULL
+                  AND (cooldown_until IS NULL OR cooldown_until <= now())
+            )
+            """,
+            account_id,
+        )
+        row = await conn.fetchrow(
+            "SELECT status, is_enabled, last_error FROM accounts WHERE id = $1",
+            account_id,
+        )
+    assert pickable is True
+    assert row["status"] == "active"
+    assert row["is_enabled"] is True
+    assert row["last_error"] is None
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_reactivate_from_unauthorized_idempotent(cooldown_account) -> None:
+    session_name, _account_id = cooldown_account
+    repo = AccountsRepo()
+
+    await repo.set_account_error(session_name, reason="err")
+    assert await repo.reactivate_from_unauthorized(session_name) is True
+    assert await repo.reactivate_from_unauthorized(session_name) is False
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_reactivate_does_not_touch_banned(cooldown_account) -> None:
+    session_name, account_id = cooldown_account
+    repo = AccountsRepo()
+
+    await repo.set_banned(session_name, reason="ban")
+    assert await repo.reactivate_from_unauthorized(session_name) is False
+
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status FROM accounts WHERE id = $1",
+            account_id,
+        )
+    assert row["status"] == "banned"
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_expired_cooldown_pickable_with_cooldown_status(cooldown_account) -> None:
     session_name, account_id = cooldown_account
     repo = AccountsRepo()

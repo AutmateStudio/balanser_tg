@@ -87,6 +87,7 @@ from discovery_api.session_registry import (
     ChannelQuotaExceeded,
     SessionClump,
     get_or_create_clump,
+    notify_session_reauthorized,
     release_client,
     remove_clump,
 )
@@ -899,6 +900,32 @@ async def parser_account_block(
 ) -> AccountFullSummary:
     norm = normalize_session_name(session_name)
     set_admin_blocked(norm, blocked=body.blocked, reason=body.reason)
+    rows = list_all_accounts_merged(_jobs)
+    row = next((r for r in rows if r["session_name"] == norm), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Аккаунт не найден")
+    return AccountFullSummary(**row)
+
+
+@parser_router.patch("/accounts/{session_name:path}/reactivate", response_model=AccountFullSummary)
+async def parser_account_reactivate(session_name: str) -> AccountFullSummary:
+    """Снимает PG status=error после re-auth; сессия должна быть авторизована в Telethon."""
+    norm = normalize_session_name(session_name)
+    if not session_file_exists(norm):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Файл сессии не найден: {norm}.session",
+        )
+    probe = await probe_session_info(norm)
+    if probe.get("error"):
+        err = str(probe["error"])
+        if "не авторизована" in err.lower() or "not authorized" in err.lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Сессия {norm} не авторизована; войдите через QR перед reactivate",
+            )
+        raise HTTPException(status_code=409, detail=err)
+    await notify_session_reauthorized(norm)
     rows = list_all_accounts_merged(_jobs)
     row = next((r for r in rows if r["session_name"] == norm), None)
     if row is None:

@@ -297,6 +297,7 @@ async def get_or_create_client(session_name: str) -> TelegramClient:
                 msg = _unauthorized_message(session_name)
                 await notify_session_unauthorized(session_name, msg)
                 raise RuntimeError(msg)
+            await notify_session_reauthorized(session_name)
             return client
 
         client = TelegramClient(session_name, int(get_api_id()), get_api_hash())
@@ -308,6 +309,7 @@ async def get_or_create_client(session_name: str) -> TelegramClient:
             raise RuntimeError(msg)
         _clients[session_name] = client
         log.info("Telethon-клиент подключён и зарегистрирован: %s", session_name)
+        await notify_session_reauthorized(session_name)
         return client
 
 
@@ -524,12 +526,29 @@ async def _persist_unauthorized_pg(session_name: str, reason: str) -> None:
     await persist_unauthorized(session_name, reason)
 
 
+async def _persist_reauthorized_pg(session_name: str) -> bool:
+    """D6: успешная re-auth → PG accounts.status error → active."""
+    try:
+        from app_balance.queue.account_health_sync import persist_account_reauthorized
+    except ImportError:
+        return False
+    return await persist_account_reauthorized(session_name)
+
+
 async def notify_session_unauthorized(session_name: str, message: str) -> None:
     """In-memory health clump + PG accounts для неавторизованной сессии."""
     pc = find_parser_client(session_name)
     if pc is not None:
         pc.health.mark_unauthorized(message)
     await _persist_unauthorized_pg(session_name, message)
+
+
+async def notify_session_reauthorized(session_name: str) -> bool:
+    """In-memory health clump + PG accounts после успешной re-auth."""
+    pc = find_parser_client(session_name)
+    if pc is not None:
+        pc.health.mark_reauthorized()
+    return await _persist_reauthorized_pg(session_name)
 
 
 class Parser_client:

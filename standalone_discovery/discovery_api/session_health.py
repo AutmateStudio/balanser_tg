@@ -184,6 +184,27 @@ class SessionHealth:
         self.last_error_at = time.time()
         self.error_count += 1
 
+    def mark_reauthorized(self) -> bool:
+        """Снимает unauthorized-ERROR после успешной re-auth (не трогает banned/flood)."""
+        if self.banned:
+            return False
+        unauthorized_error = (
+            self.status == SessionStatus.ERROR
+            and is_session_unauthorized_error(RuntimeError(self.last_error or ""))
+        )
+        recoverable_disconnected = self.status in (
+            SessionStatus.STARTING,
+            SessionStatus.DISCONNECTED,
+        )
+        if not unauthorized_error and not recoverable_disconnected:
+            return False
+        self.connected = True
+        self.status = SessionStatus.HEALTHY
+        if unauthorized_error:
+            self.last_error = None
+            self.last_error_at = None
+        return True
+
     def record_error(self, message: str) -> None:
         self.error_count += 1
         self.last_error = message

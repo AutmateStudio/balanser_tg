@@ -183,6 +183,25 @@ class SessionRegistryUnauthorizedTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("не авторизована", pc.health.last_error or "")
         notify_mock.assert_awaited_once()
 
+    async def test_authorized_client_triggers_reauthorize(self) -> None:
+        from discovery_api import session_registry as sr
+
+        reauth_mock = AsyncMock(return_value=True)
+
+        with (
+            patch("discovery_api.session_registry.TelegramClient", FakeTelegramClient),
+            patch("discovery_api.session_registry.get_api_id", return_value=1),
+            patch("discovery_api.session_registry.get_api_hash", return_value="hash"),
+            patch(
+                "discovery_api.session_registry.notify_session_reauthorized",
+                reauth_mock,
+            ),
+        ):
+            client = await sr.get_or_create_client("/sess/ok")
+            self.assertIsNotNone(client)
+
+        reauth_mock.assert_awaited_once_with("/sess/ok")
+
 
 if __name__ == "__main__":
     unittest.main()

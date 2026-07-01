@@ -103,3 +103,36 @@ async def test_persist_unauthorized_calls_set_account_error(
         await sync.persist_unauthorized("/s3", "не авторизована")
 
     mock_err.assert_awaited_once_with("/s3", reason="не авторизована")
+
+
+@pytest.mark.asyncio
+async def test_persist_account_reauthorized_calls_reactivate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/db")
+    with (
+        patch.object(sync, "_ensure_pool", new_callable=AsyncMock, return_value=True),
+        patch.object(
+            sync._repo,
+            "reactivate_from_unauthorized",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_react,
+    ):
+        ok = await sync.persist_account_reauthorized("/app/sessions/Client1")
+
+    assert ok is True
+    mock_react.assert_awaited_once_with("/app/sessions/Client1")
+
+
+@pytest.mark.asyncio
+async def test_persist_account_reauthorized_noop_without_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("QUEUE_DATABASE_URL", raising=False)
+    with patch.object(
+        sync._repo, "reactivate_from_unauthorized", new_callable=AsyncMock
+    ) as mock_react:
+        ok = await sync.persist_account_reauthorized("Client1")
+    assert ok is False
+    mock_react.assert_not_awaited()
