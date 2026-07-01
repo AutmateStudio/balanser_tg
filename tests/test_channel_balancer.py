@@ -59,6 +59,23 @@ class _FakeTaskQueue:
         return EnqueueResult(created=True, task_id=self._next_id)
 
 
+class _FakeTaskQueueFirstFatal(_FakeTaskQueue):
+    """Первый enqueue — fatal_history, остальные — успешны (F1 skip-reason)."""
+
+    async def enqueue(self, data) -> EnqueueResult:
+        self.calls.append(data)
+        if len(self.calls) == 1:
+            return EnqueueResult(
+                created=False,
+                task_id=None,
+                existing_task_id=555,
+                skipped_reason="fatal_history",
+                fatal_error_code="banned",
+            )
+        self._next_id += 1
+        return EnqueueResult(created=True, task_id=self._next_id)
+
+
 class _FakeAccounts:
     """session_name -> account_id (None => аккаунт не в PG)."""
 
@@ -253,6 +270,30 @@ async def test_unknown_session_skipped_and_single_account_clump_noop() -> None:
     results = await producer.produce()
     assert results == []
     assert tq.calls == []
+
+
+@pytest.mark.asyncio
+async def test_fatal_history_logs_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tq = _FakeTaskQueueFirstFatal()
+    producer, tq = _producer(
+        counts={1: 12, 2: 8},
+        accounts={"s1": 1, "s2": 2},
+        clumps=[("p1", _Clump(["s1", "s2"]))],
+        channels={1: _channels_for(1, 12)},
+        task_queue=tq,
+    )
+    with caplog.at_level(
+        "WARNING", logger="app_balance.queue.producers.channel_balancer"
+    ):
+        results = await producer.produce()
+
+    assert any(r.skipped_reason == "fatal_history" for r in results)
+    assert any(
+        "move_channel" in record.message and "фатально" in record.message
+        for record in caplog.records
+    )
 
 
 @pytest.mark.asyncio

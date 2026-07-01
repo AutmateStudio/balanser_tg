@@ -146,6 +146,17 @@ class ChannelBalancerProducer(BaseProducer):
             result = await self.enqueue_if_room(data)
             results.append(result)
 
+            if result.skipped_reason == "fatal_history":
+                log.warning(
+                    "channel_balancer: move_channel канал id=%s %s->%s не "
+                    "поставлен — прошлая задача id=%s завершилась фатально (%s)",
+                    channel.id,
+                    source_id,
+                    target_id,
+                    result.existing_task_id,
+                    result.fatal_error_code,
+                )
+
             if result.skipped_reason == "queue_full":
                 break
 

@@ -51,6 +51,14 @@ class CollectExtraDataProducer(BaseProducer):
         results: list[ProduceResult] = []
         for channel in pending:
             result = await self.enqueue_if_room(_build_enqueue_input(channel))
+            if result.skipped_reason == "fatal_history":
+                logger.warning(
+                    "collect_extra_data: канал id=%s не поставлен в очередь — "
+                    "прошлая задача id=%s завершилась фатально (%s)",
+                    channel.channel_id,
+                    result.existing_task_id,
+                    result.fatal_error_code,
+                )
             results.append(result)
         return results
 
