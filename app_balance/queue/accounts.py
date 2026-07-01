@@ -99,6 +99,10 @@ WHERE id = $1 AND current_task_id = $2
 RETURNING id
 """
 
+
+class _ReservePairAborted(Exception):
+    """Частичный dual-reserve откатывается через rollback транзакции."""
+
 _SET_COOLDOWN_SQL = """
 UPDATE accounts
 SET cooldown_until = GREATEST(COALESCE(cooldown_until, $2::timestamptz), $2::timestamptz),
@@ -215,52 +219,55 @@ class AccountsRepo:
         if source_id == target_id:
             return None
 
-        async with transaction() as conn:
-            rows = await conn.fetch(_PAIR_LOCK_SQL, source_id, target_id)
-            if len(rows) != 2:
-                return None
+        try:
+            async with transaction() as conn:
+                rows = await conn.fetch(_PAIR_LOCK_SQL, source_id, target_id)
+                if len(rows) != 2:
+                    return None
 
-            by_id = {row["id"]: _row_to_account(row) for row in rows}
-            source = by_id.get(source_id)
-            target = by_id.get(target_id)
-            if source is None or target is None:
-                return None
+                by_id = {row["id"]: _row_to_account(row) for row in rows}
+                source = by_id.get(source_id)
+                target = by_id.get(target_id)
+                if source is None or target is None:
+                    return None
 
-            reserved_source = await conn.fetchval(
-                _RESERVE_SQL, source_id, task_id
-            )
-            if reserved_source is None:
-                return None
+                reserved_source = await conn.fetchval(
+                    _RESERVE_SQL, source_id, task_id
+                )
+                if reserved_source is None:
+                    return None
 
-            reserved_target = await conn.fetchval(
-                _RESERVE_SQL, target_id, task_id
-            )
-            if reserved_target is None:
-                return None
+                reserved_target = await conn.fetchval(
+                    _RESERVE_SQL, target_id, task_id
+                )
+                if reserved_target is None:
+                    raise _ReservePairAborted()
 
-            source_row = await conn.fetchrow(
-                """
-                SELECT id, session_name, status, is_enabled, current_task_id,
-                       cooldown_until, last_used_at
-                FROM accounts WHERE id = $1
-                """,
-                source_id,
-            )
-            target_row = await conn.fetchrow(
-                """
-                SELECT id, session_name, status, is_enabled, current_task_id,
-                       cooldown_until, last_used_at
-                FROM accounts WHERE id = $1
-                """,
-                target_id,
-            )
-            if source_row is None or target_row is None:
-                return None
+                source_row = await conn.fetchrow(
+                    """
+                    SELECT id, session_name, status, is_enabled, current_task_id,
+                           cooldown_until, last_used_at
+                    FROM accounts WHERE id = $1
+                    """,
+                    source_id,
+                )
+                target_row = await conn.fetchrow(
+                    """
+                    SELECT id, session_name, status, is_enabled, current_task_id,
+                           cooldown_until, last_used_at
+                    FROM accounts WHERE id = $1
+                    """,
+                    target_id,
+                )
+                if source_row is None or target_row is None:
+                    raise _ReservePairAborted()
 
-            return DualReserveResult(
-                source=_row_to_account(source_row),
-                target=_row_to_account(target_row),
-            )
+                return DualReserveResult(
+                    source=_row_to_account(source_row),
+                    target=_row_to_account(target_row),
+                )
+        except _ReservePairAborted:
+            return None
 
     async def release(self, account_id: int, task_id: int | None = None) -> None:
         """Освобождает аккаунт. С task_id — CAS: снимает резерв только своей задачи."""
