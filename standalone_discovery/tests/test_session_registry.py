@@ -203,5 +203,160 @@ class SessionRegistryUnauthorizedTests(unittest.IsolatedAsyncioTestCase):
         reauth_mock.assert_awaited_once_with("/sess/ok")
 
 
+class AccountAuthWatchdogHealthCheckTests(unittest.IsolatedAsyncioTestCase):
+    """Account-auth watchdog: `_health_check_once` восстанавливает ERROR-сессии."""
+
+    async def asyncSetUp(self) -> None:
+        from discovery_api import session_registry as sr
+
+        sr.reset_for_tests()
+
+    async def asyncTearDown(self) -> None:
+        from discovery_api import session_registry as sr
+
+        await sr.release_all()
+        sr.reset_for_tests()
+
+    async def test_health_check_skips_error_before_interval(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/e1"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_unauthorized("не авторизована")
+        pc.health.record_reauth_attempt()  # только что пытались — рано повторять
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_interval_seconds",
+                return_value=300.0,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+            ) as get_client_mock,
+        ):
+            await sr._health_check_once()
+
+        get_client_mock.assert_not_awaited()
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
+
+    async def test_health_check_retries_error_after_interval_and_recovers(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/e2"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_unauthorized("не авторизована")
+
+        async def fake_get_or_create_client(session_name: str) -> object:
+            await sr.notify_session_reauthorized(session_name)
+            return object()
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_interval_seconds",
+                return_value=300.0,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                side_effect=fake_get_or_create_client,
+            ),
+            patch.object(sr, "_persist_reauthorized_pg", new_callable=AsyncMock, return_value=True),
+        ):
+            await sr._health_check_once()
+
+        self.assertEqual(pc.health.status, SessionStatus.HEALTHY)
+        self.assertEqual(pc.health.reauth_attempt_count, 1)
+
+    async def test_health_check_retries_error_and_stays_unauthorized(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/e3"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_unauthorized("не авторизована")
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_interval_seconds",
+                return_value=300.0,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("не авторизована"),
+            ) as get_client_mock,
+        ):
+            await sr._health_check_once()
+
+        get_client_mock.assert_awaited_once_with("/sess/e3")
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
+        self.assertEqual(pc.health.reauth_attempt_count, 1)
+
+    async def test_health_check_ignores_banned_sessions(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/b1"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_banned("UserDeactivatedBanError")
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+            ) as get_client_mock,
+        ):
+            await sr._health_check_once()
+
+        get_client_mock.assert_not_awaited()
+        self.assertEqual(pc.health.status, SessionStatus.BANNED)
+
+    async def test_health_check_reauth_disabled_by_config(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/e4"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_unauthorized("не авторизована")
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=False,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+            ) as get_client_mock,
+        ):
+            await sr._health_check_once()
+
+        get_client_mock.assert_not_awaited()
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -133,6 +133,8 @@ class SessionHealth:
     reconnect_count: int = 0
     banned: bool = False
     ban_reason: Optional[str] = None
+    last_reauth_attempt_at: Optional[float] = None
+    reauth_attempt_count: int = 0
 
     def touch_event(self) -> None:
         """Отметить, что сессия только что получила сообщение/апдейт."""
@@ -205,6 +207,22 @@ class SessionHealth:
             self.last_error_at = None
         return True
 
+    def should_attempt_reauth(self, min_interval_seconds: float) -> bool:
+        """Account-auth watchdog: пора ли повторить проверку авторизации ERROR-сессии.
+
+        Только для unauthorized (status=ERROR, не banned) — на бан/ревок
+        сессии повторная попытка бессмысленна, нужен новый .session-файл.
+        """
+        if self.banned or self.status != SessionStatus.ERROR:
+            return False
+        if self.last_reauth_attempt_at is None:
+            return True
+        return (time.time() - self.last_reauth_attempt_at) >= max(0.0, min_interval_seconds)
+
+    def record_reauth_attempt(self) -> None:
+        self.last_reauth_attempt_at = time.time()
+        self.reauth_attempt_count += 1
+
     def record_error(self, message: str) -> None:
         self.error_count += 1
         self.last_error = message
@@ -243,4 +261,6 @@ class SessionHealth:
             "reconnect_count": self.reconnect_count,
             "banned": self.banned,
             "ban_reason": self.ban_reason,
+            "last_reauth_attempt_at": self.last_reauth_attempt_at,
+            "reauth_attempt_count": self.reauth_attempt_count,
         }

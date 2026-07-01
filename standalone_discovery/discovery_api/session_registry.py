@@ -25,6 +25,8 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from discovery_api.config import (
+    get_account_auth_recheck_enabled,
+    get_account_auth_recheck_interval_seconds,
     get_api_hash,
     get_api_id,
     get_add_channels_per_hour,
@@ -414,8 +416,36 @@ async def release_all() -> None:
     log.info("session_registry: все клиенты отключены")
 
 
+async def _attempt_session_reauth(pc: "Parser_client") -> bool:
+    """Account-auth watchdog: пробует восстановить авторизацию ERROR-сессии.
+
+    Переиспользует `get_or_create_client` — при успехе он сам обновит
+    in-memory health и PG accounts (status=error → active) через
+    `notify_session_reauthorized`; при неудаче — просто ещё раз пометит
+    unauthorized (без изменения смысла существующего состояния).
+    """
+    pc.health.record_reauth_attempt()
+    session_name = pc.session_name
+    try:
+        await get_or_create_client(session_name)
+    except Exception as exc:  # noqa: BLE001 — ожидаемо: RuntimeError "не авторизована"
+        log.info(
+            "account-auth-watchdog: сессия %s всё ещё не авторизована (%s)",
+            session_name,
+            exc,
+        )
+        return False
+    log.warning(
+        "account-auth-watchdog: сессия %s реавторизована, статус восстановлен",
+        session_name,
+    )
+    return True
+
+
 async def _health_check_once() -> None:
     """Один тик HealthMonitor: обновить health всех сессий и добить миграции."""
+    reauth_enabled = get_account_auth_recheck_enabled()
+    reauth_interval = get_account_auth_recheck_interval_seconds()
     for clump in list(_clumps.values()):
         for pc in list(clump.parser_client_list):
             health = pc.health
@@ -423,6 +453,8 @@ async def _health_check_once() -> None:
             if health.banned:
                 continue
             if health.status == SessionStatus.ERROR:
+                if reauth_enabled and health.should_attempt_reauth(reauth_interval):
+                    await _attempt_session_reauth(pc)
                 continue
             client = _clients.get(pc.session_name)
             if client is None:
