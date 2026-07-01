@@ -39,6 +39,8 @@ PARSER_REMOVE_CHANNEL = "parser_remove_channel"
 MOVE_CHANNEL = "move_channel"
 COLLECT_EXTRA_DATA = "collect_extra_data"
 UPDATE_CHANNEL = "update_channel"
+DISCOVER_GROUPS = "discover_groups"  # legacy alias
+TELEGRAM_DISCOVER = "telegram_discover"
 
 SyncAfterAdd = Callable[[ClaimedTask, Account, Any], Awaitable[None]]
 SyncAfterMove = Callable[[ClaimedTask, Account, Any], Awaitable[None]]
@@ -373,6 +375,89 @@ async def _execute_update_channel(
     await channels_repo.save_channel_update(channel_id, build_signals(ctx))
 
 
+def _parse_telegram_discover_payload(payload: dict[str, Any]) -> tuple[str, int, int, bool, bool]:
+    query = payload.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing query")
+
+    try:
+        limit = int(payload.get("first_pass_limit", payload.get("limit", 10)))
+        depth = int(payload.get("similarity_depth", payload.get("depth", 2)))
+    except (TypeError, ValueError) as exc:
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "invalid limit/depth") from exc
+
+    if not (1 <= limit <= 100):
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "limit out of range")
+    if not (0 <= depth <= 5):
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "depth out of range")
+
+    include_global = bool(payload.get("include_global_search", True))
+    include_groups = bool(payload.get("include_groups", True))
+    return query.strip(), limit, depth, include_global, include_groups
+
+
+async def _execute_telegram_discover(
+    task: ClaimedTask,
+    *,
+    account: Account,
+    client_getter: ClientGetter,
+    queue: TaskQueueRepo,
+    channels_repo: SourceChannelsRepo | None = None,
+) -> None:
+    """POST /discover async: поиск + фильтр discussion + upsert source_channels."""
+    from discovery_api.discovery import (
+        discover_unified_on_client,
+        persist_unified_discovery,
+        serialize_unified_discovery_result,
+    )
+
+    query, limit, depth, include_global, include_groups = _parse_telegram_discover_payload(
+        dict(task.payload)
+    )
+    client = await client_getter(account.session_name)
+    try:
+        result = await discover_unified_on_client(
+            client,
+            query,
+            search_limit=limit,
+            max_depth=depth,
+            include_global_search=include_global,
+            include_groups=include_groups,
+        )
+    except QueueTaskError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise map_telethon_exception(exc) from exc
+
+    repo = channels_repo or SourceChannelsRepo()
+    persist_stats = await persist_unified_discovery(result, channels_repo=repo)
+
+    merged = await queue.merge_payload(
+        task.id,
+        {
+            "result": serialize_unified_discovery_result(
+                result,
+                persist=persist_stats.to_dict(),
+            )
+        },
+    )
+    if not merged:
+        log.warning(
+            "execute_task: не удалось записать result telegram_discover task_id=%s",
+            task.id,
+        )
+
+    log.info(
+        "execute_task: telegram_discover OK task_id=%s session=%s total=%s inserted=%s updated=%s skipped=%s",
+        task.id,
+        account.session_name,
+        result.total,
+        persist_stats.inserted,
+        persist_stats.updated,
+        persist_stats.skipped_no_discussion,
+    )
+
+
 async def execute_task(
     task: ClaimedTask,
     *,
@@ -452,6 +537,14 @@ async def execute_task(
             channels_repo=channels_repo or SourceChannelsRepo(),
             queue=queue or TaskQueueRepo(),
             usage=usage or ResourceUsageRepo(),
+        )
+    elif task.task_type_code in (TELEGRAM_DISCOVER, DISCOVER_GROUPS):
+        await _execute_telegram_discover(
+            task,
+            account=account,
+            client_getter=client_getter or default_client_getter(),
+            queue=queue or TaskQueueRepo(),
+            channels_repo=channels_repo or SourceChannelsRepo(),
         )
     else:
         raise PermanentError(

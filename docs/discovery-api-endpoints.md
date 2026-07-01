@@ -72,7 +72,25 @@ curl -sS "$BASE/health"
 
 ### POST /discovery-api/discover
 
-Поиск broadcast-каналов (опционально групп) по запросу с обходом «похожих» в глубину.
+Единый поиск **каналов и групп** с записью результатов в PostgreSQL (`source_channels`).
+По умолчанию — **async** через PG-очередь (`telegram_discover`).
+
+**Query:** `async` (bool, по умолч. `true`). При `async=true` и `USE_PG_QUEUE=true` задача
+ставится в очередь с **fixed `account_id`** (резерв аккаунта через dispatch). Ответ сразу
+содержит `task_id` и `action_id`; полный результат — в `payload.result` после
+`GET /discovery-api/parser/queue/tasks/{task_id}` при `status=done`.
+
+При `async=false` — синхронный поиск в процессе HTTP-запроса + тот же upsert в БД
+(удобно для отладки).
+
+**Фильтр записи в БД:**
+
+| Тип | Условие |
+|-----|---------|
+| broadcast-канал | сохраняется только если есть linked discussion (`linked_chat_id`) |
+| supergroup / group / Chat | сохраняется всегда |
+
+Отброшенные broadcast-каналы учитываются в `persist.skipped_no_discussion`.
 
 **Тело запроса** (`DiscoveryRequest`):
 
@@ -83,23 +101,29 @@ curl -sS "$BASE/health"
 | `first_pass_limit` | int (1–100) | нет | 10 | Лимит результатов первого прохода |
 | `similarity_depth` | int (0–5) | нет | 2 | Глубина обхода похожих каналов |
 | `include_global_search` | bool | нет | true | Доп. поиск по тексту сообщений (`messages.SearchGlobal`) |
-| `include_groups` | bool | нет | false | Возвращать также группы/супергруппы |
+| `include_groups` | bool | нет | **true** | Включать группы/супергруппы (seeds-поиск + из основного discover) |
 
 **Ответ** (`DiscoveryResponse`):
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `query` | string | Эхо запроса |
-| `total` | int | Кол-во найденных каналов |
-| `depth_stats` | object<int,int> | Кол-во каналов по глубине |
-| `channels` | array<ChannelItem> | Список каналов (см. ниже) |
+| `total` | int | Кол-во найденных каналов + уникальных групп |
+| `depth_stats` | object<int,int> | Кол-во по глубине |
+| `channels` | array<ChannelItem> | Broadcast-каналы и супергруппы из основного поиска |
+| `groups` | array<GroupItem> | Доп. группы из seeds-поиска (дедуп по `peer_id`) |
+| `seeds` | array<string> | Seeds для группового поиска |
+| `errors` | array<string> | Нефатальные ошибки (async enqueue / group search) |
+| `persist` | object | Статистика upsert: `inserted`, `updated`, `skipped_no_discussion`, `channel_ids` |
+| `task_id` | int | При async — id задачи в PG |
+| `action_id` | string | Корреляция с `task_queue.payload` |
+| `async_mode` | bool | `true` если ответ только с `task_id` |
+| `deprecated` | bool | `true` только у обёртки `/discover-groups` |
 
-`ChannelItem` (ключевые поля): `peer_id` (int), `title` (string), `username` (string|null),
-`participants_count` (int|null), `depth` (int), `source` (string), `recommended_by` (int|null),
-`score` (int), `score_breakdown` (object), `score_signals` (object), `score_hard_flags` (object),
-плюс флаги Telegram: `verified`, `scam`, `fake`, `megagroup`, `broadcast`, `about`, `created_at` и др.
+`external_channel_id` в БД — полный `peer_id` как строка (например `-1001234567890`).
 
 ```bash
+# async (по умолчанию, USE_PG_QUEUE=true)
 curl -sS -X POST "$BASE/discovery-api/discover" \
   -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
   -d '{
@@ -108,31 +132,42 @@ curl -sS -X POST "$BASE/discovery-api/discover" \
     "first_pass_limit": 10,
     "similarity_depth": 2,
     "include_global_search": true,
-    "include_groups": false
+    "include_groups": true
   }'
+
+# статус и результат (channels, groups, persist)
+curl -sS "$BASE/discovery-api/parser/queue/tasks/TASK_ID" -H "X-API-Key: $KEY"
+
+# синхронный поиск + persist (без очереди)
+curl -sS -X POST "$BASE/discovery-api/discover?async=false" \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"session_name":"my_account","query":"маркетинг","first_pass_limit":20,"similarity_depth":2}'
 ```
 
 ### POST /discovery-api/discover-groups
 
-Поиск групп/супергрупп по слову. **Ошибки не бросают 500** — возвращаются в поле `errors`.
-
-**Тело запроса** (`GroupDiscoveryRequest`):
-
-| Поле | Тип | Обяз. | По умолч. | Описание |
-|------|-----|-------|-----------|----------|
-| `session_name` | string | да | — | Имя/путь Telethon `.session` |
-| `word` | string | да | — | Поисковое слово |
-| `limit` | int (1–100) | нет | 20 | Лимит результатов |
-| `depth` | int (0–5) | нет | 2 | Глубина обхода |
-
-**Ответ** (`GroupDiscoveryResponse`): `query`, `seeds` (array<string>), `total`, `depth_stats`,
-`groups` (array<GroupItem>), `errors` (array<string>).
+**Deprecated.** Тонкая обёртка над `POST /discover`: поле `word` → `query`, `limit` →
+`first_pass_limit`, `depth` → `similarity_depth`, `include_groups=true`.
+В ответе всегда `deprecated: true`. Удаление после миграции n8n workflow «Телеграм поиск».
 
 ```bash
+# эквивалент POST /discover с query=word
 curl -sS -X POST "$BASE/discovery-api/discover-groups" \
   -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
   -d '{"session_name":"my_account","word":"маркетинг","limit":20,"depth":2}'
 ```
+
+#### Миграция n8n workflow «Телеграм поиск» (`Cno7xg0nQg8D`)
+
+После деплоя unified `/discover`:
+
+1. Убрать второй HTTP-вызов на `/discover-groups` — достаточно одного `POST /discover`.
+2. Poll результата: `GET /discovery-api/parser/queue/tasks/{task_id}` до `status=done`.
+3. Удалить postgres-ноды upsert в `source_channels` — запись делает API (`persist` в `payload.result`).
+4. Для dedup следующих шагов читать `source_channels` или `persist.channel_ids` из результата задачи.
+5. `external_channel_id` оставить в формате полного `peer_id` (как в Set-ноде workflow).
+
+Файл workflow: [`n8n/телеграм-поиск-Cno7xg0nQg8D-newapi.json`](../n8n/телеграм-поиск-Cno7xg0nQg8D-newapi.json).
 
 ### POST /discovery-api/add-channel-by-link
 
@@ -699,8 +734,8 @@ curl -sS "$BASE/discovery-api/parser/queue/accounts/Test2/summary" -H "X-API-Key
 | Метод | Путь | Назначение |
 |-------|------|------------|
 | GET | `/health` | Живость (без ключа) |
-| POST | `/discovery-api/discover` | Поиск каналов |
-| POST | `/discovery-api/discover-groups` | Поиск групп |
+| POST | `/discovery-api/discover` | Единый поиск каналов/групп + upsert в `source_channels` (async по умолч.) |
+| POST | `/discovery-api/discover-groups` | **Deprecated** — обёртка над `/discover` |
 | POST | `/discovery-api/add-channel-by-link` | Добавить канал по ссылке |
 | POST | `/discovery-api/add-channel-by-link-session-file` | То же, сессия в `session_file` |
 | POST | `/discovery-api/auth/qr` | Создать QR-сессию |

@@ -1,4 +1,4 @@
-"""D8/D9 — продюсер задач parser_add_channel / parser_remove_channel в PostgreSQL."""
+"""D8/D9 — продюсер задач parser_add_channel / parser_remove_channel / telegram_discover."""
 from __future__ import annotations
 
 import logging
@@ -14,8 +14,10 @@ log = logging.getLogger(__name__)
 
 PARSER_ADD_CHANNEL = "parser_add_channel"
 PARSER_REMOVE_CHANNEL = "parser_remove_channel"
+TELEGRAM_DISCOVER = "telegram_discover"
 CREATED_BY_ADD = "discovery_api:add-channels"
 CREATED_BY_REMOVE = "discovery_api:remove-channels"
+CREATED_BY_DISCOVER = "discovery_api:discover"
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +29,12 @@ class EnqueueAddChannelsResult:
 @dataclass(frozen=True, slots=True)
 class EnqueueRemoveChannelsResult:
     task_ids: list[int]
+    action_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class EnqueueTelegramDiscoverResult:
+    task_id: int | None
     action_id: str
 
 
@@ -206,3 +214,81 @@ async def enqueue_parser_remove_channels(
             task_ids.append(task_id)
 
     return EnqueueRemoveChannelsResult(task_ids=task_ids, action_id=action_id)
+
+
+def _telegram_discover_dedup_key(
+    session_name: str,
+    query: str,
+    *,
+    first_pass_limit: int,
+    similarity_depth: int,
+    include_global_search: bool,
+    include_groups: bool,
+) -> str:
+    from app_balance.queue.accounts_sync import normalize_session_name
+
+    session = normalize_session_name(session_name)
+    normalized_query = (query or "").strip().lower()
+    return (
+        f"{TELEGRAM_DISCOVER}:{session}:{normalized_query}:"
+        f"{first_pass_limit}:{similarity_depth}:"
+        f"{int(include_global_search)}:{int(include_groups)}"
+    )
+
+
+async def enqueue_telegram_discover(
+    *,
+    session_name: str,
+    query: str,
+    first_pass_limit: int,
+    similarity_depth: int,
+    include_global_search: bool,
+    include_groups: bool,
+    action_id: str,
+) -> EnqueueTelegramDiscoverResult:
+    """Ставит задачу telegram_discover с fixed account_id (резерв через dispatch)."""
+    from app_balance.queue.accounts_sync import normalize_session_name
+
+    accounts = AccountsRepo()
+    normalized_session = normalize_session_name(session_name)
+    account_id = await accounts.get_id_by_session_name(session_name)
+    if account_id is None:
+        log.warning(
+            "enqueue_telegram_discover: аккаунт не в PG session=%r",
+            session_name,
+        )
+        return EnqueueTelegramDiscoverResult(task_id=None, action_id=action_id)
+
+    trimmed_query = (query or "").strip()
+    if not trimmed_query:
+        return EnqueueTelegramDiscoverResult(task_id=None, action_id=action_id)
+
+    payload: dict[str, Any] = {
+        "session_name": normalized_session,
+        "query": trimmed_query,
+        "first_pass_limit": int(first_pass_limit),
+        "similarity_depth": int(similarity_depth),
+        "include_global_search": bool(include_global_search),
+        "include_groups": bool(include_groups),
+        "action_id": action_id,
+    }
+
+    repo = TaskQueueRepo()
+    result = await repo.enqueue(
+        EnqueueInput(
+            task_type_code=TELEGRAM_DISCOVER,
+            payload=payload,
+            dedup_key=_telegram_discover_dedup_key(
+                session_name,
+                trimmed_query,
+                first_pass_limit=first_pass_limit,
+                similarity_depth=similarity_depth,
+                include_global_search=include_global_search,
+                include_groups=include_groups,
+            ),
+            created_by=CREATED_BY_DISCOVER,
+            account_id=account_id,
+        )
+    )
+    task_id = _task_id_from_enqueue(result)
+    return EnqueueTelegramDiscoverResult(task_id=task_id, action_id=action_id)
