@@ -92,6 +92,13 @@ WHERE id = $1
 RETURNING id
 """
 
+_RELEASE_FOR_TASK_SQL = """
+UPDATE accounts
+SET current_task_id = NULL
+WHERE id = $1 AND current_task_id = $2
+RETURNING id
+"""
+
 _SET_COOLDOWN_SQL = """
 UPDATE accounts
 SET cooldown_until = GREATEST(COALESCE(cooldown_until, $2::timestamptz), $2::timestamptz),
@@ -255,9 +262,13 @@ class AccountsRepo:
                 target=_row_to_account(target_row),
             )
 
-    async def release(self, account_id: int) -> None:
+    async def release(self, account_id: int, task_id: int | None = None) -> None:
+        """Освобождает аккаунт. С task_id — CAS: снимает резерв только своей задачи."""
         async with acquire() as conn:
-            await conn.execute(_RELEASE_SQL, account_id)
+            if task_id is None:
+                await conn.execute(_RELEASE_SQL, account_id)
+            else:
+                await conn.execute(_RELEASE_FOR_TASK_SQL, account_id, task_id)
 
     async def get_by_id(self, account_id: int) -> Account | None:
         async with acquire() as conn:

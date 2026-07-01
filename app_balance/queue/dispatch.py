@@ -339,7 +339,7 @@ class TaskDispatcher:
 
             for account_id in reserved_ids:
 
-                await self._accounts.release(account_id)
+                await self._accounts.release(account_id, task.id)
 
 
 
@@ -573,7 +573,7 @@ class TaskDispatcher:
 
         if account is None:
 
-            await self._accounts.release(account_id)
+            await self._accounts.release(account_id, task.id)
 
             await self._postpone_task(
                 task,
@@ -593,7 +593,7 @@ class TaskDispatcher:
 
 
 
-        await self._accounts.release(account.id)
+        await self._accounts.release(account.id, task.id)
 
         await self._postpone_task(
             task,
@@ -664,7 +664,7 @@ class TaskDispatcher:
 
 
 
-            await self._accounts.release(account.id)
+            await self._accounts.release(account.id, task.id)
 
             rejected_ids.add(account.id)
             last_account = account

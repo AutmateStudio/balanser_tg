@@ -64,7 +64,7 @@ class FakeAccounts:
     def __init__(self) -> None:
         self.released: list[int] = []
 
-    async def release(self, account_id):
+    async def release(self, account_id, task_id=None):
         self.released.append(account_id)
 
 

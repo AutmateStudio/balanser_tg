@@ -297,7 +297,7 @@ class FakeDualAccounts(FakeAccounts):
 
         return DualReserveResult(source=_account(source_id), target=_account(target_id))
 
-    async def release(self, account_id: int) -> None:
+    async def release(self, account_id: int, task_id: int | None = None) -> None:
         self.released.append(account_id)
 
 

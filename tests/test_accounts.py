@@ -258,3 +258,36 @@ async def test_pick_and_reserve_skips_excluded_account(pg_pool) -> None:
         await _unlock_accounts(locked)
 
     await _cleanup_b6()
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_release_cas_skips_foreign_task(account_and_task) -> None:
+    """CAS-release не снимает резерв, если аккаунт уже переехал на другую задачу."""
+    account_id, task_id = account_and_task
+    repo = AccountsRepo()
+
+    other = await TaskQueueRepo().enqueue(
+        EnqueueInput(
+            task_type_code="parser_add_channel",
+            dedup_key=f"{_PREFIX}other_{uuid.uuid4().hex}",
+        )
+    )
+    assert other.task_id is not None
+    other_task_id = int(other.task_id)
+
+    assert await repo.reserve(account_id, task_id) is True
+
+    async with db.acquire() as conn:
+        await conn.execute(
+            "UPDATE accounts SET current_task_id = $2 WHERE id = $1",
+            account_id,
+            other_task_id,
+        )
+
+    await repo.release(account_id, task_id)
+    assert await _current_task(account_id) == other_task_id
+
+    await repo.release(account_id, other_task_id)
+    assert await _current_task(account_id) is None
