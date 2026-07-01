@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app_balance.queue.accounts import AccountsRepo
@@ -24,6 +24,9 @@ CREATED_BY_DISCOVER = "discovery_api:discover"
 class EnqueueAddChannelsResult:
     task_ids: list[int]
     action_id: str
+    # B12: канал -> код фатальной ошибки прошлой попытки; новая задача НЕ
+    # создана (dedup_key ранее terminal failed с постоянной причиной).
+    skipped_fatal: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,11 +94,23 @@ async def enqueue_parser_add_channels(
     channel_list: list[str],
     webhook_url: str | None = None,
     action_id: str,
+    skip_known_fatal: bool = True,
 ) -> EnqueueAddChannelsResult:
-    """Создаёт по одной задаче parser_add_channel на каждый канал (dedup по dedup_key)."""
+    """Создаёт по одной задаче parser_add_channel на каждый канал (dedup по dedup_key).
+
+    B12: если для канала последняя попытка уже terminal failed с постоянной
+    причиной (banned, channel_private, invalid_payload, ...) — новая задача
+    не создаётся (см. TaskQueueRepo.find_fatal_history/FATAL_ERROR_CODES).
+    Каналы, уже активные (queued/scheduled/retry/in_progress), и так не
+    дублируются — это гарантирует partial unique index dedup_key.
+    Источник вызова (n8n tg-parser-sync и т.п.) не меняется: он продолжает
+    присылать один и тот же список каналов каждый тик, фильтрация — здесь.
+    `skip_known_fatal=False` — принудительный повтор (ручной override оператора).
+    """
     repo = TaskQueueRepo()
     channels_repo = SourceChannelsRepo()
     task_ids: list[int] = []
+    skipped_fatal: dict[str, str] = {}
     wh = (webhook_url or "").strip() or None
 
     for raw in channel_list:
@@ -128,13 +143,28 @@ async def enqueue_parser_add_channels(
                 dedup_key=_dedup_key(PARSER_ADD_CHANNEL, parser_id, channel_ref),
                 created_by=CREATED_BY_ADD,
                 channel_id=channel_id,
-            )
+            ),
+            skip_known_fatal=skip_known_fatal,
         )
+        if result.skipped_reason == "fatal_history":
+            log.warning(
+                "enqueue_parser_add_channels: канал ref=%r parser_id=%s не поставлен — "
+                "прошлая задача id=%s фатально завершена (%s)",
+                channel_ref,
+                parser_id,
+                result.existing_task_id,
+                result.fatal_error_code,
+            )
+            skipped_fatal[channel_ref] = result.fatal_error_code or "fatal"
+            continue
+
         task_id = _task_id_from_enqueue(result)
         if task_id is not None:
             task_ids.append(task_id)
 
-    return EnqueueAddChannelsResult(task_ids=task_ids, action_id=action_id)
+    return EnqueueAddChannelsResult(
+        task_ids=task_ids, action_id=action_id, skipped_fatal=skipped_fatal
+    )
 
 
 async def enqueue_parser_remove_channels(

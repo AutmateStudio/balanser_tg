@@ -136,6 +136,64 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_call.payload["webhook_url"], "http://wh")
         self.assertEqual(first_call.created_by, "discovery_api:add-channels")
 
+    async def test_enqueue_skips_channel_with_fatal_history(self) -> None:
+        """B12: канал с фатальной историей не создаёт новую задачу."""
+        from app_balance.queue.source_channels import SourceChannelsRepo
+        from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
+        from discovery_api.queue.producer import enqueue_parser_add_channels
+
+        with patch.object(
+            TaskQueueRepo, "enqueue", new_callable=AsyncMock
+        ) as mock_enqueue, patch.object(
+            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock
+        ) as mock_find:
+            mock_find.side_effect = [101, 102]
+            mock_enqueue.side_effect = [
+                EnqueueResult(
+                    created=False,
+                    task_id=None,
+                    existing_task_id=42,
+                    skipped_reason="fatal_history",
+                    fatal_error_code="banned",
+                ),
+                EnqueueResult(created=True, task_id=10),
+            ]
+
+            result = await enqueue_parser_add_channels(
+                parser_id="p1",
+                channel_list=["@dead", "@ok"],
+                action_id="act-3",
+            )
+
+        self.assertEqual(result.task_ids, [10])
+        self.assertEqual(result.skipped_fatal, {"@dead": "banned"})
+        # skip_known_fatal=True (default) прокидывается в TaskQueueRepo.enqueue.
+        self.assertTrue(mock_enqueue.await_args_list[0].kwargs["skip_known_fatal"])
+
+    async def test_enqueue_force_retry_disables_fatal_skip(self) -> None:
+        """B12: force_retry=True (skip_known_fatal=False) — ручной override."""
+        from app_balance.queue.source_channels import SourceChannelsRepo
+        from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
+        from discovery_api.queue.producer import enqueue_parser_add_channels
+
+        with patch.object(
+            TaskQueueRepo, "enqueue", new_callable=AsyncMock
+        ) as mock_enqueue, patch.object(
+            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=1
+        ):
+            mock_enqueue.return_value = EnqueueResult(created=True, task_id=99)
+
+            result = await enqueue_parser_add_channels(
+                parser_id="p1",
+                channel_list=["@retry_me"],
+                action_id="act-4",
+                skip_known_fatal=False,
+            )
+
+        self.assertEqual(result.task_ids, [99])
+        self.assertEqual(result.skipped_fatal, {})
+        self.assertFalse(mock_enqueue.await_args_list[0].kwargs["skip_known_fatal"])
+
     async def test_enqueue_skips_empty_channels(self) -> None:
         from app_balance.queue.source_channels import SourceChannelsRepo
         from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo

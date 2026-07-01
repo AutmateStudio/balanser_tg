@@ -359,6 +359,8 @@ curl -sS "$BASE/discovery-api/parser/PARSER_ID/channels" -H "X-API-Key: $KEY"
 
 **Query:** `async` (bool, по умолч. `true`). При `async=true` и включённой PG-очереди задача
 ставится в очередь и исполняется воркером.
+`force_retry` (bool, по умолч. `false`) — B12: игнорировать фатальную историю dedup_key
+и поставить задачу заново для всех каналов (ручной override оператора).
 **Тело** (`ChannelsBody`): `channel_list` (array<string>, мин. 1).
 **Ответ** (`AddChannelsResponse`):
 
@@ -372,10 +374,26 @@ curl -sS "$BASE/discovery-api/parser/PARSER_ID/channels" -H "X-API-Key: $KEY"
 | `pending` | array<string> | отложены до HealthMonitor (sync) |
 | `assignments` | object | канал→сессия (sync) |
 | `action_id` | string\|null | id задачи (async) |
-| `task_ids` | array<int> | id задач PG-очереди (async + PG) |
+| `task_ids` | array<int> | id задач PG-очереди (async + PG); для каналов, уже активных (queued/scheduled/retry/in_progress), возвращается id существующей задачи — дубль не создаётся |
+| `skipped_fatal` | object<string, string> | B12: канал → код ошибки; задача НЕ поставлена, т.к. прошлая попытка для этого dedup_key уже terminal failed с постоянной причиной (`banned`, `channel_private`, `invalid_payload`, `account_not_found`, `unsupported_task_type`, `unknown_task_type`, `account_unauthorized`, `fatal`). Повтор — `?force_retry=1` |
 | `async_mode` | bool | режим обработки |
 
 **Ошибки:** `404` (нет clump), `409` (clump остановлен / квота).
+
+**B12 — защита от бесконечного re-enqueue мёртвых каналов.** Источники вроде n8n
+`tg-parser-sync` присылают один и тот же список каналов на каждом тике (там
+`is_active` в `source_channels` означает «канал включён в проект», а не
+«уже успешно добавлен в парсер») и не знают о состоянии PG-очереди. Фильтрация —
+целиком на стороне `POST /add-channels` (без изменений в БД/workflow):
+- канал уже в активной задаче (`queued`/`scheduled`/`retry`/`in_progress`) —
+  дубль не создаётся, в `task_ids` возвращается id существующей задачи
+  (partial unique index `idx_task_queue_dedup_active`);
+- канал уже **terminal failed** с постоянной причиной — новая задача не
+  создаётся вовсе, канал попадает в `skipped_fatal` (см. `TaskQueueRepo.
+  find_fatal_history`, `FATAL_ERROR_CODES` в `app_balance/queue/task_queue.py`).
+  Retryable-причины (`flood_wait`, `clump_error`, `join_pending`,
+  `insufficient_resource`, `account_reserve_failed`, `transient_error`, …) в
+  `skipped_fatal` не попадают — такие каналы ставятся в очередь заново как обычно.
 
 ```bash
 # асинхронно (по умолчанию)

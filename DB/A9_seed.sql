@@ -50,32 +50,32 @@ INSERT INTO task_types (
   (
     'parser_add_channel',
     'Добавить канал на parser-сессию',
-    'HTTP #12/#19: resolve_listen_target() — join source + discussion, проверка доступа. Одна строка task_queue = один канал. RPH seed A14 + порог 20% (использовать до 80% effective, резерв 20%).',
-    true, 500, 20, false, NULL
+    'HTTP #12/#19: resolve_listen_target() — join source + discussion, проверка доступа. Одна строка task_queue = один канал. RPH seed A14 + порог 0% (использовать effective RPH до исчерпания).',
+    true, 500, 0, false, NULL
   ),
   (
     'move_channel',
     'Перенос канала между аккаунтами',
     'HTTP #16 migrate, #23 rebalance_idle → PG F2: join на target; проверка на source. §18–19 ТЗ.',
-    true, 100, 80, true, 20
+    true, 100, 20, true, 20
   ),
   (
     'collect_extra_data',
     'Сбор последних сообщений (временный вход)',
     'Join → GetFull (broadcast) → iter_messages → GetParticipants (megagroup) → Leave. Не оставляет канал в listener. Продюсер F4.',
-    false, 200, 90, false, 20
+    false, 200, 20, false, 20
   ),
   (
     'update_channel',
     'Обновление метаданных + сообщения',
     'Как collect_extra_data + GetParticipants (megagroup) + полные метаданные GetFullChannel. Продюсер F5.',
-    true, 50, 90, false, 20
+    true, 50, 20, false, 20
   ),
   (
     'parser_remove_channel',
     'Снять с listener и выйти из канала',
     'get_entity → GetFull (broadcast) → LeaveChannel×2 (listen + source). + remove_event_handler локально. D9.',
-    true, 400, 80, false, NULL
+    true, 400, 20, false, NULL
   ),
   (
     'telegram_discover',

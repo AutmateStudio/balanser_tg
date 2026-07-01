@@ -43,7 +43,7 @@ async def main() -> int:
         print(f"accounts: {accounts}")
         print(f"users: {users}")
         print(f"channels: {channels}")
-        print(f"parser_add_channel threshold % (A15=20): {threshold}")
+        print(f"parser_add_channel threshold % (A16=0): {threshold}")
         print(f"GetFullChannel rph_limit (A14=112): {rph}")
         print(f"op with effective_rph=0 (A13, want 0): {zero_eff}")
         print("v_queue_metrics: OK")
@@ -51,7 +51,7 @@ async def main() -> int:
         ok = (
             task_queue is not None
             and accounts is not None
-            and threshold == 20
+            and threshold == 0
             and rph == 112
             and zero_eff == 0
         )

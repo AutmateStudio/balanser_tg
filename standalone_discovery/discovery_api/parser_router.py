@@ -395,6 +395,15 @@ class AddChannelsResponse(BaseModel):
     assignments: dict[str, str] = Field(default_factory=dict)
     action_id: Optional[str] = None
     task_ids: list[int] = Field(default_factory=list)
+    skipped_fatal: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "B12: канал -> код ошибки; задача НЕ поставлена в очередь, т.к. "
+            "прошлая попытка для этого канала уже завершилась фатально "
+            "(banned/channel_private/invalid_payload/...). Повтор через "
+            "?force_retry=1"
+        ),
+    )
     async_mode: bool = False
 
 
@@ -607,14 +616,22 @@ async def parser_add_channels(
     parser_id: str,
     body: ChannelsBody,
     async_mode: bool = Query(default=True, alias="async"),
+    force_retry: bool = Query(
+        default=False,
+        description=(
+            "B12: игнорировать фатальную историю dedup_key и поставить "
+            "задачу заново для всех каналов (ручной override оператора)"
+        ),
+    ),
 ) -> AddChannelsResponse:
     job = _require_running_clump(parser_id)
 
     log.info(
-        "parser add-channels parser_id=%s count=%s async=%s",
+        "parser add-channels parser_id=%s count=%s async=%s force_retry=%s",
         parser_id,
         len(body.channel_list),
         async_mode,
+        force_retry,
     )
 
     if async_mode:
@@ -626,12 +643,14 @@ async def parser_add_channels(
                 channel_list=body.channel_list,
                 webhook_url=webhook_url,
                 action_id=action_id,
+                skip_known_fatal=not force_retry,
             )
             return AddChannelsResponse(
                 parser_id=parser_id,
                 channel_list=job.clump.list_channels(),
                 action_id=pg_result.action_id,
                 task_ids=pg_result.task_ids,
+                skipped_fatal=pg_result.skipped_fatal,
                 async_mode=True,
             )
 

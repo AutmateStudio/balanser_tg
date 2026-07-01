@@ -118,18 +118,32 @@ apply_seed() {
 }
 
 # --- Выполнение --------------------------------------------------------------
-A10_FILE="$DB_DIR/A10_attempt_status_running.sql"
-A11_FILE="$DB_DIR/A11_g6_error_detector.sql"
-A12_FILE="$DB_DIR/A12_g7_monitoring_views.sql"
+for mig in \
+  A10_attempt_status_running.sql \
+  A11_g6_error_detector.sql \
+  A12_g7_monitoring_views.sql \
+  A13_fix_effective_rph_zero_exhausted.sql \
+  A14_parser_add_channel_rph_20_per_hour.sql \
+  A15_parser_add_channel_threshold_20.sql \
+  A16_min_available_resource_percent_uniform.sql
+do
+  MIG_FILE="$DB_DIR/$mig"
+  [[ -f "$MIG_FILE" ]] || die "Файл миграции не найден: $MIG_FILE"
+done
 
 ensure_ledger
 apply_once "$SCHEMA_FILE"
-[[ -f "$A10_FILE" ]] || die "Файл миграции не найден: $A10_FILE"
-apply_once "$A10_FILE"
-[[ -f "$A11_FILE" ]] || die "Файл миграции не найден: $A11_FILE"
-apply_once "$A11_FILE"
-[[ -f "$A12_FILE" ]] || die "Файл миграции не найден: $A12_FILE"
-apply_once "$A12_FILE"
+for mig in \
+  A10_attempt_status_running.sql \
+  A11_g6_error_detector.sql \
+  A12_g7_monitoring_views.sql \
+  A13_fix_effective_rph_zero_exhausted.sql \
+  A14_parser_add_channel_rph_20_per_hour.sql \
+  A15_parser_add_channel_threshold_20.sql \
+  A16_min_available_resource_percent_uniform.sql
+do
+  apply_once "$DB_DIR/$mig"
+done
 if [[ "$RUN_SEED" == "1" ]]; then
   apply_seed "$SEED_FILE"
 else
