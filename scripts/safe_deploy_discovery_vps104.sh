@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
-# Безопасный деплой discovery-api на vps-104.
+# Безопасный деплой discovery-api на vps-104: git pull + миграции БД + ребилд.
 # Не трогает .env, standalone_discovery/data/, sessions/ (в .gitignore).
 #
 #   bash scripts/safe_deploy_discovery_vps104.sh
 #   bash scripts/safe_deploy_discovery_vps104.sh --skip-pull
+#   bash scripts/safe_deploy_discovery_vps104.sh --skip-migrate
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SD="${ROOT}/standalone_discovery"
 BACKUP="${HOME}/lidogen-deploy-backup-$(date +%Y%m%d-%H%M%S)"
 SKIP_PULL=false
+SKIP_MIGRATE=false
 LOG="${HOME}/lidogen-deploy-$(date +%Y%m%d-%H%M%S).log"
 
 for arg in "$@"; do
   case "$arg" in
     --skip-pull) SKIP_PULL=true ;;
+    --skip-migrate) SKIP_MIGRATE=true ;;
     -h|--help)
-      echo "Usage: $0 [--skip-pull]"
+      echo "Usage: $0 [--skip-pull] [--skip-migrate]"
       exit 0
       ;;
     *) echo "Unknown arg: $arg" >&2; exit 1 ;;
@@ -84,6 +87,19 @@ set_env_line "WORKER_TASK_ADAPTER=clump" "$ENV"
 set_env_line "USE_PG_QUEUE=true" "$ENV"
 set_env_line "INPROCESS_WORKER_COUNT=4" "$ENV"
 set_env_line "JOIN_PENDING_RETRY_SECONDS=1800" "$ENV"
+
+echo "=== 5.5. Миграции БД (migrate_queue.sh) ==="
+if [ "$SKIP_MIGRATE" = false ]; then
+  MIGRATE_DSN="$(grep -E '^QUEUE_DATABASE_URL=' "$ENV" | tail -1 | cut -d= -f2- | tr -d '\r')"
+  if [ -n "$MIGRATE_DSN" ]; then
+    QUEUE_DATABASE_URL="$MIGRATE_DSN" bash "${ROOT}/scripts/migrate_queue.sh" \
+      || die "migrate_queue.sh упал — деплой остановлен ДО пересборки/рестарта"
+  else
+    echo "WARN: QUEUE_DATABASE_URL не найден в ${ENV} — миграции пропущены"
+  fi
+else
+  echo "Миграции пропущены (--skip-migrate)"
+fi
 
 echo "=== 6. Останов queue-worker ==="
 (cd "$ROOT" && docker compose stop queue-worker) 2>/dev/null || true
