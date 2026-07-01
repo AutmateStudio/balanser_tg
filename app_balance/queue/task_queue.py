@@ -30,6 +30,28 @@ WATCHDOG_STUCK_REASON = ErrorCode.WATCHDOG_TASK_TIMEOUT
 # partial unique index idx_task_queue_dedup_active (BD_schema.sql).
 ACTIVE_STATUSES = ("queued", "scheduled", "retry", "in_progress")
 
+# B12: коды last_error, при которых повторная постановка того же dedup_key
+# без вмешательства оператора бессмысленна («канал умер фатально»). Не
+# включает retryable/resource-коды (flood_wait, insufficient_resource,
+# account_reserve_failed, clump_error, join_pending, transient_error,
+# watchdog:*) — те могут пройти при следующей попытке, поэтому re-enqueue
+# для них не блокируется. Партиальный unique-индекс уже не пускает дубль,
+# пока такая задача активна (queued/scheduled/retry/in_progress) — здесь
+# закрывается оставшийся случай: задача уже terminal failed с постоянной
+# причиной, но dedup_key снова свободен.
+FATAL_ERROR_CODES = frozenset(
+    {
+        ErrorCode.INVALID_PAYLOAD,
+        ErrorCode.ACCOUNT_NOT_FOUND,
+        ErrorCode.UNSUPPORTED_TASK_TYPE,
+        ErrorCode.UNKNOWN_TASK_TYPE,
+        ErrorCode.CHANNEL_PRIVATE,
+        ErrorCode.BANNED,
+        ErrorCode.ACCOUNT_UNAUTHORIZED,
+        "fatal",  # app_balance.queue.errors.FATAL — fallback map_telethon_exception
+    }
+)
+
 
 class UnknownTaskTypeError(ValueError):
     """task_type_code отсутствует в task_types или тип выключен."""
@@ -54,6 +76,19 @@ class EnqueueResult:
     created: bool
     task_id: int | None
     existing_task_id: int | None = None
+    # B12: "fatal_history" — не создано, т.к. последняя задача с этим dedup_key
+    # уже завершилась permanent-ошибкой (см. FATAL_ERROR_CODES).
+    skipped_reason: str | None = None
+    fatal_error_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FatalHistoryInfo:
+    """B12: последняя terminal-failed попытка по dedup_key с постоянной причиной."""
+
+    task_id: int
+    error_code: str
+    last_error: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +179,16 @@ FROM task_queue
 WHERE dedup_key = $1
   AND status IN {ACTIVE_STATUSES}
 ORDER BY id ASC
+LIMIT 1
+"""
+
+# B12: последняя по времени задача с этим dedup_key (любой статус). Если это
+# terminal failed с постоянной причиной — новую задачу создавать не будем.
+_FIND_LAST_BY_DEDUP_SQL = """
+SELECT id, status::text AS status, last_error
+FROM task_queue
+WHERE dedup_key = $1
+ORDER BY id DESC
 LIMIT 1
 """
 
@@ -476,12 +521,54 @@ class TaskQueueRepo:
     def __init__(self, task_types: TaskTypesRepo | None = None) -> None:
         self._task_types = task_types or TaskTypesRepo()
 
-    async def enqueue(self, data: EnqueueInput) -> EnqueueResult:
+    async def find_fatal_history(self, dedup_key: str | None) -> FatalHistoryInfo | None:
+        """B12: последняя попытка по dedup_key, если это terminal failed с fatal-кодом.
+
+        Не блокирует retry после временных/ресурсных ошибок — только после
+        кодов из FATAL_ERROR_CODES (banned, channel_private, invalid_payload,
+        account_unauthorized, fatal и т.п.). Активные статусы (queued/
+        scheduled/retry/in_progress) сюда не попадают — их уже отсекает
+        partial unique index (idx_task_queue_dedup_active) в enqueue().
+        """
+        if not dedup_key:
+            return None
+        async with acquire() as conn:
+            row = await conn.fetchrow(_FIND_LAST_BY_DEDUP_SQL, dedup_key)
+        if row is None or row["status"] != "failed":
+            return None
+        code = error_code_prefix(row["last_error"])
+        if code not in FATAL_ERROR_CODES:
+            return None
+        return FatalHistoryInfo(
+            task_id=row["id"], error_code=code, last_error=row["last_error"]
+        )
+
+    async def enqueue(
+        self, data: EnqueueInput, *, skip_known_fatal: bool = True
+    ) -> EnqueueResult:
         task_type = await self._task_types.get_by_code(data.task_type_code)
         if task_type is None or not task_type.is_enabled:
             raise UnknownTaskTypeError(
                 f"Тип задачи '{data.task_type_code}' не найден или выключен"
             )
+
+        if skip_known_fatal and data.dedup_key:
+            fatal = await self.find_fatal_history(data.dedup_key)
+            if fatal is not None:
+                logger.info(
+                    "enqueue: пропуск dedup_key=%s — прошлая задача id=%s "
+                    "завершилась фатально (%s), новая не создана",
+                    data.dedup_key,
+                    fatal.task_id,
+                    fatal.error_code,
+                )
+                return EnqueueResult(
+                    created=False,
+                    task_id=None,
+                    existing_task_id=fatal.task_id,
+                    skipped_reason="fatal_history",
+                    fatal_error_code=fatal.error_code,
+                )
 
         priority = data.priority if data.priority is not None else task_type.default_priority
         payload_json = json.dumps(data.payload or {})

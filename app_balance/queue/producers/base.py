@@ -40,7 +40,10 @@ class ProduceResult:
     created: bool
     task_id: int | None
     existing_task_id: int | None = None
-    skipped_reason: Literal["queue_full", "duplicate"] | None = None
+    # B12: "fatal_history" — dedup_key уже terminal failed с постоянной
+    # причиной (см. FATAL_ERROR_CODES) — новая задача не создана.
+    skipped_reason: Literal["queue_full", "duplicate", "fatal_history"] | None = None
+    fatal_error_code: str | None = None
 
 
 async def count_active_tasks(task_type_id: int) -> int:
@@ -101,6 +104,14 @@ def _map_enqueue_result(result: EnqueueResult) -> ProduceResult:
         return ProduceResult(
             created=True,
             task_id=result.task_id,
+        )
+    if result.skipped_reason == "fatal_history":
+        return ProduceResult(
+            created=False,
+            task_id=None,
+            existing_task_id=result.existing_task_id,
+            skipped_reason="fatal_history",
+            fatal_error_code=result.fatal_error_code,
         )
     return ProduceResult(
         created=False,

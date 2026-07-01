@@ -76,9 +76,10 @@ def _summarize(results: list[ProduceResult]) -> str:
     created = sum(1 for r in results if r.created)
     duplicate = sum(1 for r in results if r.skipped_reason == "duplicate")
     queue_full = sum(1 for r in results if r.skipped_reason == "queue_full")
+    fatal = sum(1 for r in results if r.skipped_reason == "fatal_history")
     return (
         f"создано={created} дубликатов={duplicate} "
-        f"queue_full={queue_full} всего={len(results)}"
+        f"queue_full={queue_full} fatal_history={fatal} всего={len(results)}"
     )
 
 
