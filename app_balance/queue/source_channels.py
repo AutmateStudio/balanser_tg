@@ -73,6 +73,15 @@ ORDER BY created_at ASC, id ASC
 LIMIT $2
 """
 
+_LIST_ASSIGNED_DETAIL_SQL = """
+SELECT id, name, external_url, external_channel_id, is_active,
+       extra_data_collected, last_updated_at
+FROM source_channels
+WHERE assigned_account_id = $1
+ORDER BY created_at ASC, id ASC
+LIMIT $2
+"""
+
 _GET_COLLECT_TARGET_SQL = """
 SELECT id, external_url, external_channel_id
 FROM source_channels
@@ -114,6 +123,28 @@ class StaleChannel:
     id: int
     account_id: int
     last_updated_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class AssignedChannelDetail:
+    """Канал, закреплённый за аккаунтом (PG read API)."""
+
+    id: int
+    name: str | None
+    external_url: str | None
+    external_channel_id: str | None
+    is_active: bool
+    extra_data_collected: bool
+    last_updated_at: datetime | None
+
+    def ref(self) -> str:
+        url = (self.external_url or "").strip()
+        if url:
+            return url
+        ext = (self.external_channel_id or "").strip()
+        if ext and not ext.startswith("@"):
+            return f"@{ext}"
+        return ext
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +268,35 @@ class SourceChannelsRepo:
             )
             for row in rows
         ]
+
+    async def list_assigned_detail_for_account(
+        self, account_id: int, limit: int = 500
+    ) -> list[AssignedChannelDetail]:
+        """PG: каналы с assigned_account_id = account_id (read API дашборда)."""
+        if limit <= 0:
+            return []
+        async with acquire() as conn:
+            rows = await conn.fetch(_LIST_ASSIGNED_DETAIL_SQL, account_id, limit)
+        return [
+            AssignedChannelDetail(
+                id=int(row["id"]),
+                name=row["name"],
+                external_url=row["external_url"],
+                external_channel_id=row["external_channel_id"],
+                is_active=bool(row["is_active"]),
+                extra_data_collected=bool(row["extra_data_collected"]),
+                last_updated_at=row["last_updated_at"],
+            )
+            for row in rows
+        ]
+
+    async def count_assigned_by_account(self, account_id: int) -> int:
+        async with acquire() as conn:
+            val = await conn.fetchval(
+                "SELECT COUNT(*) FROM source_channels WHERE assigned_account_id = $1",
+                account_id,
+            )
+        return int(val or 0)
 
     async def get_collect_target(self, channel_id: int) -> CollectTarget | None:
         """F6/F7: ссылки канала для resolve ref в multi-op пайплайне."""
