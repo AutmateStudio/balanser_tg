@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import pytest
 
+from app_balance.queue.adapter import ClumpTaskAdapter
 from app_balance.queue.dispatch import DispatchResult, TaskDispatcher
+from app_balance.queue.error_codes import ErrorCode
 from app_balance.queue.ops_catalog import COLLECT_EXTRA_DATA
 from tests.test_dispatch import (
     FakeAccounts,
@@ -88,3 +90,26 @@ async def test_single_op_calls_record_for_task() -> None:
     assert len(usage.record_for_task_calls) == 1
     # adapter вызван без task_type (single-call путь).
     assert adapter.calls == [("parser_add_channel", False, None)]
+
+
+@pytest.mark.asyncio
+async def test_invalid_payload_skips_record_for_task() -> None:
+    task_type = _task_type(code="parser_add_channel")
+    usage = _FakeUsage()
+    adapter = ClumpTaskAdapter()
+    queue = _fake_queue()
+
+    result = await TaskDispatcher(
+        queue=queue,
+        accounts=FakeAccounts(),
+        task_types=_FakeTaskTypes(task_type),
+        adapter=adapter,
+        resource_check=FakeResourceChecker(),
+        usage=usage,
+        attempts=FakeAttempts(),
+    ).dispatch(_claimed(task_type_code="parser_add_channel"))
+
+    assert result == DispatchResult.FAILED
+    assert usage.record_for_task_calls == []
+    assert queue.permanent_failed == [(1, ErrorCode.INVALID_PAYLOAD)]
+    assert queue.failed == []

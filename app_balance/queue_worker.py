@@ -177,7 +177,7 @@ class QueueWorker:
                 )
         finally:
             if task.account_id is not None:
-                await self._accounts.release(task.account_id)
+                await self._accounts.release(task.account_id, task.id)
 
     async def _idle_wait(self) -> None:
         """Пауза между опросами; прерывается сигналом остановки."""

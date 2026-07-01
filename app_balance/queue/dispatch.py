@@ -210,6 +210,10 @@ class TaskDispatcher:
                 target_account_id=target_account_id,
             )
 
+            validate = getattr(self._adapter, "validate", None)
+            if validate is not None:
+                await validate(task)
+
             is_multi_op = task_type.code in MULTI_OP_TASK_TYPES
             if is_multi_op:
                 # Multi-op типы (collect/update) ведут учёт пошагово в adapter
@@ -339,7 +343,7 @@ class TaskDispatcher:
 
             for account_id in reserved_ids:
 
-                await self._accounts.release(account_id)
+                await self._accounts.release(account_id, task.id)
 
 
 
@@ -573,7 +577,7 @@ class TaskDispatcher:
 
         if account is None:
 
-            await self._accounts.release(account_id)
+            await self._accounts.release(account_id, task.id)
 
             await self._postpone_task(
                 task,
@@ -593,7 +597,7 @@ class TaskDispatcher:
 
 
 
-        await self._accounts.release(account.id)
+        await self._accounts.release(account.id, task.id)
 
         await self._postpone_task(
             task,
@@ -664,7 +668,7 @@ class TaskDispatcher:
 
 
 
-            await self._accounts.release(account.id)
+            await self._accounts.release(account.id, task.id)
 
             rejected_ids.add(account.id)
             last_account = account

@@ -96,6 +96,20 @@ def _parse_parser_channel_payload(
     return parser_id.strip(), channel_ref.strip(), webhook
 
 
+def validate_task(
+    task_type_code: str,
+    payload: dict[str, Any],
+    *,
+    task: ClaimedTask | None = None,
+) -> None:
+    """Лёгкая проверка payload до списания ресурса (без RPC / clump)."""
+    if task_type_code in (PARSER_ADD_CHANNEL, PARSER_REMOVE_CHANNEL, MOVE_CHANNEL):
+        _parse_parser_channel_payload(payload)
+    if task_type_code == MOVE_CHANNEL and task is not None:
+        if task.source_account_id is None or task.target_account_id is None:
+            raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing dual account ids")
+
+
 def _session_basename(session_name: str) -> str:
     """basename без .session — каноническая форма имени аккаунта (как в PG, A10)."""
     base = (session_name or "").replace("\\", "/").rsplit("/", 1)[-1]
@@ -604,6 +618,9 @@ class ClumpTaskAdapter:
         self._sync_after_add = sync_after_add
         self._sync_after_move = sync_after_move
         self._sync_after_remove = sync_after_remove
+
+    async def validate(self, task: ClaimedTask) -> None:
+        validate_task(task.task_type_code, dict(task.payload), task=task)
 
     async def execute(
         self,

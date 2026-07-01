@@ -249,7 +249,7 @@ class FakeAccounts:
     async def get_by_id(self, account_id: int) -> Account | None:
         return _account(account_id)
 
-    async def release(self, account_id: int) -> None:
+    async def release(self, account_id: int, task_id: int | None = None) -> None:
         self.released.append(account_id)
 
     async def set_cooldown(self, session_name: str, until: datetime) -> bool:
