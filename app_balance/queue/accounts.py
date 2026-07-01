@@ -128,6 +128,18 @@ WHERE session_name = $1
 RETURNING id
 """
 
+_REACTIVATE_FROM_ERROR_SQL = """
+UPDATE accounts
+SET status = 'active',
+    is_enabled = true,
+    last_error = NULL,
+    last_error_at = NULL,
+    updated_at = now()
+WHERE session_name = $1
+  AND status = 'error'
+RETURNING id
+"""
+
 # C4: блокировка пары аккаунтов перед атомарным dual reserve.
 _PAIR_LOCK_SQL = """
 SELECT id, session_name, status, is_enabled, current_task_id, cooldown_until, last_used_at
@@ -164,6 +176,12 @@ def _row_to_account(row) -> Account:
         cooldown_until=row["cooldown_until"],
         last_used_at=row["last_used_at"],
     )
+
+
+def _normalize_session_name_for_pg(session_name: str) -> str:
+    from app_balance.queue.accounts_sync import normalize_session_name
+
+    return normalize_session_name(session_name)
 
 
 class AccountsRepo:
@@ -276,7 +294,7 @@ class AccountsRepo:
 
     async def set_cooldown(self, session_name: str, until: datetime) -> bool:
         """Flood/cooldown: продлевает cooldown_until, status → cooldown (кроме banned)."""
-        name = (session_name or "").strip()
+        name = _normalize_session_name_for_pg(session_name)
         if not name:
             return False
         async with acquire() as conn:
@@ -285,7 +303,7 @@ class AccountsRepo:
 
     async def set_banned(self, session_name: str, *, reason: str | None = None) -> bool:
         """Telegram ban: status → banned, сбрасывает cooldown."""
-        name = (session_name or "").strip()
+        name = _normalize_session_name_for_pg(session_name)
         if not name:
             return False
         async with acquire() as conn:
@@ -299,11 +317,20 @@ class AccountsRepo:
         reason: str | None = None,
     ) -> bool:
         """Неавторизованная/сломанная сессия: status → error, is_enabled → false."""
-        name = (session_name or "").strip()
+        name = _normalize_session_name_for_pg(session_name)
         if not name:
             return False
         async with acquire() as conn:
             row = await conn.fetchrow(_SET_ACCOUNT_ERROR_SQL, name, reason)
+            return row is not None
+
+    async def reactivate_from_unauthorized(self, session_name: str) -> bool:
+        """Снимает PG error после успешной re-auth (только status=error, не banned/cooldown)."""
+        name = _normalize_session_name_for_pg(session_name)
+        if not name:
+            return False
+        async with acquire() as conn:
+            row = await conn.fetchrow(_REACTIVATE_FROM_ERROR_SQL, name)
             return row is not None
 
     async def pick_and_reserve(

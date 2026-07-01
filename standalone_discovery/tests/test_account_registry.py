@@ -402,6 +402,42 @@ class AccountEndpointTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["phone"], "+79991234567")
 
+    def test_account_reactivate_ok(self) -> None:
+        with (
+            patch(
+                "discovery_api.parser_router.probe_session_info",
+                new_callable=AsyncMock,
+                return_value={
+                    "session_name": "Client1",
+                    "session_file": "Client1.session",
+                    "phone": "+79991234567",
+                    "error": None,
+                },
+            ),
+            patch(
+                "discovery_api.parser_router.notify_session_reauthorized",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+        ):
+            resp = self.client.patch("/discovery-api/parser/accounts/Client1/reactivate")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["session_name"], "Client1")
+
+    def test_account_reactivate_unauthorized_409(self) -> None:
+        with patch(
+            "discovery_api.parser_router.probe_session_info",
+            new_callable=AsyncMock,
+            return_value={
+                "session_name": "Client1",
+                "session_file": "Client1.session",
+                "phone": None,
+                "error": "Сессия не авторизована",
+            },
+        ):
+            resp = self.client.patch("/discovery-api/parser/accounts/Client1/reactivate")
+        self.assertEqual(resp.status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()

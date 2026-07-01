@@ -156,11 +156,13 @@ async def _wait_for_scan(session: QRSession) -> None:
             if session.session_name:
                 from discovery_api.account_registry import register_account_after_qr
                 from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+                from discovery_api.session_registry import notify_session_reauthorized
 
                 register_account_after_qr(session.session_name)
                 await sync_accounts_to_pg_best_effort(
                     context=f"qr:{session.session_name}"
                 )
+                await notify_session_reauthorized(session.session_name)
             return
         except telethon.errors.SessionPasswordNeededError:
             session.status = "2fa_required"

@@ -504,6 +504,17 @@ curl -sS -X PATCH "$BASE/discovery-api/parser/accounts/acc1/block" \
   -d '{"blocked":true,"reason":"подозрение на бан"}'
 ```
 
+### PATCH /discovery-api/parser/accounts/{session_name}/reactivate
+
+Снимает PG `accounts.status=error` после успешной re-auth (QR или живой `.session`).
+Проверяет авторизацию через Telethon `get_me`; если сессия не залогинена — **409**.
+**Ответ:** `AccountFullSummary`. **Ошибки:** `404`, `409`.
+
+```bash
+curl -sS -X PATCH "$BASE/discovery-api/parser/accounts/Client1/reactivate" \
+  -H "X-API-Key: $KEY"
+```
+
 ### DELETE /discovery-api/parser/accounts/{session_name}
 
 Полностью удаляет аккаунт (из clump и хранилища). **Query:** `migrate` (bool, по умолч. `true`) —
@@ -716,6 +727,7 @@ curl -sS "$BASE/discovery-api/parser/queue/accounts/Test2/summary" -H "X-API-Key
 | PATCH | `/discovery-api/parser/account-meta` | Метаданные аккаунта |
 | PATCH | `/discovery-api/parser/accounts/{session_name}` | Обновить аккаунт |
 | PATCH | `/discovery-api/parser/accounts/{session_name}/block` | Блокировка аккаунта |
+| PATCH | `/discovery-api/parser/accounts/{session_name}/reactivate` | Снять PG error после re-auth |
 | DELETE | `/discovery-api/parser/accounts/{session_name}` | Удалить аккаунт |
 | POST | `/discovery-api/parser/{parser_id}/enroll-session` | Зачислить сессию |
 | POST | `/discovery-api/parser/{parser_id}/add-session` | Добавить сессию |
