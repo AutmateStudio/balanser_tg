@@ -102,5 +102,53 @@ class SessionHealthTests(unittest.TestCase):
             self.assertIn(key, d)
 
 
+class AccountAuthWatchdogTests(unittest.TestCase):
+    """Account-auth watchdog: политика повторных попыток реавторизации."""
+
+    def test_should_attempt_reauth_true_on_first_error(self) -> None:
+        h = SessionHealth()
+        h.mark_unauthorized("не авторизована")
+        self.assertTrue(h.should_attempt_reauth(300.0))
+
+    def test_should_attempt_reauth_false_before_interval_elapsed(self) -> None:
+        h = SessionHealth()
+        h.mark_unauthorized("не авторизована")
+        h.record_reauth_attempt()
+        self.assertFalse(h.should_attempt_reauth(300.0))
+
+    def test_should_attempt_reauth_true_after_interval_elapsed(self) -> None:
+        h = SessionHealth()
+        h.mark_unauthorized("не авторизована")
+        h.record_reauth_attempt()
+        h.last_reauth_attempt_at = time.time() - 301.0
+        self.assertTrue(h.should_attempt_reauth(300.0))
+
+    def test_should_attempt_reauth_false_when_banned(self) -> None:
+        h = SessionHealth()
+        h.mark_banned("UserDeactivatedBanError")
+        self.assertFalse(h.should_attempt_reauth(0.0))
+
+    def test_should_attempt_reauth_false_when_not_error(self) -> None:
+        h = SessionHealth()
+        h.mark_connected()
+        self.assertFalse(h.should_attempt_reauth(0.0))
+
+    def test_record_reauth_attempt_increments_counter(self) -> None:
+        h = SessionHealth()
+        h.mark_unauthorized("не авторизована")
+        h.record_reauth_attempt()
+        h.record_reauth_attempt()
+        self.assertEqual(h.reauth_attempt_count, 2)
+        self.assertIsNotNone(h.last_reauth_attempt_at)
+
+    def test_successful_reauth_resets_error_state(self) -> None:
+        h = SessionHealth()
+        h.mark_unauthorized("не авторизована")
+        h.record_reauth_attempt()
+        self.assertTrue(h.mark_reauthorized())
+        self.assertEqual(h.status, SessionStatus.HEALTHY)
+        self.assertFalse(h.should_attempt_reauth(0.0))
+
+
 if __name__ == "__main__":
     unittest.main()

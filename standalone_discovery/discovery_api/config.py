@@ -149,6 +149,22 @@ def get_session_auto_migrate() -> bool:
     return _get_bool_env("SESSION_AUTO_MIGRATE", True)
 
 
+def get_account_auth_recheck_enabled() -> bool:
+    """Account-auth watchdog: периодически пробовать реавторизовать ERROR-сессии."""
+    return _get_bool_env("ACCOUNT_AUTH_RECHECK_ENABLED", True)
+
+
+def get_account_auth_recheck_interval_seconds() -> float:
+    """Интервал (сек) между повторными попытками восстановить авторизацию ERROR-сессии.
+
+    Отдельно от SESSION_HEALTH_CHECK_INTERVAL, т.к. реальный RPC
+    `is_user_authorized()` дороже обычного health-тика и не должен дёргаться
+    так же часто — иначе постоянно неавторизованная сессия будет спамить
+    Telegram и логи каждые SESSION_HEALTH_CHECK_INTERVAL секунд.
+    """
+    return max(30.0, _get_float_env("ACCOUNT_AUTH_RECHECK_INTERVAL_SECONDS", 300.0))
+
+
 def get_add_channels_per_hour() -> int:
     """Лимит успешных добавлений каналов на сессию в час (0 = без лимита)."""
     return max(0, _get_int_env("ADD_CHANNELS_PER_HOUR", 0))
