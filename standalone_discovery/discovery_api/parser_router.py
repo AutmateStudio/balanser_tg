@@ -82,6 +82,7 @@ from discovery_api.parser_store import (
     normalize_persisted_record,
     upsert_job as persist_upsert_job,
 )
+from discovery_api.session_info import list_sessions_info, probe_session_info
 from discovery_api.session_registry import (
     ChannelQuotaExceeded,
     SessionClump,
@@ -290,6 +291,23 @@ class AccountAllListResponse(BaseModel):
     total: int
     accounts: list[AccountFullSummary] = Field(default_factory=list)
     generated_at: Optional[str] = None
+
+
+class SessionInfoItem(BaseModel):
+    session_name: str = Field(..., description="Имя сессии без расширения .session")
+    session_file: str = Field(..., description="Имя файла сессии, например Client1.session")
+    phone: Optional[str] = Field(
+        default=None, description="Номер телефона из Telegram (get_me), если сессия авторизована"
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Причина, по которой телефон не получен (не авторизована, сеть, …)",
+    )
+
+
+class SessionInfoListResponse(BaseModel):
+    total: int
+    sessions: list[SessionInfoItem] = Field(default_factory=list)
 
 
 class AccountBlockUpdate(BaseModel):
@@ -718,6 +736,24 @@ def _find_account_job(session_name: str, parser_id: Optional[str]) -> tuple[str,
     raise HTTPException(
         status_code=404, detail="Аккаунт с таким session_name не найден"
     )
+
+
+@parser_router.get("/sessions", response_model=SessionInfoListResponse)
+async def parser_sessions_list() -> SessionInfoListResponse:
+    """Все `.session` в SESSIONS_DIR: имя файла, имя сессии и телефон аккаунта."""
+    rows = await list_sessions_info()
+    sessions = [SessionInfoItem(**row) for row in rows]
+    return SessionInfoListResponse(total=len(sessions), sessions=sessions)
+
+
+@parser_router.get("/sessions/{session_name:path}", response_model=SessionInfoItem)
+async def parser_session_detail(session_name: str) -> SessionInfoItem:
+    """Сведения об одной сессии по имени или пути к `.session`-файлу."""
+    try:
+        row = await probe_session_info(session_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SessionInfoItem(**row)
 
 
 @parser_router.get("/accounts/all", response_model=AccountAllListResponse)
