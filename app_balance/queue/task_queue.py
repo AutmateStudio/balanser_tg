@@ -297,6 +297,14 @@ SET payload = jsonb_set(
 WHERE id = $1
 """
 
+_MERGE_PAYLOAD_SQL = """
+UPDATE task_queue
+SET payload = COALESCE(payload, '{}'::jsonb) || $2::jsonb,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'in_progress'
+"""
+
 # ТЗ §9.3: attempt_count — только при передаче задачи аккаунту (до execute).
 _BEGIN_EXECUTION_ATTEMPT_SQL = """
 UPDATE task_queue
@@ -623,6 +631,13 @@ class TaskQueueRepo:
         """
         async with acquire() as conn:
             await conn.execute(_SET_LAST_COMPLETED_STEP_SQL, task_id, step)
+
+    async def merge_payload(self, task_id: int, patch: dict[str, Any]) -> bool:
+        """Дополняет payload задачи (напр. result после discover_groups)."""
+        payload_json = json.dumps(patch or {})
+        async with acquire() as conn:
+            result = await conn.execute(_MERGE_PAYLOAD_SQL, task_id, payload_json)
+            return int(result.split()[-1]) == 1
 
     async def begin_execution_attempt(self, task_id: int) -> int:
         """Инкремент attempt_count при передаче задачи аккаунту (ТЗ §9.3)."""

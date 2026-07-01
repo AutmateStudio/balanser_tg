@@ -76,6 +76,12 @@ INSERT INTO task_types (
     'Снять с listener и выйти из канала',
     'get_entity → GetFull (broadcast) → LeaveChannel×2 (listen + source). + remove_event_handler локально. D9.',
     true, 400, 80, false, NULL
+  ),
+  (
+    'telegram_discover',
+    'Поиск каналов и групп (POST /discover)',
+    'HTTP POST /discover async: contacts.Search + SearchGlobal + recommendations + lidgen scoring + upsert source_channels.',
+    true, 80, 20, false, NULL
   )
 ON CONFLICT (code) DO UPDATE SET
   name = EXCLUDED.name,
@@ -179,6 +185,29 @@ WHERE tt.code = 'parser_remove_channel'
 ON CONFLICT (task_type_id, op_type_id, account_role) DO UPDATE SET
   units_per_execution = EXCLUDED.units_per_execution;
 
+-- telegram_discover: оценочный расход на один async-поиск (seeds + scoring + recommendations)
+INSERT INTO task_type_ops (task_type_id, op_type_id, units_per_execution, account_role)
+SELECT tt.id, ot.id, v.units, v.role::task_op_account_role
+FROM task_types tt
+JOIN (VALUES
+  ('contacts.Search',                 10, 'primary'),
+  ('messages.SearchGlobal',           10, 'primary'),
+  ('channels.GetChannelRecommendations', 5, 'primary'),
+  ('get_input_entity',                2, 'primary'),
+  ('channels.GetFullChannel',        15, 'primary'),
+  ('channels.GetParticipants',       10, 'primary'),
+  ('iter_messages',                  10, 'primary')
+) AS v(op_code, units, role) ON true
+JOIN resource_op_types ot ON ot.code = v.op_code
+WHERE tt.code = 'telegram_discover'
+ON CONFLICT (task_type_id, op_type_id, account_role) DO UPDATE SET
+  units_per_execution = EXCLUDED.units_per_execution;
+
+-- Удалить устаревший discover_groups (если был накатан)
+DELETE FROM task_type_ops
+WHERE task_type_id IN (SELECT id FROM task_types WHERE code = 'discover_groups');
+DELETE FROM task_types WHERE code = 'discover_groups';
+
 -- remove_event_handler / allowed_chat_ids / entity_cache — локально, не в resource_op_types
 
 -- =============================================================================
@@ -190,7 +219,8 @@ ON CONFLICT (task_type_id, op_type_id, account_role) DO UPDATE SET
 -- #4  POST /discover             → contacts.Search, messages.SearchGlobal,
 --                                 GetChannelRecommendations, get_input_entity,
 --                                 GetFullChannel, iter_messages, GetParticipants
--- #5  POST /discover-groups      → как #4 + seeds
+-- #4  POST /discover             → task_queue telegram_discover (async) + upsert source_channels
+-- #5  POST /discover-groups      → deprecated wrapper → /discover
 -- #6  POST /add-channel-by-link  → как parser_add_channel + GetParticipants (скоринг)
 -- #7  POST /bot/send-message     → bot.send_message | bot.send_photo
 -- #8  POST /parser/start         → N × resolve_listen_target + connect + NewMessage*

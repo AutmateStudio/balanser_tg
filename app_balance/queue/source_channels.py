@@ -107,6 +107,32 @@ WHERE id = $1
 RETURNING id
 """
 
+_UPSERT_DISCOVERED_SQL = """
+INSERT INTO source_channels (
+    platform_id,
+    external_channel_id,
+    name,
+    description,
+    external_url,
+    metadata,
+    is_active
+)
+VALUES ($1, $2, $3, $4, $5, $6::jsonb, true)
+ON CONFLICT (platform_id, external_channel_id) DO UPDATE SET
+    name = COALESCE(EXCLUDED.name, source_channels.name),
+    description = COALESCE(EXCLUDED.description, source_channels.description),
+    external_url = COALESCE(EXCLUDED.external_url, source_channels.external_url),
+    metadata = COALESCE(source_channels.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+    updated_at = now()
+RETURNING id, (xmax = 0) AS inserted
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class UpsertDiscoveredResult:
+    channel_id: int
+    inserted: bool
+
 
 @dataclass(frozen=True, slots=True)
 class PendingChannel:
@@ -331,3 +357,63 @@ class SourceChannelsRepo:
                 _SAVE_CHANNEL_UPDATE_SQL, channel_id, json.dumps(signals), title
             )
         return row is not None
+
+    async def upsert_discovered(
+        self,
+        *,
+        platform_id: int,
+        external_channel_id: str,
+        name: str | None,
+        description: str | None,
+        external_url: str | None,
+        metadata: dict[str, Any],
+    ) -> UpsertDiscoveredResult | None:
+        async with acquire() as conn:
+            row = await conn.fetchrow(
+                _UPSERT_DISCOVERED_SQL,
+                platform_id,
+                external_channel_id,
+                name,
+                description,
+                external_url,
+                json.dumps(metadata or {}),
+            )
+        if row is None:
+            return None
+        return UpsertDiscoveredResult(
+            channel_id=int(row["id"]),
+            inserted=bool(row["inserted"]),
+        )
+
+    async def batch_upsert_discovered(
+        self,
+        items: list[Any],
+        *,
+        platform_id: int,
+        should_persist: Any,
+        build_fields: Any,
+    ) -> Any:
+        from app_balance.queue.discover_persist import PersistStats
+
+        stats = PersistStats()
+        for item in items:
+            if not should_persist(item):
+                stats.skipped_no_discussion += 1
+                continue
+            fields = build_fields(item)
+            result = await self.upsert_discovered(
+                platform_id=platform_id,
+                external_channel_id=fields["external_channel_id"],
+                name=fields.get("name"),
+                description=fields.get("description"),
+                external_url=fields.get("external_url"),
+                metadata=fields.get("metadata") or {},
+            )
+            if result is None:
+                continue
+            stats.channel_ids.append(result.channel_id)
+            if result.inserted:
+                stats.inserted += 1
+            else:
+                stats.updated += 1
+        return stats
