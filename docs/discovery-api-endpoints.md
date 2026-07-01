@@ -657,6 +657,30 @@ curl -sS -X PATCH "$BASE/discovery-api/parser/queue/task-types/parser_add_channe
   -d '{"rph_limit": 230}'
 ```
 
+### GET /discovery-api/parser/queue/accounts/{session_name}/channels
+
+Каналы аккаунта из PostgreSQL (`source_channels.assigned_account_id`). Не зависит от in-memory clump — работает для `Test2`, `Client1` и др., если аккаунт есть в PG.
+
+**Ответ** (`AccountChannelsPgResponse`): `session_name`, `account_id`, `channel_count`, `source: "pg"`, `channels[]` с полями `channel_id`, `channel_ref`, `name`, `external_url`, `is_active`, `extra_data_collected`, `last_updated_at`.
+
+**Ошибки:** `404` (аккаунт не в PG), `503`.
+
+```bash
+curl -sS "$BASE/discovery-api/parser/queue/accounts/Test2/channels" -H "X-API-Key: $KEY"
+```
+
+### GET /discovery-api/parser/queue/accounts/{session_name}/summary
+
+Сводка по каналам аккаунта для дашборда: сколько назначено, активных, кандидатов F4 (`pending_collect_count`) и F5 (`stale_update_count`).
+
+```bash
+curl -sS "$BASE/discovery-api/parser/queue/accounts/Test2/summary" -H "X-API-Key: $KEY"
+```
+
+### GET /discovery-api/parser/account-channels (PG-fallback)
+
+Если аккаунт **не найден в clump**, но `USE_PG_QUEUE=true` и аккаунт есть в PG — ответ из PostgreSQL (`source: "pg"`, поле `channels_detail`). Иначе поведение как раньше (clump, `source: "clump"`).
+
 ---
 
 ## 10. Сводная таблица
@@ -686,7 +710,9 @@ curl -sS -X PATCH "$BASE/discovery-api/parser/queue/task-types/parser_add_channe
 | GET | `/discovery-api/parser/accounts/all` | Все аккаунты |
 | GET | `/discovery-api/parser/accounts` | Аккаунты активных clump |
 | GET | `/discovery-api/parser/account-detail` | Деталь аккаунта |
-| GET | `/discovery-api/parser/account-channels` | Каналы аккаунта |
+| GET | `/discovery-api/parser/account-channels` | Каналы аккаунта (clump или PG-fallback) |
+| GET | `/discovery-api/parser/queue/accounts/{session_name}/channels` | Каналы аккаунта из PG (детально) |
+| GET | `/discovery-api/parser/queue/accounts/{session_name}/summary` | Сводка каналов / F4–F5 |
 | PATCH | `/discovery-api/parser/account-meta` | Метаданные аккаунта |
 | PATCH | `/discovery-api/parser/accounts/{session_name}` | Обновить аккаунт |
 | PATCH | `/discovery-api/parser/accounts/{session_name}/block` | Блокировка аккаунта |

@@ -61,6 +61,13 @@ from discovery_api.queue.task_types import (
     list_task_types,
     patch_task_type,
 )
+from discovery_api.queue.account_channels import (
+    AccountChannelItemResponse,
+    AccountChannelsPgResponse,
+    AccountChannelsSummaryResponse,
+    get_account_channels_pg,
+    get_account_channels_summary,
+)
 from discovery_api.queue.account_queue_overlay import (
     fetch_pg_queue_states,
     overlay_account_rows,
@@ -239,10 +246,13 @@ class AccountDetail(AccountQueueOverlayFields):
 
 
 class AccountChannelsResponse(BaseModel):
-    parser_id: str
+    parser_id: Optional[str] = None
     session_name: str
     channel_count: int = 0
     channels: list[str] = Field(default_factory=list)
+    source: str = "clump"
+    account_id: Optional[int] = None
+    channels_detail: Optional[list[AccountChannelItemResponse]] = None
 
 
 class AccountMetaUpdate(BaseModel):
@@ -772,7 +782,22 @@ async def parser_account_detail(
 async def parser_account_channels(
     session_name: str, parser_id: Optional[str] = None
 ) -> AccountChannelsResponse:
-    pid, job = _find_account_job(session_name, parser_id)
+    try:
+        pid, job = _find_account_job(session_name, parser_id)
+    except HTTPException as exc:
+        if exc.status_code != 404 or not get_use_pg_queue():
+            raise
+        pg = await get_account_channels_pg(session_name)
+        return AccountChannelsResponse(
+            parser_id=parser_id,
+            session_name=session_name,
+            channel_count=pg.channel_count,
+            channels=[item.channel_ref for item in pg.channels],
+            source="pg",
+            account_id=pg.account_id,
+            channels_detail=pg.channels,
+        )
+
     channels = job.clump.account_channels(session_name)
     if channels is None:
         raise HTTPException(status_code=404, detail="Аккаунт не найден")
@@ -781,6 +806,7 @@ async def parser_account_channels(
         session_name=session_name,
         channel_count=len(channels),
         channels=channels,
+        source="clump",
     )
 
 
@@ -967,6 +993,24 @@ async def parser_queue_task_type_patch(
     body: TaskTypePatchRequest,
 ) -> TaskTypeDetailResponse:
     return await patch_task_type(code, body)
+
+
+@parser_router.get(
+    "/queue/accounts/{session_name}/channels",
+    response_model=AccountChannelsPgResponse,
+)
+async def parser_queue_account_channels(session_name: str) -> AccountChannelsPgResponse:
+    return await get_account_channels_pg(session_name)
+
+
+@parser_router.get(
+    "/queue/accounts/{session_name}/summary",
+    response_model=AccountChannelsSummaryResponse,
+)
+async def parser_queue_account_summary(
+    session_name: str,
+) -> AccountChannelsSummaryResponse:
+    return await get_account_channels_summary(session_name)
 
 
 @parser_router.get("/settings", response_model=BalancerSettingsResponse)
