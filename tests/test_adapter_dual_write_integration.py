@@ -358,3 +358,78 @@ async def test_dispatch_add_missing_channel_row_retries(d7_add_ctx) -> None:
             ctx["task_id"],
         )
     assert status == "retry"
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sync_add_without_task_channel_id_resolves_from_ref(pg_pool) -> None:
+    """Prod-сценарий: задача без channel_id, dual-write по payload.channel_ref."""
+    import uuid
+
+    suffix = uuid.uuid4().hex
+    platform_code = f"{_PREFIX}ref_plat_{suffix}"
+    handle = f"d7refonly_{suffix}"
+    channel_ref = f"@{handle}"
+    external_url = f"https://t.me/{handle}"
+
+    async with db.acquire() as conn:
+        platform_id = await conn.fetchval(
+            "INSERT INTO platforms (code, name) VALUES ($1, $2) RETURNING id",
+            platform_code,
+            "D7 ref-only platform",
+        )
+        account_id = await conn.fetchval(
+            "INSERT INTO accounts (session_name, status, is_enabled) "
+            "VALUES ($1, 'active', true) RETURNING id",
+            f"{_PREFIX}ref_acc_{suffix}",
+        )
+        channel_id = await conn.fetchval(
+            "INSERT INTO source_channels (platform_id, external_channel_id, external_url, name) "
+            "VALUES ($1, $2, $3, $4) RETURNING id",
+            platform_id,
+            handle,
+            external_url,
+            "D7 ref-only channel",
+        )
+
+    task = ClaimedTask(
+        id=1,
+        task_type_id=1,
+        task_type_code="parser_add_channel",
+        priority=500,
+        payload={"parser_id": "p1", "channel_ref": channel_ref},
+        channel_id=None,
+        account_id=account_id,
+        source_account_id=None,
+        target_account_id=None,
+        attempt_count=1,
+        max_attempts=3,
+        dedup_key=None,
+        locked_by="test",
+        locked_until=None,
+    )
+    clump = FakeClump()
+
+    await sync_after_parser_add_channel(
+        task,
+        _account(account_id),
+        clump,
+    )
+
+    assigned = await SourceChannelsRepo().get_assigned_account(channel_id)
+    assert assigned == account_id
+
+    async with db.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM source_channels WHERE id = $1",
+            channel_id,
+        )
+        await conn.execute(
+            "DELETE FROM accounts WHERE id = $1",
+            account_id,
+        )
+        await conn.execute(
+            "DELETE FROM platforms WHERE id = $1",
+            platform_id,
+        )

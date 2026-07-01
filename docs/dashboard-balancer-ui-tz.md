@@ -1831,6 +1831,10 @@ Body: любое подмножество editable полей §6.3 + `reset_rph
 
 См. §11.6.
 
+### 14.5. Реализация `task-types` API
+
+Спецификация и статус реализации: [`task-types-api-tz.md`](task-types-api-tz.md).
+
 ---
 
 *Конец документа.*

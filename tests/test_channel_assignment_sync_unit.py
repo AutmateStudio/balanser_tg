@@ -94,13 +94,59 @@ async def test_sync_add_calls_set_assigned_account(
 
 
 @pytest.mark.asyncio
-async def test_sync_add_skips_pg_when_channel_id_none(
+async def test_sync_add_resolves_channel_id_from_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/db")
     clump = MagicMock()
     clump._persist_safe = MagicMock()
     repo = AsyncMock()
+    repo.find_id_by_ref = AsyncMock(return_value=55)
+    repo.set_assigned_account = AsyncMock(return_value=True)
+    task = _task(channel_id=None)
+    task = ClaimedTask(
+        id=task.id,
+        task_type_id=task.task_type_id,
+        task_type_code=task.task_type_code,
+        priority=task.priority,
+        payload={"channel_ref": "@mychannel"},
+        channel_id=None,
+        account_id=task.account_id,
+        source_account_id=task.source_account_id,
+        target_account_id=task.target_account_id,
+        attempt_count=task.attempt_count,
+        max_attempts=task.max_attempts,
+        dedup_key=task.dedup_key,
+        locked_by=task.locked_by,
+        locked_until=task.locked_until,
+    )
+
+    with patch(
+        "app_balance.queue.channel_assignment_sync._ensure_pool",
+        new_callable=AsyncMock,
+        return_value=True,
+    ):
+        await sync_after_parser_add_channel(
+            task,
+            _account(),
+            clump,
+            repo=repo,
+        )
+
+    repo.find_id_by_ref.assert_awaited_once_with("@mychannel")
+    repo.set_assigned_account.assert_awaited_once_with(55, 7)
+    clump._persist_safe.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_sync_add_skips_pg_when_channel_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/db")
+    clump = MagicMock()
+    clump._persist_safe = MagicMock()
+    repo = AsyncMock()
+    repo.find_id_by_ref = AsyncMock(return_value=None)
 
     with patch(
         "app_balance.queue.channel_assignment_sync._ensure_pool",
@@ -313,6 +359,50 @@ async def test_sync_remove_calls_clear_assigned_account(
             repo=repo,
         )
 
+    repo.clear_assigned_account.assert_awaited_once_with(55)
+    clump._persist_safe.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_sync_remove_resolves_channel_id_from_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/db")
+    clump = MagicMock()
+    clump._persist_safe = MagicMock()
+    repo = AsyncMock()
+    repo.find_id_by_ref = AsyncMock(return_value=55)
+    repo.clear_assigned_account = AsyncMock(return_value=True)
+    remove_task = ClaimedTask(
+        id=99,
+        task_type_id=3,
+        task_type_code="parser_remove_channel",
+        priority=400,
+        payload={"channel_ref": "@mychannel"},
+        channel_id=None,
+        account_id=7,
+        source_account_id=None,
+        target_account_id=None,
+        attempt_count=1,
+        max_attempts=3,
+        dedup_key=None,
+        locked_by="test",
+        locked_until=None,
+    )
+
+    with patch(
+        "app_balance.queue.channel_assignment_sync._ensure_pool",
+        new_callable=AsyncMock,
+        return_value=True,
+    ):
+        await sync_after_parser_remove_channel(
+            remove_task,
+            _account(),
+            clump,
+            repo=repo,
+        )
+
+    repo.find_id_by_ref.assert_awaited_once_with("@mychannel")
     repo.clear_assigned_account.assert_awaited_once_with(55)
     clump._persist_safe.assert_called_once()
 
