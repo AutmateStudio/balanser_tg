@@ -357,6 +357,51 @@ class AccountEndpointTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["in_clump"])
 
+    def test_sessions_list_returns_phone(self) -> None:
+        with patch(
+            "discovery_api.parser_router.list_sessions_info",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "session_name": "Client1",
+                    "session_file": "Client1.session",
+                    "phone": "+79991234567",
+                    "error": None,
+                }
+            ],
+        ):
+            resp = self.client.get("/discovery-api/parser/sessions")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["sessions"][0]["session_name"], "Client1")
+        self.assertEqual(data["sessions"][0]["session_file"], "Client1.session")
+        self.assertEqual(data["sessions"][0]["phone"], "+79991234567")
+
+    def test_session_detail_not_found(self) -> None:
+        with patch(
+            "discovery_api.parser_router.probe_session_info",
+            new_callable=AsyncMock,
+            side_effect=FileNotFoundError("Файл сессии не найден: Missing.session"),
+        ):
+            resp = self.client.get("/discovery-api/parser/sessions/Missing")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_session_detail_returns_phone(self) -> None:
+        with patch(
+            "discovery_api.parser_router.probe_session_info",
+            new_callable=AsyncMock,
+            return_value={
+                "session_name": "Client1",
+                "session_file": "Client1.session",
+                "phone": "+79991234567",
+                "error": None,
+            },
+        ):
+            resp = self.client.get("/discovery-api/parser/sessions/Client1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["phone"], "+79991234567")
+
 
 if __name__ == "__main__":
     unittest.main()

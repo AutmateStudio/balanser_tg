@@ -345,6 +345,17 @@ async def release_client(session_name: str) -> None:
                 pass
 
 
+def find_registered_client(session_name: str) -> Optional[TelegramClient]:
+    """Подключённый клиент из process-wide реестра (по нормализованному имени)."""
+    from discovery_api.account_registry import normalize_session_name
+
+    norm = normalize_session_name(session_name)
+    for key, client in _clients.items():
+        if normalize_session_name(key) == norm:
+            return client
+    return None
+
+
 def get_clump(parser_id: str) -> Optional["SessionClump"]:
     return _clumps.get(parser_id)
 
