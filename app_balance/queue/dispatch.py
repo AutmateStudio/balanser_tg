@@ -210,6 +210,10 @@ class TaskDispatcher:
                 target_account_id=target_account_id,
             )
 
+            validate = getattr(self._adapter, "validate", None)
+            if validate is not None:
+                await validate(task)
+
             is_multi_op = task_type.code in MULTI_OP_TASK_TYPES
             if is_multi_op:
                 # Multi-op типы (collect/update) ведут учёт пошагово в adapter
