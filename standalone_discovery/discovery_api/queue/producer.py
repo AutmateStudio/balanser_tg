@@ -247,7 +247,7 @@ async def enqueue_parser_remove_channels(
 
 
 def _telegram_discover_dedup_key(
-    session_name: str,
+    session_name: str | None,
     query: str,
     *,
     first_pass_limit: int,
@@ -255,9 +255,22 @@ def _telegram_discover_dedup_key(
     include_global_search: bool,
     include_groups: bool,
 ) -> str:
-    from app_balance.queue.accounts_sync import normalize_session_name
+    """dedup_key для telegram_discover.
 
-    session = normalize_session_name(session_name)
+    session_name задан — как раньше, дедуп на конкретную сессию (fixed
+    account). session_name отсутствует (auto-pick) — используется плейсхолдер
+    "auto": дедуп идёт по query+параметрам без привязки к сессии, т.к.
+    конкретный аккаунт ещё не выбран на момент постановки (его подберёт
+    dispatch()). Один и тот же запрос без фиксированной сессии не дублируется,
+    пока предыдущая попытка активна.
+    """
+    stripped = (session_name or "").strip()
+    if stripped:
+        from app_balance.queue.accounts_sync import normalize_session_name
+
+        session = normalize_session_name(stripped)
+    else:
+        session = "auto"
     normalized_query = (query or "").strip().lower()
     return (
         f"{TELEGRAM_DISCOVER}:{session}:{normalized_query}:"
@@ -268,7 +281,7 @@ def _telegram_discover_dedup_key(
 
 async def enqueue_telegram_discover(
     *,
-    session_name: str,
+    session_name: str | None = None,
     query: str,
     first_pass_limit: int,
     similarity_depth: int,
@@ -276,25 +289,38 @@ async def enqueue_telegram_discover(
     include_groups: bool,
     action_id: str,
 ) -> EnqueueTelegramDiscoverResult:
-    """Ставит задачу telegram_discover с fixed account_id (резерв через dispatch)."""
-    from app_balance.queue.accounts_sync import normalize_session_name
+    """Ставит задачу telegram_discover.
 
-    accounts = AccountsRepo()
-    normalized_session = normalize_session_name(session_name)
-    account_id = await accounts.get_id_by_session_name(session_name)
-    if account_id is None:
-        log.warning(
-            "enqueue_telegram_discover: аккаунт не в PG session=%r",
-            session_name,
-        )
-        return EnqueueTelegramDiscoverResult(task_id=None, action_id=action_id)
-
+    session_name задан — fixed account_id, резерв через dispatch (старое
+    поведение, обратная совместимость).
+    session_name не задан/пуст — auto-pick: account_id=None в EnqueueInput,
+    dispatch() сам подберёт свободный аккаунт с достаточным ресурсом
+    (та же механика _reserve_auto_pick_account, что у parser_add_channel;
+    ресурс-чек по min_available_resource_percent=20% для telegram_discover,
+    приоритет 80 — см. DB/A9_seed.sql).
+    """
     trimmed_query = (query or "").strip()
     if not trimmed_query:
         return EnqueueTelegramDiscoverResult(task_id=None, action_id=action_id)
 
+    session_stripped = (session_name or "").strip()
+    account_id: int | None = None
+    normalized_session: str | None = None
+
+    if session_stripped:
+        from app_balance.queue.accounts_sync import normalize_session_name
+
+        accounts = AccountsRepo()
+        normalized_session = normalize_session_name(session_stripped)
+        account_id = await accounts.get_id_by_session_name(session_stripped)
+        if account_id is None:
+            log.warning(
+                "enqueue_telegram_discover: аккаунт не в PG session=%r",
+                session_stripped,
+            )
+            return EnqueueTelegramDiscoverResult(task_id=None, action_id=action_id)
+
     payload: dict[str, Any] = {
-        "session_name": normalized_session,
         "query": trimmed_query,
         "first_pass_limit": int(first_pass_limit),
         "similarity_depth": int(similarity_depth),
@@ -302,6 +328,8 @@ async def enqueue_telegram_discover(
         "include_groups": bool(include_groups),
         "action_id": action_id,
     }
+    if normalized_session:
+        payload["session_name"] = normalized_session
 
     repo = TaskQueueRepo()
     result = await repo.enqueue(
@@ -309,7 +337,7 @@ async def enqueue_telegram_discover(
             task_type_code=TELEGRAM_DISCOVER,
             payload=payload,
             dedup_key=_telegram_discover_dedup_key(
-                session_name,
+                session_stripped or None,
                 trimmed_query,
                 first_pass_limit=first_pass_limit,
                 similarity_depth=similarity_depth,

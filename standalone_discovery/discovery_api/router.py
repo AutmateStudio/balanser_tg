@@ -60,9 +60,14 @@ class QRStatusResponse(BaseModel):
 
 
 class DiscoveryRequest(BaseModel):
-    session_name: str = Field(
-        ...,
-        description="Имя или путь к Telethon .session-файлу на сервере (без расширения)",
+    session_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "Имя или путь к Telethon .session-файлу на сервере (без расширения). "
+            "Не указан + async=true + USE_PG_QUEUE=true — аккаунт подберёт "
+            "балансировщик автоматически (dispatch auto-pick, C5 resource_check). "
+            "Обязателен для синхронного режима (async=false или USE_PG_QUEUE=false)."
+        ),
     )
     query: str = Field(...)
     first_pass_limit: int = Field(default=10, ge=1, le=100)
@@ -385,16 +390,19 @@ async def discover(
             action_id=action_id,
         )
         if pg_result.task_id is None:
+            error = (
+                "Не удалось поставить задачу: пустой query"
+                if not req.session_name
+                else "Не удалось поставить задачу: аккаунт не найден в PG "
+                f"(session_name={req.session_name!r}) или пустой query"
+            )
             return DiscoveryResponse(
                 query=req.query,
                 total=0,
                 depth_stats={},
                 channels=[],
                 groups=[],
-                errors=[
-                    "Не удалось поставить задачу: аккаунт не найден в PG "
-                    f"(session_name={req.session_name!r}) или пустой query"
-                ],
+                errors=[error],
             )
         return DiscoveryResponse(
             query=req.query,
@@ -406,6 +414,16 @@ async def discover(
             task_id=pg_result.task_id,
             action_id=pg_result.action_id,
             async_mode=True,
+        )
+
+    if not req.session_name:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "session_name обязателен для синхронного режима "
+                "(async=false или USE_PG_QUEUE=false) — без PG-очереди "
+                "нет диспетчера, который подберёт аккаунт автоматически"
+            ),
         )
 
     try:
