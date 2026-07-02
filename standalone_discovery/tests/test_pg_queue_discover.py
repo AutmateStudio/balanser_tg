@@ -117,6 +117,55 @@ class PgQueueDiscoverApiTests(unittest.TestCase):
         self.assertEqual(body["persist"]["inserted"], 1)
         mock_persist.assert_awaited_once()
 
+    @patch("discovery_api.router.enqueue_telegram_discover", new_callable=AsyncMock)
+    def test_async_discover_without_session_name_auto_picks(
+        self, mock_enqueue: AsyncMock
+    ) -> None:
+        """POST /discover без session_name (async + PG queue) — auto-pick аккаунта."""
+        from discovery_api.queue.producer import EnqueueTelegramDiscoverResult
+
+        async def _fake_enqueue(**kwargs):
+            self.assertIsNone(kwargs.get("session_name"))
+            return EnqueueTelegramDiscoverResult(task_id=702, action_id=kwargs["action_id"])
+
+        mock_enqueue.side_effect = _fake_enqueue
+        client = self._make_client()
+
+        resp = client.post(
+            "/discovery-api/discover",
+            json={"query": "маркетинг", "first_pass_limit": 20, "similarity_depth": 2},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["async_mode"])
+        self.assertEqual(body["task_id"], 702)
+        mock_enqueue.assert_awaited_once()
+
+    def test_sync_discover_without_session_name_rejected(self) -> None:
+        """Синхронный режим (async=false) без session_name — 400, нет диспетчера."""
+        client = self._make_client()
+
+        resp = client.post(
+            "/discovery-api/discover?async=false",
+            json={"query": "ремонт"},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("session_name", resp.json()["detail"])
+
+    def test_async_discover_without_session_name_no_pg_queue_rejected(self) -> None:
+        """async=true, но USE_PG_QUEUE=false — падает в синхронный путь, требует session_name."""
+        os.environ["USE_PG_QUEUE"] = "false"
+        client = self._make_client()
+
+        resp = client.post(
+            "/discovery-api/discover",
+            json={"query": "ремонт"},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+
     @patch("discovery_api.router.discover", new_callable=AsyncMock)
     def test_discover_groups_deprecated_wrapper(self, mock_discover: AsyncMock) -> None:
         from discovery_api.router import DiscoveryResponse, PersistStatsResponse
@@ -172,7 +221,88 @@ class ProducerTelegramDiscoverUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data.task_type_code, "telegram_discover")
         self.assertEqual(data.account_id, 42)
         self.assertEqual(data.payload["query"], "маркетинг")
+        self.assertEqual(data.payload["session_name"], "Client1")
         self.assertEqual(data.created_by, "discovery_api:discover")
+        self.assertTrue(data.dedup_key.startswith("telegram_discover:Client1:"))
+
+    async def test_enqueue_telegram_discover_auto_pick_when_session_omitted(self) -> None:
+        """session_name не задан — account_id=None, dispatch() сам подберёт аккаунт."""
+        from app_balance.queue.task_queue import EnqueueInput, EnqueueResult, TaskQueueRepo
+        from discovery_api.queue.producer import enqueue_telegram_discover
+
+        with patch.object(
+            TaskQueueRepo, "enqueue", new_callable=AsyncMock
+        ) as mock_enqueue, patch(
+            "discovery_api.queue.producer.AccountsRepo"
+        ) as accounts_cls:
+            mock_enqueue.return_value = EnqueueResult(created=True, task_id=100)
+
+            result = await enqueue_telegram_discover(
+                query="маркетинг",
+                first_pass_limit=15,
+                similarity_depth=1,
+                include_global_search=True,
+                include_groups=True,
+                action_id="act-auto",
+            )
+
+        self.assertEqual(result.task_id, 100)
+        # AccountsRepo не должен даже создаваться — резолва аккаунта нет вовсе.
+        accounts_cls.assert_not_called()
+        data: EnqueueInput = mock_enqueue.await_args.args[0]
+        self.assertEqual(data.task_type_code, "telegram_discover")
+        self.assertIsNone(data.account_id)
+        self.assertNotIn("session_name", data.payload)
+        self.assertEqual(data.payload["query"], "маркетинг")
+        self.assertTrue(data.dedup_key.startswith("telegram_discover:auto:"))
+
+    async def test_enqueue_telegram_discover_auto_pick_with_empty_session(self) -> None:
+        """session_name="" (пустая строка) — тоже трактуется как auto-pick."""
+        from app_balance.queue.task_queue import EnqueueInput, EnqueueResult, TaskQueueRepo
+        from discovery_api.queue.producer import enqueue_telegram_discover
+
+        with patch.object(
+            TaskQueueRepo, "enqueue", new_callable=AsyncMock
+        ) as mock_enqueue:
+            mock_enqueue.return_value = EnqueueResult(created=True, task_id=101)
+
+            result = await enqueue_telegram_discover(
+                session_name="   ",
+                query="реклама",
+                first_pass_limit=10,
+                similarity_depth=2,
+                include_global_search=True,
+                include_groups=False,
+                action_id="act-blank",
+            )
+
+        self.assertEqual(result.task_id, 101)
+        data: EnqueueInput = mock_enqueue.await_args.args[0]
+        self.assertIsNone(data.account_id)
+        self.assertNotIn("session_name", data.payload)
+
+    async def test_dedup_key_differs_for_auto_vs_fixed(self) -> None:
+        from discovery_api.queue.producer import _telegram_discover_dedup_key
+
+        fixed = _telegram_discover_dedup_key(
+            "Client1",
+            "запрос",
+            first_pass_limit=10,
+            similarity_depth=2,
+            include_global_search=True,
+            include_groups=True,
+        )
+        auto = _telegram_discover_dedup_key(
+            None,
+            "запрос",
+            first_pass_limit=10,
+            similarity_depth=2,
+            include_global_search=True,
+            include_groups=True,
+        )
+        self.assertNotEqual(fixed, auto)
+        self.assertIn(":Client1:", fixed)
+        self.assertIn(":auto:", auto)
 
 
 if __name__ == "__main__":
