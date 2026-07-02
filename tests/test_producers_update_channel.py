@@ -253,3 +253,54 @@ async def test_produce_propagates_skipped_reason(
             skipped_reason="duplicate",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_produce_logs_warning_on_fatal_history(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    task_types = AsyncMock()
+    task_types.get_by_code = AsyncMock(return_value=_task_type(target_queue_size=20))
+
+    channels = AsyncMock()
+    channels.list_stale_for_update = AsyncMock(
+        return_value=[StaleChannel(id=10, account_id=100, last_updated_at=None)]
+    )
+
+    task_queue = AsyncMock()
+    task_queue.enqueue = AsyncMock(
+        return_value=EnqueueResult(
+            created=False,
+            task_id=None,
+            existing_task_id=77,
+            skipped_reason="fatal_history",
+            fatal_error_code="channel_private",
+        )
+    )
+
+    monkeypatch.setattr(
+        "app_balance.queue.producers.base.count_active_tasks",
+        AsyncMock(return_value=0),
+    )
+
+    producer = UpdateChannelProducer(
+        task_queue=task_queue, task_types=task_types, channels=channels
+    )
+    with caplog.at_level(
+        "WARNING", logger="app_balance.queue.producers.update_channel"
+    ):
+        result = await producer.produce()
+
+    assert result == [
+        ProduceResult(
+            created=False,
+            task_id=None,
+            existing_task_id=77,
+            skipped_reason="fatal_history",
+            fatal_error_code="channel_private",
+        )
+    ]
+    assert any(
+        "не поставлен в очередь" in record.message and "id=10" in record.message
+        for record in caplog.records
+    )

@@ -333,6 +333,55 @@ class AccountAuthWatchdogHealthCheckTests(unittest.IsolatedAsyncioTestCase):
         get_client_mock.assert_not_awaited()
         self.assertEqual(pc.health.status, SessionStatus.BANNED)
 
+    async def test_health_check_logs_tick_summary_when_errors_present(self) -> None:
+        from discovery_api import session_registry as sr
+
+        clump = sr.SessionClump(["/sess/e5", "/sess/e6"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc1, pc2 = clump.parser_client_list
+        pc1.health.mark_unauthorized("не авторизована")
+        pc2.health.mark_unauthorized("не авторизована")
+        # pc2 недавно проверялся — в этот тик пропускается.
+        pc2.health.record_reauth_attempt()
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_interval_seconds",
+                return_value=300.0,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("не авторизована"),
+            ),
+            self.assertLogs("discovery_api.session_registry", level="INFO") as logs,
+        ):
+            await sr._health_check_once()
+
+        summary = [m for m in logs.output if "тик завершён" in m]
+        self.assertEqual(len(summary), 1)
+        self.assertIn("ERROR-сессий=2", summary[0])
+        self.assertIn("проверено=1", summary[0])
+        self.assertIn("восстановлено=0", summary[0])
+
+    async def test_health_check_no_tick_summary_without_errors(self) -> None:
+        from discovery_api import session_registry as sr
+
+        clump = sr.SessionClump(["/sess/h1"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+
+        with self.assertRaises(AssertionError):
+            with self.assertLogs(
+                "discovery_api.session_registry", level="INFO"
+            ) as logs:
+                await sr._health_check_once()
+        # Ничего не залогировано на INFO — assertLogs сам бросает AssertionError,
+        # если не было ни одной записи (нет ERROR-аккаунтов — сводка не нужна).
+
     async def test_health_check_reauth_disabled_by_config(self) -> None:
         from discovery_api import session_registry as sr
         from discovery_api.session_health import SessionStatus

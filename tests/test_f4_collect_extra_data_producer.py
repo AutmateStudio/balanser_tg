@@ -145,3 +145,32 @@ async def test_produce_passes_through_enqueue_results() -> None:
     assert len(results) == 1
     assert results[0].skipped_reason == "duplicate"
     assert results[0].existing_task_id == 999
+
+
+@pytest.mark.asyncio
+async def test_produce_logs_warning_on_fatal_history(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    pending = [PendingChannel(channel_id=42, account_id=7)]
+    producer = _producer(task_type=_task_type(), pending=pending, capacity=1)
+    producer.enqueue_if_room = AsyncMock(
+        return_value=ProduceResult(
+            created=False,
+            task_id=None,
+            existing_task_id=999,
+            skipped_reason="fatal_history",
+            fatal_error_code="banned",
+        )
+    )
+
+    with caplog.at_level(
+        "WARNING", logger="app_balance.queue.producers.collect_extra_data"
+    ):
+        results = await producer.produce()
+
+    assert len(results) == 1
+    assert results[0].skipped_reason == "fatal_history"
+    assert any(
+        "не поставлен в очередь" in record.message and "id=42" in record.message
+        for record in caplog.records
+    )
