@@ -296,6 +296,8 @@ async def get_or_create_client(session_name: str) -> TelegramClient:
             if not client.is_connected():
                 await client.connect()
             if not await client.is_user_authorized():
+                await client.disconnect()
+                _clients.pop(session_name, None)
                 msg = _unauthorized_message(session_name)
                 await notify_session_unauthorized(session_name, msg)
                 raise RuntimeError(msg)
@@ -306,6 +308,7 @@ async def get_or_create_client(session_name: str) -> TelegramClient:
         await client.connect()
         if not await client.is_user_authorized():
             await client.disconnect()
+            _clients.pop(session_name, None)
             msg = _unauthorized_message(session_name)
             await notify_session_unauthorized(session_name, msg)
             raise RuntimeError(msg)
