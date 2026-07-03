@@ -13,7 +13,7 @@ from discovery_api.account_registry import (
     session_file_path,
 )
 from discovery_api.config import get_api_hash, get_api_id
-from discovery_api.session_registry import find_registered_client
+from discovery_api.session_registry import find_registered_client, session_lock
 
 log = logging.getLogger(__name__)
 
@@ -41,38 +41,51 @@ async def probe_session_info(session_name: str) -> dict[str, Any]:
         "error": None,
     }
 
-    client: Optional[TelegramClient] = find_registered_client(norm)
-    owned = client is None
-    if owned:
-        client = TelegramClient(_telethon_session_base(norm), int(get_api_id()), get_api_hash())
+    # Сериализуемся на том же per-session lock, что и реестр клиентов: пока probe
+    # держит lock, `get_or_create_client` не откроет второй коннект к тому же файлу
+    # (второй SQLite-коннект рассинхронизирует сессию → Telegram отзывает auth_key).
+    async with session_lock(norm):
+        client: Optional[TelegramClient] = find_registered_client(norm)
+        owned = client is None
+        if owned:
+            client = TelegramClient(
+                _telethon_session_base(norm), int(get_api_id()), get_api_hash()
+            )
+            try:
+                await client.connect()
+            except Exception as exc:
+                log.warning("Не удалось подключить сессию %s: %s", norm, exc)
+                row["error"] = str(exc)
+                return row
+
+        assert client is not None
         try:
-            await client.connect()
+            # Не доверяем кэшу Telethon (_authorized): форсируем свежий серверный RPC,
+            # иначе живой в кэше, но реально отозванный login покажется авторизованным
+            # (и наоборот — восстановленный .session останется «не авторизован»).
+            try:
+                client._authorized = None  # noqa: SLF001
+            except Exception:  # noqa: BLE001
+                pass
+            if not await client.is_user_authorized():
+                row["error"] = "Сессия не авторизована"
+                return row
+            me = await client.get_me()
+            if me is None:
+                row["error"] = "get_me вернул пустой результат"
+                return row
+            row["phone"] = f"+{me.phone}" if getattr(me, "phone", None) else None
+            return row
         except Exception as exc:
-            log.warning("Не удалось подключить сессию %s: %s", norm, exc)
+            log.warning("Не удалось прочитать профиль сессии %s: %s", norm, exc)
             row["error"] = str(exc)
             return row
-
-    assert client is not None
-    try:
-        if not await client.is_user_authorized():
-            row["error"] = "Сессия не авторизована"
-            return row
-        me = await client.get_me()
-        if me is None:
-            row["error"] = "get_me вернул пустой результат"
-            return row
-        row["phone"] = f"+{me.phone}" if getattr(me, "phone", None) else None
-        return row
-    except Exception as exc:
-        log.warning("Не удалось прочитать профиль сессии %s: %s", norm, exc)
-        row["error"] = str(exc)
-        return row
-    finally:
-        if owned:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
+        finally:
+            if owned:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
 
 async def list_sessions_info() -> list[dict[str, Any]]:

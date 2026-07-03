@@ -936,15 +936,11 @@ async def parser_account_reactivate(session_name: str) -> AccountFullSummary:
             detail=f"Файл сессии не найден: {norm}.session",
         )
         
-    # Принудительно выкидываем старый клиент из кэша, чтобы probe и get_or_create_client 
-    # прочитали обновлённый .session файл с диска.
-    from discovery_api.session_registry import _clients
-    old_client = _clients.pop(norm, None)
-    if old_client is not None:
-        try:
-            await old_client.disconnect()
-        except Exception:
-            pass
+    # Принудительно выкидываем старый клиент из реестра (под per-session lock),
+    # чтобы probe и get_or_create_client прочитали обновлённый .session с диска.
+    from discovery_api.session_registry import release_client
+
+    await release_client(norm)
 
     probe = await probe_session_info(norm)
     if probe.get("error"):

@@ -248,8 +248,42 @@ class ClumpConfig:
         }
 
 
+def _canonical_key(session_name: str) -> str:
+    """Каноническое имя сессии (basename без `.session`).
+
+    Один физический `.session`-файл = один ключ = один `TelegramClient` = один
+    lock. Разные написания одного файла (`Test3`, `/app/sessions/Test3`,
+    `/app/sessions/Test3.session`) обязаны резолвиться в один и тот же клиент —
+    иначе на файле открывается второй SQLite-коннект, состояние сессии
+    рассинхронизируется и Telegram отзывает `auth_key` (потеря авторизации).
+    """
+    from discovery_api.account_registry import normalize_session_name
+
+    return normalize_session_name(session_name)
+
+
+def _telethon_session_base(session_name: str) -> str:
+    """Детерминированный путь к `.session` (без суффикса) в SESSIONS_DIR.
+
+    Клиент всегда создаётся по каноническому пути, чтобы разные вызовы для
+    одного аккаунта работали с одним и тем же файлом.
+    """
+    from discovery_api.account_registry import session_file_path
+
+    return session_file_path(session_name)[: -len(".session")]
+
+
 def _lock_for(session_name: str) -> asyncio.Lock:
-    return _locks.setdefault(session_name, asyncio.Lock())
+    return _locks.setdefault(_canonical_key(session_name), asyncio.Lock())
+
+
+def session_lock(session_name: str) -> asyncio.Lock:
+    """Публичный per-session lock: сериализует любой доступ к одному `.session`.
+
+    Используется вне реестра (например, `probe_session_info`), чтобы гарантировать
+    отсутствие второго одновременного коннекта к тому же файлу.
+    """
+    return _lock_for(session_name)
 
 
 def reset_for_tests() -> None:
@@ -280,58 +314,92 @@ def _unauthorized_message(session_name: str) -> str:
 
 
 def find_parser_client(session_name: str) -> Optional["Parser_client"]:
-    """Parser_client в загруженных clump'ах (для обновления in-memory health)."""
+    """Parser_client в загруженных clump'ах (для обновления in-memory health).
+
+    Сопоставление по каноническому имени, чтобы health обновлялся независимо от
+    того, как передано имя (basename / полный путь / с суффиксом `.session`).
+    """
+    key = _canonical_key(session_name)
     for clump in _clumps.values():
         pc = clump._session_index.get(session_name)
         if pc is not None:
             return pc
+        for name, candidate in clump._session_index.items():
+            if _canonical_key(name) == key:
+                return candidate
     return None
 
 
+async def is_authorized_uncached(client: TelegramClient) -> bool:
+    """Проверка авторизации без доверия кэшу Telethon.
+
+    Telethon кэширует результат в `client._authorized` и после первого ответа
+    больше не ходит в сеть. Из-за этого «умершая» в памяти сессия навсегда
+    остаётся unauthorized, а восстановленный на диске `.session` не поднимается
+    без пересоздания процесса. Сбрасываем кэш, чтобы `is_user_authorized()`
+    заново выполнил серверный RPC (GetState) и вернул реальное состояние.
+    """
+    try:
+        client._authorized = None  # noqa: SLF001 — форсируем свежий серверный RPC
+    except Exception:  # noqa: BLE001 — приватный атрибут не должен ломать проверку
+        pass
+    return await client.is_user_authorized()
+
+
 async def get_or_create_client(session_name: str) -> TelegramClient:
-    """Возвращает единственный подключённый клиент для данного `session_name`."""
+    """Возвращает единственный подключённый клиент для данного `session_name`.
+
+    Ключ реестра и путь к файлу канонизируются, поэтому один физический
+    `.session` обслуживается ровно одним `TelegramClient` под одним lock'ом.
+    """
+    key = _canonical_key(session_name)
     async with _lock_for(session_name):
-        client = _clients.get(session_name)
+        client = _clients.get(key)
         if client is not None:
             if not client.is_connected():
                 await client.connect()
-            if not await client.is_user_authorized():
+            if not await is_authorized_uncached(client):
                 await client.disconnect()
-                _clients.pop(session_name, None)
+                _clients.pop(key, None)
+                _session_strings.pop(key, None)
                 msg = _unauthorized_message(session_name)
                 await notify_session_unauthorized(session_name, msg)
                 raise RuntimeError(msg)
             await notify_session_reauthorized(session_name)
             return client
 
-        client = TelegramClient(session_name, int(get_api_id()), get_api_hash())
+        client = TelegramClient(
+            _telethon_session_base(session_name), int(get_api_id()), get_api_hash()
+        )
         await client.connect()
-        if not await client.is_user_authorized():
+        if not await is_authorized_uncached(client):
             await client.disconnect()
-            _clients.pop(session_name, None)
+            _clients.pop(key, None)
+            _session_strings.pop(key, None)
             msg = _unauthorized_message(session_name)
             await notify_session_unauthorized(session_name, msg)
             raise RuntimeError(msg)
-        _clients[session_name] = client
-        log.info("Telethon-клиент подключён и зарегистрирован: %s", session_name)
+        _clients[key] = client
+        log.info("Telethon-клиент подключён и зарегистрирован: %s", key)
         await notify_session_reauthorized(session_name)
         return client
 
 
 async def get_session_string(session_name: str) -> str:
     """Строка `StringSession` для данного `session_name` (кешируется в памяти)."""
-    cached = _session_strings.get(session_name)
+    key = _canonical_key(session_name)
+    cached = _session_strings.get(key)
     if cached is not None:
         return cached
     client = await get_or_create_client(session_name)
     s = StringSession.save(client.session)
-    _session_strings[session_name] = s
+    _session_strings[key] = s
     return s
 
 
 async def is_session_active(session_name: str) -> bool:
     """True, если для сессии уже есть подключённый и авторизованный клиент."""
-    client = _clients.get(session_name)
+    client = _clients.get(_canonical_key(session_name))
     if client is None:
         return False
     try:
@@ -342,9 +410,10 @@ async def is_session_active(session_name: str) -> bool:
 
 async def release_client(session_name: str) -> None:
     """Отключает и удаляет клиент из process-wide реестра."""
+    key = _canonical_key(session_name)
     async with _lock_for(session_name):
-        client = _clients.pop(session_name, None)
-        _session_strings.pop(session_name, None)
+        client = _clients.pop(key, None)
+        _session_strings.pop(key, None)
         if client is not None:
             try:
                 await client.disconnect()
@@ -353,14 +422,8 @@ async def release_client(session_name: str) -> None:
 
 
 def find_registered_client(session_name: str) -> Optional[TelegramClient]:
-    """Подключённый клиент из process-wide реестра (по нормализованному имени)."""
-    from discovery_api.account_registry import normalize_session_name
-
-    norm = normalize_session_name(session_name)
-    for key, client in _clients.items():
-        if normalize_session_name(key) == norm:
-            return client
-    return None
+    """Подключённый клиент из process-wide реестра (по каноническому имени)."""
+    return _clients.get(_canonical_key(session_name))
 
 
 def get_clump(parser_id: str) -> Optional["SessionClump"]:
@@ -465,12 +528,12 @@ async def _health_check_once() -> None:
                     if await _attempt_session_reauth(pc):
                         reauth_recovered += 1
                 continue
-            client = _clients.get(pc.session_name)
+            client = _clients.get(_canonical_key(pc.session_name))
             if client is None:
                 continue
             try:
                 connected = bool(client.is_connected())
-                authorized = connected and await client.is_user_authorized()
+                authorized = connected and await is_authorized_uncached(client)
             except Exception:
                 connected = False
                 authorized = False
@@ -549,12 +612,16 @@ OnDownCallback = Callable[[str, str], Awaitable[None]]
 
 
 async def _persist_flood_cooldown_pg(session_name: str, seconds: int) -> None:
-    """D6: FloodWait → PG accounts.cooldown_until (no-op без QUEUE_DATABASE_URL)."""
+    """D6: FloodWait → PG accounts.cooldown_until (no-op без QUEUE_DATABASE_URL).
+
+    Имя канонизируется: строки в `accounts` хранятся по basename (`Client1`),
+    поэтому полный путь `/app/sessions/Client1` не совпал бы и sync стал бы no-op.
+    """
     try:
         from app_balance.queue.account_health_sync import persist_flood_cooldown
     except ImportError:
         return
-    await persist_flood_cooldown(session_name, seconds)
+    await persist_flood_cooldown(_canonical_key(session_name), seconds)
 
 
 async def _persist_banned_pg(session_name: str, reason: str) -> None:
@@ -563,7 +630,7 @@ async def _persist_banned_pg(session_name: str, reason: str) -> None:
         from app_balance.queue.account_health_sync import persist_banned
     except ImportError:
         return
-    await persist_banned(session_name, reason)
+    await persist_banned(_canonical_key(session_name), reason)
 
 
 async def _persist_unauthorized_pg(session_name: str, reason: str) -> None:
@@ -572,7 +639,7 @@ async def _persist_unauthorized_pg(session_name: str, reason: str) -> None:
         from app_balance.queue.account_health_sync import persist_unauthorized
     except ImportError:
         return
-    await persist_unauthorized(session_name, reason)
+    await persist_unauthorized(_canonical_key(session_name), reason)
 
 
 async def _persist_reauthorized_pg(session_name: str) -> bool:
@@ -581,7 +648,7 @@ async def _persist_reauthorized_pg(session_name: str) -> bool:
         from app_balance.queue.account_health_sync import persist_account_reauthorized
     except ImportError:
         return False
-    return await persist_account_reauthorized(session_name)
+    return await persist_account_reauthorized(_canonical_key(session_name))
 
 
 async def notify_session_unauthorized(session_name: str, message: str) -> None:
