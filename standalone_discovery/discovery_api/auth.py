@@ -156,13 +156,26 @@ async def _wait_for_scan(session: QRSession) -> None:
             if session.session_name:
                 from discovery_api.account_registry import register_account_after_qr
                 from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
-                from discovery_api.session_registry import notify_session_reauthorized
+                from discovery_api.session_registry import (
+                    find_clump_for_session,
+                    notify_session_reauthorized,
+                )
+                from discovery_api.session_dialogs import scan_client_channel_membership
 
                 register_account_after_qr(session.session_name)
                 await sync_accounts_to_pg_best_effort(
                     context=f"qr:{session.session_name}"
                 )
                 await notify_session_reauthorized(session.session_name)
+
+                # Сверяем членство через уже авторизованный QR-клиент, а не через
+                # реестр по .session-файлу — второй коннект к тому же файлу здесь
+                # не нужен и создавал бы ту же гонку, которую чинит session_registry.
+                clump = find_clump_for_session(session.session_name)
+                membership = await scan_client_channel_membership(
+                    session.client, clump, session_name=session.session_name
+                )
+                session.result.update(membership.to_dict())
             return
         except telethon.errors.SessionPasswordNeededError:
             session.status = "2fa_required"

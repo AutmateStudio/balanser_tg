@@ -430,6 +430,16 @@ def get_clump(parser_id: str) -> Optional["SessionClump"]:
     return _clumps.get(parser_id)
 
 
+def find_clump_for_session(session_name: str) -> Optional["SessionClump"]:
+    """Clump, в который зачислена данная сессия (по каноническому имени)."""
+    key = _canonical_key(session_name)
+    for clump in _clumps.values():
+        for name in clump._session_index:
+            if _canonical_key(name) == key:
+                return clump
+    return None
+
+
 def iter_clumps() -> list[tuple[str, "SessionClump"]]:
     """F2: снимок (parser_id, clump) всех загруженных clump'ов реестра."""
     return list(_clumps.items())

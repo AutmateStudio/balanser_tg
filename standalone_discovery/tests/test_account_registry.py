@@ -347,15 +347,28 @@ class AccountEndpointTests(unittest.TestCase):
         from discovery_api.parser_router import _ClumpJob, _jobs
         from discovery_api.session_registry import SessionClump
 
+        from discovery_api.session_dialogs import AccountMembershipSnapshot
+
         clump = SessionClump(["/s0"], "c", webhook_url="http://h")
         _jobs["pid"] = _ClumpJob(clump=clump, parser_id="pid")
-        with patch.object(clump, "start", new_callable=AsyncMock):
+        with (
+            patch.object(clump, "start", new_callable=AsyncMock),
+            patch(
+                "discovery_api.session_dialogs.scan_account_channel_membership",
+                new_callable=AsyncMock,
+                return_value=AccountMembershipSnapshot(3, 5, 2),
+            ),
+        ):
             resp = self.client.post(
                 "/discovery-api/parser/pid/enroll-session",
                 json={"session_name": "Client1"},
             )
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.json()["in_clump"])
+        data = resp.json()
+        self.assertTrue(data["in_clump"])
+        self.assertEqual(data["telegram_channel_count"], 3)
+        self.assertEqual(data["required_channel_total"], 5)
+        self.assertEqual(data["required_channel_present"], 2)
 
     def test_sessions_list_returns_phone(self) -> None:
         with patch(
@@ -403,6 +416,8 @@ class AccountEndpointTests(unittest.TestCase):
         self.assertEqual(resp.json()["phone"], "+79991234567")
 
     def test_account_reactivate_ok(self) -> None:
+        from discovery_api.session_dialogs import AccountMembershipSnapshot
+
         with (
             patch(
                 "discovery_api.parser_router.probe_session_info",
@@ -419,10 +434,17 @@ class AccountEndpointTests(unittest.TestCase):
                 new_callable=AsyncMock,
                 return_value=True,
             ),
+            patch(
+                "discovery_api.session_dialogs.scan_account_channel_membership",
+                new_callable=AsyncMock,
+                return_value=AccountMembershipSnapshot(7, 0, 0),
+            ),
         ):
             resp = self.client.patch("/discovery-api/parser/accounts/Client1/reactivate")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["session_name"], "Client1")
+        data = resp.json()
+        self.assertEqual(data["session_name"], "Client1")
+        self.assertEqual(data["telegram_channel_count"], 7)
 
     def test_account_reactivate_unauthorized_409(self) -> None:
         with patch(
