@@ -71,6 +71,23 @@ class SessionRegistryConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(c1, c2)
         self.assertEqual(FakeTelegramClient.init_count, 1)
 
+    async def test_name_variants_map_to_single_client(self) -> None:
+        """`Test3`, `/app/sessions/Test3`, `...Test3.session` → один клиент/файл."""
+        from discovery_api import session_registry as sr
+
+        with patch("discovery_api.session_registry.TelegramClient", FakeTelegramClient), patch(
+            "discovery_api.session_registry.get_api_id", return_value=1
+        ), patch("discovery_api.session_registry.get_api_hash", return_value="hash"):
+            c1 = await sr.get_or_create_client("Test3")
+            c2 = await sr.get_or_create_client("/app/sessions/Test3")
+            c3 = await sr.get_or_create_client("/app/sessions/Test3.session")
+
+        self.assertIs(c1, c2)
+        self.assertIs(c2, c3)
+        self.assertEqual(FakeTelegramClient.init_count, 1)
+        self.assertIsNotNone(sr.find_registered_client("Test3"))
+        self.assertIs(sr.find_registered_client("/app/sessions/Test3.session"), c1)
+
 
 class SessionRegistryStringCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -201,6 +218,49 @@ class SessionRegistryUnauthorizedTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(client)
 
         reauth_mock.assert_awaited_once_with("/sess/ok")
+
+    async def test_liveness_check_resets_telethon_auth_cache(self) -> None:
+        """is_authorized_uncached сбрасывает _authorized перед серверным RPC."""
+        from discovery_api import session_registry as sr
+
+        client = MagicMock()
+        client._authorized = True  # «залипший» кэш Telethon
+        client.is_user_authorized = AsyncMock(return_value=False)
+
+        result = await sr.is_authorized_uncached(client)
+
+        self.assertFalse(result)
+        self.assertIsNone(client._authorized)
+        client.is_user_authorized.assert_awaited_once()
+
+    async def test_cached_client_with_stale_auth_is_evicted(self) -> None:
+        """Кэшированный клиент, ставший unauthorized, выбрасывается из реестра."""
+        from discovery_api.session_health import SessionStatus
+        from discovery_api import session_registry as sr
+
+        client = MagicMock()
+        client._authorized = True
+        client.is_connected.return_value = True
+        client.is_user_authorized = AsyncMock(return_value=False)
+        client.connect = AsyncMock()
+        client.disconnect = AsyncMock()
+
+        clump = sr.SessionClump(["/sess/stale"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        key = sr._canonical_key("/sess/stale")
+        sr._clients[key] = client
+
+        with patch(
+            "discovery_api.session_registry._persist_unauthorized_pg",
+            AsyncMock(),
+        ):
+            with self.assertRaises(RuntimeError):
+                await sr.get_or_create_client("/sess/stale")
+
+        self.assertNotIn(key, sr._clients)
+        client.disconnect.assert_awaited()
+        pc = clump.parser_client_list[0]
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
 
 
 class AccountAuthWatchdogHealthCheckTests(unittest.IsolatedAsyncioTestCase):
