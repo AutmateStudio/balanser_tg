@@ -3,6 +3,9 @@
 -- effective_rph = floor(rph_limit × (1 − reserve_percent/100)), reserve_percent = 10
 -- Политика RPH (A14): parser_add_channel = 20 кан/ч на аккаунт (get_entity/Join=223,
 -- GetFull=112); все прочие op — ×5 от исходного базового seed.
+-- Политика RPH (A17): telegram_discover = до 120 async-поисков/ч на аккаунт при пороге 20%
+-- (contacts.Search/SearchGlobal=1670, GetFullChannel=2500, GetRecommendations=840,
+-- get_input_entity=340; GetParticipants/iter_messages — без изменений).
 --
 -- HTTP/фоновые задачи discovery (1–30) → resource_op_types ниже;
 -- PG-очередь (task_types) — только типы §8 ТЗ + parser_remove_channel (D9);
@@ -19,11 +22,11 @@ INSERT INTO resource_op_types (code, name, rph_limit, is_enabled) VALUES
   ('get_me', 'Текущий пользователь (валидация сессии)', 150, true),
   ('is_user_authorized', 'Проверка авторизации', 150, true),
   ('get_entity', 'Resolve username / ссылки / peer', 223, true),
-  ('get_input_entity', 'get_input_entity() для InputPeer', 35, true),
-  ('contacts.Search', 'Поиск контактов / каналов', 10, true),
-  ('messages.SearchGlobal', 'Глобальный поиск сообщений', 600, true),
-  ('channels.GetChannelRecommendations', 'Рекомендации каналов', 150, true),
-  ('channels.GetFullChannel', 'Полные данные канала', 112, true),
+  ('get_input_entity', 'get_input_entity() для InputPeer', 340, true),
+  ('contacts.Search', 'Поиск контактов / каналов', 1670, true),
+  ('messages.SearchGlobal', 'Глобальный поиск сообщений', 1670, true),
+  ('channels.GetChannelRecommendations', 'Рекомендации каналов', 840, true),
+  ('channels.GetFullChannel', 'Полные данные канала', 2500, true),
   ('channels.JoinChannel', 'Подписка / join канала или discussion', 223, true),
   ('channels.LeaveChannel', 'Выход из канала или discussion', 150, true),
   ('channels.GetParticipant', 'Проверка участника (InputPeerSelf)', 30000, true),
@@ -80,7 +83,7 @@ INSERT INTO task_types (
   (
     'telegram_discover',
     'Поиск каналов и групп (POST /discover)',
-    'HTTP POST /discover async: contacts.Search + SearchGlobal + recommendations + lidgen scoring + upsert source_channels.',
+    'HTTP POST /discover async: contacts.Search + SearchGlobal + recommendations + lidgen scoring + upsert source_channels. RPH A17: до 120 discover/ч на аккаунт при пороге 20%.',
     true, 80, 20, false, NULL
   )
 ON CONFLICT (code) DO UPDATE SET

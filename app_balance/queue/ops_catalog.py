@@ -65,28 +65,30 @@ RESOURCE_OPS: dict[str, ResourceOpDefinition] = {
     "get_input_entity": ResourceOpDefinition(
         code="get_input_entity",
         name="get_input_entity() для InputPeer",
-        rph_limit=35,
+        # telegram_discover 120/ч @ 20%: 2 units → effective ≥ 300 → rph_limit 340
+        rph_limit=340,
     ),
     "contacts.Search": ResourceOpDefinition(
         code="contacts.Search",
         name="Поиск контактов / каналов",
-        rph_limit=10,
+        # telegram_discover 120/ч @ 20%: 10 units → effective ≥ 1500 → rph_limit 1670
+        rph_limit=1670,
     ),
     "messages.SearchGlobal": ResourceOpDefinition(
         code="messages.SearchGlobal",
         name="Глобальный поиск сообщений",
-        rph_limit=600,
+        rph_limit=1670,
     ),
     "channels.GetChannelRecommendations": ResourceOpDefinition(
         code="channels.GetChannelRecommendations",
         name="Рекомендации каналов",
-        rph_limit=150,
+        rph_limit=840,
     ),
     "channels.GetFullChannel": ResourceOpDefinition(
         code="channels.GetFullChannel",
         name="Полные данные канала",
-        # 1 unit/канал, threshold 80% → effective_rph ≥ 100 → rph_limit 112
-        rph_limit=112,
+        # parser_add_channel: 1 unit/канал @ 20% → 1800/ч; discover: 15 units → 120/ч
+        rph_limit=2500,
     ),
     "channels.JoinChannel": ResourceOpDefinition(
         code="channels.JoinChannel",

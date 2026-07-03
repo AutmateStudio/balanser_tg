@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Безопасный деплой discovery-api на vps-104: git pull + миграции БД + ребилд.
 # Не трогает .env, standalone_discovery/data/, sessions/ (в .gitignore).
+# parser_jobs.json бэкапится явно (часто root:root после контейнера).
 #
 #   bash scripts/safe_deploy_discovery_vps104.sh
 #   bash scripts/safe_deploy_discovery_vps104.sh --skip-pull
@@ -9,6 +10,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SD="${ROOT}/standalone_discovery"
+PARSER_JOBS="${SD}/data/parser_jobs.json"
 BACKUP="${HOME}/lidogen-deploy-backup-$(date +%Y%m%d-%H%M%S)"
 SKIP_PULL=false
 SKIP_MIGRATE=false
@@ -31,10 +33,105 @@ echo "Лог деплоя: $LOG"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-copy_if_exists() {
+file_size() {
+  local path="$1"
+  if stat -c%s "$path" >/dev/null 2>&1; then
+    stat -c%s "$path"
+  else
+    stat -f%z "$path"
+  fi
+}
+
+path_exists() {
+  local path="$1"
+  [ -e "$path" ] || sudo test -e "$path"
+}
+
+fix_data_permissions() {
+  echo "=== Права на data/sessions ==="
+  if ! command -v sudo >/dev/null 2>&1; then
+    die "нужен sudo: data/sessions часто root:root после discovery-api"
+  fi
+  sudo mkdir -p "${SD}/data" "${SD}/sessions"
+  sudo chown -R "$(whoami):$(whoami)" "${SD}/data" "${SD}/sessions"
+  sudo chmod -R u+rwX "${SD}/data" "${SD}/sessions"
+}
+
+verify_parser_jobs() {
+  local path="$1"
+  local label="${2:-parser_jobs.json}"
+  [ -f "$path" ] || die "${label} не найден: ${path}"
+  local size
+  size="$(file_size "$path")"
+  [ "$size" -gt 0 ] || die "${label} пуст (${size} bytes): ${path}"
+  python3 -m json.tool "$path" >/dev/null \
+    || die "${label} невалидный JSON: ${path}"
+  echo "OK: ${label} — ${size} bytes"
+}
+
+copy_path() {
   local src="$1" dst="$2"
-  if [ -e "$src" ]; then
-    cp -a "$src" "$dst"
+  if cp -a "$src" "$dst" 2>/dev/null; then
+    return 0
+  fi
+  sudo cp -a "$src" "$dst"
+  if [ -d "$dst" ]; then
+    sudo chown -R "$(whoami):$(whoami)" "$dst"
+  else
+    sudo chown "$(whoami):$(whoami)" "$dst"
+  fi
+}
+
+backup_parser_jobs() {
+  local dst="${BACKUP}/data/parser_jobs.json"
+  mkdir -p "${BACKUP}/data"
+  if ! path_exists "$PARSER_JOBS"; then
+    echo "WARN: parser_jobs.json отсутствует — первый деплой или clump ещё не создавали"
+    return 0
+  fi
+  copy_path "$PARSER_JOBS" "$dst"
+  verify_parser_jobs "$dst" "бэкап parser_jobs.json"
+}
+
+backup_critical_data() {
+  echo "=== Бэкап не-git данных ==="
+  mkdir -p "$BACKUP"
+  if [ -f "${SD}/.env" ]; then
+    cp -a "${SD}/.env" "${BACKUP}/.env"
+  fi
+  backup_parser_jobs
+  if path_exists "${SD}/data"; then
+    copy_path "${SD}/data" "${BACKUP}/data"
+    if path_exists "${BACKUP}/data/parser_jobs.json"; then
+      verify_parser_jobs "${BACKUP}/data/parser_jobs.json" "data/ в бэкапе"
+    fi
+  fi
+  if path_exists "${SD}/sessions"; then
+    copy_path "${SD}/sessions" "${BACKUP}/sessions"
+  fi
+  echo "Бэкап: ${BACKUP}"
+}
+
+restore_parser_jobs_if_needed() {
+  local src="${BACKUP}/data/parser_jobs.json"
+  if [ ! -f "$src" ]; then
+    return 0
+  fi
+  mkdir -p "${SD}/data"
+  local need=false
+  if [ ! -f "$PARSER_JOBS" ]; then
+    need=true
+  elif [ ! -s "$PARSER_JOBS" ]; then
+    need=true
+  elif ! python3 -m json.tool "$PARSER_JOBS" >/dev/null 2>&1; then
+    need=true
+  fi
+  if [ "$need" = true ]; then
+    echo "WARN: восстанавливаем parser_jobs.json из бэкапа деплоя"
+    copy_path "$src" "$PARSER_JOBS"
+  fi
+  if path_exists "$PARSER_JOBS"; then
+    verify_parser_jobs "$PARSER_JOBS" "parser_jobs.json на хосте"
   fi
 }
 
@@ -53,29 +150,24 @@ set_env_line() {
 echo "=== 1. Останов discovery (PG-очередь сохраняется) ==="
 (cd "$SD" && docker compose stop discovery-api) 2>/dev/null || true
 
-echo "=== 2. Права на data/sessions (ДО бэкапа — иначе Permission denied) ==="
-if command -v sudo >/dev/null 2>&1; then
-  sudo chown -R "$(whoami):$(whoami)" "${SD}/data" "${SD}/sessions" 2>/dev/null || true
-fi
-
-echo "=== 3. Бэкап не-git данных ==="
-mkdir -p "$BACKUP"
-copy_if_exists "${SD}/.env" "${BACKUP}/.env"
-copy_if_exists "${SD}/data" "${BACKUP}/data"
-copy_if_exists "${SD}/sessions" "${BACKUP}/sessions"
-echo "Бэкап: ${BACKUP}"
+fix_data_permissions
+backup_critical_data
 
 if [ "$SKIP_PULL" = false ]; then
   echo "=== 4. git pull ==="
   cd "$ROOT"
   git fetch origin
   git checkout main
-  git pull origin main
+  git pull origin main --ff-only
 else
   echo "=== 4. git pull пропущен (--skip-pull) ==="
 fi
 
-copy_if_exists "${BACKUP}/.env" "${SD}/.env"
+if [ -f "${BACKUP}/.env" ]; then
+  cp -a "${BACKUP}/.env" "${SD}/.env"
+fi
+
+restore_parser_jobs_if_needed
 
 echo "=== 5. Флаги .env ==="
 ENV="${SD}/.env"
@@ -112,8 +204,22 @@ cd "$SD"
 docker compose up -d --force-recreate discovery-api
 sleep 10
 
+fix_data_permissions
+restore_parser_jobs_if_needed
+
 echo "=== 8. Проверка ==="
 bash "${ROOT}/scripts/verify_discovery_vps104.sh" || die "verify не прошёл"
+
+if path_exists "$PARSER_JOBS"; then
+  docker exec standalone-discovery-api python3 -c "
+import json, os
+p='/app/discovery_api/data/parser_jobs.json'
+if not os.path.isfile(p):
+    raise SystemExit('parser_jobs.json отсутствует в контейнере')
+n=len(json.load(open(p, encoding='utf-8')))
+print(f'контейнер parser_jobs.json: {os.path.getsize(p)} bytes, records={n}')
+" || die "parser_jobs.json в контейнере недоступен или битый"
+fi
 
 echo ""
 echo "OK: деплой завершён"
