@@ -286,6 +286,22 @@ class AccountFullSummary(AccountQueueOverlayFields):
     connected: bool = False
     running: bool = False
     channel_count: int = 0
+    telegram_channel_count: Optional[int] = Field(
+        default=None,
+        description="Сколько каналов/супергрупп аккаунт реально слушает в Telegram (iter_dialogs), из лимита MAX_CHANNELS_PER_SESSION",
+    )
+    required_channel_total: Optional[int] = Field(
+        default=None,
+        description="Сколько каналов уже требует пул этого парсера (SessionClump)",
+    )
+    required_channel_present: Optional[int] = Field(
+        default=None,
+        description="Сколько из требуемых каналов уже есть на этом аккаунте в Telegram",
+    )
+    membership_check_error: Optional[str] = Field(
+        default=None,
+        description="Ошибка проверки членства (iter_dialogs), если проверка не удалась",
+    )
 
 
 class AccountAllListResponse(BaseModel):
@@ -952,11 +968,17 @@ async def parser_account_reactivate(session_name: str) -> AccountFullSummary:
             )
         raise HTTPException(status_code=409, detail=err)
     await notify_session_reauthorized(norm)
+
+    from discovery_api.session_dialogs import scan_account_channel_membership
+    from discovery_api.session_registry import find_clump_for_session
+
+    membership = await scan_account_channel_membership(norm, find_clump_for_session(norm))
+
     rows = list_all_accounts_merged(_jobs)
     row = next((r for r in rows if r["session_name"] == norm), None)
     if row is None:
         raise HTTPException(status_code=404, detail="Аккаунт не найден")
-    return AccountFullSummary(**row)
+    return AccountFullSummary(**{**row, **membership.to_dict()})
 
 
 @parser_router.patch("/accounts/{session_name:path}", response_model=AccountFullSummary)
@@ -1015,11 +1037,16 @@ async def parser_enroll_session(
     await job.clump.add_session(norm)
     await job.clump.start()
     _persist_clump_state(parser_id, job.clump)
+
+    from discovery_api.session_dialogs import scan_account_channel_membership
+
+    membership = await scan_account_channel_membership(norm, job.clump)
+
     rows = list_all_accounts_merged(_jobs)
     row = next((r for r in rows if r["session_name"] == norm), None)
     if row is None:
         raise HTTPException(status_code=500, detail="Не удалось зарегистрировать аккаунт")
-    return AccountFullSummary(**row)
+    return AccountFullSummary(**{**row, **membership.to_dict()})
 
 
 @parser_router.get("/actions", response_model=ActionListResponse)

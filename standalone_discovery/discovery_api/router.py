@@ -57,6 +57,10 @@ class QRStatusResponse(BaseModel):
     session_string: Optional[str] = None
     session_file: Optional[str] = None
     session_file_error: Optional[str] = None
+    telegram_channel_count: Optional[int] = None
+    required_channel_total: Optional[int] = None
+    required_channel_present: Optional[int] = None
+    membership_check_error: Optional[str] = None
 
 
 class DiscoveryRequest(BaseModel):
@@ -360,6 +364,10 @@ async def auth_qr_status(session_id: str):
         response.session_string = session.result.get("session_string")
         response.session_file = session.result.get("session_file")
         response.session_file_error = session.result.get("session_file_error")
+        response.telegram_channel_count = session.result.get("telegram_channel_count")
+        response.required_channel_total = session.result.get("required_channel_total")
+        response.required_channel_present = session.result.get("required_channel_present")
+        response.membership_check_error = session.result.get("membership_check_error")
     return response
 
 
