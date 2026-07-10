@@ -31,6 +31,7 @@ OP_LEAVE = "channels.LeaveChannel"
 
 DEFAULT_RECENT_POSTS_LIMIT = 50
 DEFAULT_MEMBERS_SAMPLE_LIMIT = 100
+MAX_POST_TEXT_LEN = 4096
 _POSTS_LIMIT_ENV = "COLLECT_RECENT_POSTS_LIMIT"
 _MEMBERS_LIMIT_ENV = "COLLECT_MEMBERS_SAMPLE_LIMIT"
 
@@ -98,6 +99,14 @@ def _is_megagroup(entity: Any) -> bool:
     return bool(getattr(entity, "megagroup", False))
 
 
+def _extract_post_text(msg: Any) -> str | None:
+    """Текст поста из Telethon message (caption для медиа тоже в message)."""
+    raw_text = getattr(msg, "message", None)
+    if not isinstance(raw_text, str) or not raw_text:
+        return None
+    return raw_text[:MAX_POST_TEXT_LEN]
+
+
 async def _op_get_entity(client: Any, ref: str, ctx: CollectContext) -> None:
     ctx.entity = await client.get_entity(ref)
 
@@ -133,7 +142,9 @@ async def _op_iter_messages(client: Any, ref: str, ctx: CollectContext) -> None:
         forwards = getattr(msg, "forwards", None)
         posts.append(
             {
+                "id": getattr(msg, "id", None),
                 "date_ts": ts,
+                "text": _extract_post_text(msg),
                 "views": int(views) if views is not None else None,
                 "forwards": int(forwards) if forwards is not None else None,
                 "reactions_total": _msg_reactions_total(msg),

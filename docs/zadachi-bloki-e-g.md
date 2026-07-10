@@ -248,8 +248,8 @@
 | F7 | Adapter: `update_channel` | 5 | 1 | F5, D3 | Нет | ✅ |
 | F8 | Cron / docker schedule | 3 | 1 | F2, F4, F5 | Нет | ✅ |
 
-> **Rollout seed (A9):** `update_channel` — `is_enabled=true` (воркер обрабатывает в prod).  
-> `collect_extra_data` — `is_enabled=false`: продюсер F4 и adapter F6 готовы и покрыты тестами; включение типа в prod — отдельный ops-шаг (A9 seed / staging).
+> **Rollout seed (A9/A18):** `update_channel` и `collect_extra_data` — `is_enabled=true` в seed;
+> на уже развёрнутых инстансах collect включается миграцией A18.
 
 ### Покрытие тестами (блок F)
 
@@ -572,7 +572,7 @@
 ☑ Scheduler + compose profile producers (F8)
 ☑ Adapter-ветки collect/update (F6, F7); update_channel is_enabled=true в A9 seed
 ☑ F3: idle-rebalance off при USE_PG_QUEUE=true — runbook + test_clump_balancer
-☐ collect_extra_data is_enabled в prod — ops-шаг при staging (seed A9)
+☑ collect_extra_data is_enabled в prod — A9 seed + миграция A18
 ```
 
 ---

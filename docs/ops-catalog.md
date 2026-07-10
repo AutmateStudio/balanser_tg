@@ -104,9 +104,9 @@ GetFull effective=100 — до ~80 GetFull/ч (~80 кан/ч), пока не у�
 
 ## Примечания
 
-- `update_channel` включён в seed (`is_enabled=true`) — adapter-ветка F7 реализована
-  (`_execute_update_channel`). `collect_extra_data` остаётся `is_enabled=false` до
-  включения в рамках F6.
+- `update_channel` и `collect_extra_data` включены в seed (`is_enabled=true`) — adapter-ветки F6/F7 реализованы
+  (`_execute_collect_extra_data`, `_execute_update_channel`). Включение `collect_extra_data` на уже
+  развёрнутых инстансах — миграция `DB/A18_enable_collect_extra_data.sql`.
 - После любого изменения seed или каталога запустите `make verify-ops-catalog`
   (или `python scripts/verify_ops_catalog_seed.py --db` для сверки с PostgreSQL).
 - Per-op RPH с точки зрения оператора см. в [`docs/queue-runbook.md`](queue-runbook.md).
