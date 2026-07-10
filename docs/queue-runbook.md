@@ -37,8 +37,10 @@
 | Код | Причина | Действие worker | Что делать оператору |
 |-----|---------|-----------------|----------------------|
 | `invalid_payload` | Невалидный payload задачи | failed | Исправить payload / пересоздать задачу |
+| `username_not_found` | Telethon `No user has "X" as username` — юзернейм не занят (удалён/сменён), `ResolveUsernameRequest` стабильно вернёт то же | failed | Не пытаться повторно этот канал; удалить/актуализировать ссылку в источнике |
 | `account_not_found` | Аккаунт отсутствует в PG | failed | Синхронизировать аккаунты |
 | `unsupported_task_type` | Adapter не поддерживает тип | failed | Дождаться реализации adapter-ветки |
+| `account_unauthorized` | Сессия аккаунта не авторизована в Telegram | failed + sync health | Переавторизовать аккаунт (сессия/2FA) |
 
 ### Postpone (отложить без расхода attempt)
 

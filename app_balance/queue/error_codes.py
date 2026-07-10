@@ -28,6 +28,7 @@ class ErrorCode(StrEnum):
     ACCOUNT_NOT_FOUND = "account_not_found"
     UNSUPPORTED_TASK_TYPE = "unsupported_task_type"
     UNKNOWN_TASK_TYPE = "unknown_task_type"
+    USERNAME_NOT_FOUND = "username_not_found"
 
     # --- resource / postpone ---
     INSUFFICIENT_RESOURCE = "insufficient_resource"

@@ -375,7 +375,7 @@ curl -sS "$BASE/discovery-api/parser/PARSER_ID/channels" -H "X-API-Key: $KEY"
 | `assignments` | object | канал→сессия (sync) |
 | `action_id` | string\|null | id задачи (async) |
 | `task_ids` | array<int> | id задач PG-очереди (async + PG); для каналов, уже активных (queued/scheduled/retry/in_progress), возвращается id существующей задачи — дубль не создаётся |
-| `skipped_fatal` | object<string, string> | B12: канал → код ошибки; задача НЕ поставлена, т.к. прошлая попытка для этого dedup_key уже terminal failed с постоянной причиной (`banned`, `channel_private`, `invalid_payload`, `account_not_found`, `unsupported_task_type`, `unknown_task_type`, `account_unauthorized`, `fatal`). Повтор — `?force_retry=1` |
+| `skipped_fatal` | object<string, string> | B12: канал → код ошибки; задача НЕ поставлена, т.к. прошлая попытка для этого dedup_key уже terminal failed с постоянной причиной (`banned`, `channel_private`, `invalid_payload`, `account_not_found`, `unsupported_task_type`, `unknown_task_type`, `account_unauthorized`, `username_not_found`, `fatal`). Повтор — `?force_retry=1` |
 | `async_mode` | bool | режим обработки |
 
 **Ошибки:** `404` (нет clump), `409` (clump остановлен / квота).

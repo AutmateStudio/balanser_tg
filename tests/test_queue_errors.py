@@ -66,6 +66,13 @@ def test_map_clump_error_no_discussion_is_permanent() -> None:
     assert mapped.code == "channel_private"
 
 
+def test_map_clump_error_username_not_found_is_permanent() -> None:
+    msg = 'No user has "grtetlidog" as username'
+    mapped = map_clump_error_message(msg)
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "username_not_found"
+
+
 def test_map_clump_error_join_pending_retries_in_30_min() -> None:
     msg = (
         "Нет доступа к чату для прослушивания «Chat» "

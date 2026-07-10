@@ -150,6 +150,12 @@ def map_clump_error_message(err: str) -> QueueTaskError:
     if "нет чата обсуждений" in lowered:
         return PermanentError(ErrorCode.CHANNEL_PRIVATE, text)
 
+    # Telethon utils.get_entity: username не занят никем (удалён/сменён) —
+    # ResolveUsernameRequest стабильно вернёт то же самое, retry не поможет.
+    # См. telethon/client/users.py: 'No user has "{}" as username'.
+    if "no user has" in lowered and "as username" in lowered:
+        return PermanentError(ErrorCode.USERNAME_NOT_FOUND, text)
+
     join_pending_markers = (
         "не участник",
         "нет доступа к чату",
