@@ -7,6 +7,8 @@ import pytest
 
 from app_balance.queue.collect_pipeline import (
     CollectContext,
+    MAX_POST_TEXT_LEN,
+    _extract_post_text,
     build_collect_op_executor,
     build_signals,
 )
@@ -58,7 +60,15 @@ def _collect_task_type() -> TaskType:
 
 
 class _FakeMessage:
-    def __init__(self, views: int) -> None:
+    def __init__(
+        self,
+        views: int,
+        *,
+        msg_id: int | None = None,
+        message: str | None = None,
+    ) -> None:
+        self.id = msg_id
+        self.message = message
         self.views = views
         self.forwards = 1
         self.date = None
@@ -96,7 +106,10 @@ class _FakeClient:
         self.requests: list[str] = []
         self.get_entity_calls = 0
         self.participants_calls = 0
-        self._messages = [_FakeMessage(10), _FakeMessage(20)]
+        self._messages = [
+            _FakeMessage(10, msg_id=101, message="first post text"),
+            _FakeMessage(20, msg_id=102, message="second post text"),
+        ]
         self._participants = [
             _FakeUser(1),
             _FakeUser(2, bot=True),
@@ -175,8 +188,22 @@ async def test_build_signals_summarizes_context() -> None:
     assert extra["participants_count"] == 1234  # из full_chat, не из entity
     assert extra["is_megagroup"] is True
     assert extra["posts_count"] == 2
+    assert extra["posts"][0]["id"] == 101
+    assert extra["posts"][0]["text"] == "first post text"
+    assert extra["posts"][1]["id"] == 102
     assert extra["members_sample"] == {"sampled": 3, "bots": 1, "deleted": 1}
     assert "collected_at" in extra
+
+
+def test_extract_post_text_truncates_to_telegram_limit() -> None:
+    long_text = "x" * (MAX_POST_TEXT_LEN + 100)
+    msg = _FakeMessage(1, message=long_text)
+    assert _extract_post_text(msg) == "x" * MAX_POST_TEXT_LEN
+
+
+def test_extract_post_text_empty_returns_none() -> None:
+    msg = _FakeMessage(1, message="")
+    assert _extract_post_text(msg) is None
 
 
 @pytest.mark.asyncio

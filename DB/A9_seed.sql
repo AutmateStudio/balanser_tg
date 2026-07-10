@@ -66,7 +66,7 @@ INSERT INTO task_types (
     'collect_extra_data',
     'Сбор последних сообщений (временный вход)',
     'Join → GetFull (broadcast) → iter_messages → GetParticipants (megagroup) → Leave. Не оставляет канал в listener. Продюсер F4.',
-    false, 200, 20, false, 20
+    true, 200, 20, false, 20
   ),
   (
     'update_channel',

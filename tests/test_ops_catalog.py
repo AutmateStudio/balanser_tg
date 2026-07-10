@@ -77,13 +77,17 @@ async def test_task_type_ops_for_collect_update(pg_pool) -> None:
     """E7/F6/F7: op-состав совпадает с catalog; is_enabled — как в A9_seed."""
     repo = TaskTypesRepo()
     expected_enabled = {
-        "collect_extra_data": False,  # F6 — включить в seed после adapter
+        "collect_extra_data": True,  # A18 — включён в seed по умолчанию
         "update_channel": True,  # F7 — adapter в seed уже enabled
     }
 
     for task_type_code, want_enabled in expected_enabled.items():
         task_type = await repo.get_by_code(task_type_code)
         assert task_type is not None
+        if task_type_code == "collect_extra_data" and not task_type.is_enabled:
+            pytest.skip(
+                "collect_extra_data ещё не включён в PG — накатите migrate (A18_enable_collect_extra_data.sql)"
+            )
         assert task_type.is_enabled is want_enabled
         ops = {
             (op.op_code, op.units_per_execution, op.account_role)

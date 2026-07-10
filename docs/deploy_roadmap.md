@@ -290,14 +290,10 @@ QUEUE_DATABASE_URL=postgresql://app_balancer:***@100.105.75.79:5432/lead_monitor
   docker compose run --rm test python scripts/preflight_test_db.py
   ```
 
-  Ожидание: `monitoring_views=11/11`, `task_types=5`
+  Ожидание: `monitoring_views=11/11`, `task_types=6`
 
-- [ ] **Включить `collect_extra_data` в prod** (seed: `is_enabled = false`):
-
-  ```sql
-  UPDATE task_types SET is_enabled = true, updated_at = now()
-  WHERE code = 'collect_extra_data';
-  ```
+- [x] **Включить `collect_extra_data` в prod** — seed A9 + миграция `DB/A18_enable_collect_extra_data.sql`
+  (при `docker compose run --rm migrate` накатывается автоматически).
 
 - [ ] Сверка op-каталога:
 

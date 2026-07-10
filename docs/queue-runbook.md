@@ -212,6 +212,8 @@ docker compose --profile producers up -d producer-collect producer-update produc
   только для megagroup. `LeaveChannel` — последний op (канал не остаётся в listener).
 - Результат: сигналы пишутся в `source_channels.metadata` (jsonb merge, ключ `extra_data`),
   `extra_data_collected` выставляется в `true`.
+- Каждый элемент `extra_data.posts[]`: `id`, `date_ts`, `text` (до 4096 символов, Telethon `message`),
+  `views`, `forwards`, `reactions_total`, `replies`. Посты без текста (только медиа без caption) — `text: null`.
 - Лимиты сбора: env `COLLECT_RECENT_POSTS_LIMIT` (дефолт 50), `COLLECT_MEMBERS_SAMPLE_LIMIT` (дефолт 100).
 - Идемпотентность (E6): per-op пайплайн пропускает уже выполненные шаги по
   `payload.last_completed_step`; ресурс списывается только за оставшиеся op.
@@ -240,6 +242,7 @@ iter_messages -> GetParticipants -> LeaveChannel` (`collect_pipeline.py`).
   `source_channels.metadata` (jsonb, ключ `extra_data`), обновляется
   `last_updated_at = now()` и синхронизируется колонка `name`. Флаг
   `extra_data_collected` **не** трогается (это зона F6).
+- Формат `extra_data.posts[]` — тот же, что у F6: `id`, `date_ts`, `text`, метрики вовлечённости.
 - Идемпотентность (E6) и развязка учёта ресурса — общие с F6 (см. выше):
   `update_channel` входит в `MULTI_OP_TASK_TYPES`, поэтому dispatch не вызывает
   `record_for_task` — учёт пошаговый через `record_op`.

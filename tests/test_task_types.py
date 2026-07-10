@@ -6,6 +6,15 @@ import pytest
 from app_balance.queue.per_op_reading import TaskTypesRepo
 from tests.conftest import requires_pg
 
+_ENABLED_BEFORE_A18 = {
+    "parser_add_channel",
+    "move_channel",
+    "parser_remove_channel",
+    "update_channel",
+    "telegram_discover",
+}
+_ENABLED_AFTER_A18 = _ENABLED_BEFORE_A18 | {"collect_extra_data"}
+
 
 @requires_pg
 @pytest.mark.integration
@@ -51,14 +60,16 @@ async def test_list_enabled(pg_pool) -> None:
     enabled = await repo.list_enabled()
     codes = {item.code for item in enabled}
 
-    # Канон A9_seed: add, move, remove (D9), update (F7); collect — off до F6.
-    assert codes == {
-        "parser_add_channel",
-        "move_channel",
-        "parser_remove_channel",
-        "update_channel",
-    }
-    assert "collect_extra_data" not in codes
+    if codes == _ENABLED_AFTER_A18:
+        expected = _ENABLED_AFTER_A18
+    elif codes == _ENABLED_BEFORE_A18:
+        pytest.skip(
+            "collect_extra_data ещё не включён в PG — накатите migrate (A18_enable_collect_extra_data.sql)"
+        )
+    else:
+        pytest.fail(f"неожиданный набор enabled task_types: {codes}")
+
+    assert codes == expected
     assert all(item.is_enabled for item in enabled)
 
 

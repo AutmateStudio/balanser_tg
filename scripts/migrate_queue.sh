@@ -126,7 +126,8 @@ for mig in \
   A14_parser_add_channel_rph_20_per_hour.sql \
   A15_parser_add_channel_threshold_20.sql \
   A16_min_available_resource_percent_uniform.sql \
-  A17_telegram_discover_rph_120_per_hour.sql
+  A17_telegram_discover_rph_120_per_hour.sql \
+  A18_enable_collect_extra_data.sql
 do
   MIG_FILE="$DB_DIR/$mig"
   [[ -f "$MIG_FILE" ]] || die "Файл миграции не найден: $MIG_FILE"
@@ -142,7 +143,8 @@ for mig in \
   A14_parser_add_channel_rph_20_per_hour.sql \
   A15_parser_add_channel_threshold_20.sql \
   A16_min_available_resource_percent_uniform.sql \
-  A17_telegram_discover_rph_120_per_hour.sql
+  A17_telegram_discover_rph_120_per_hour.sql \
+  A18_enable_collect_extra_data.sql
 do
   apply_once "$DB_DIR/$mig"
 done
