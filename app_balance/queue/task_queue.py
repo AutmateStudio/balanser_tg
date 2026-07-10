@@ -48,6 +48,7 @@ FATAL_ERROR_CODES = frozenset(
         ErrorCode.CHANNEL_PRIVATE,
         ErrorCode.BANNED,
         ErrorCode.ACCOUNT_UNAUTHORIZED,
+        ErrorCode.USERNAME_NOT_FOUND,
         "fatal",  # app_balance.queue.errors.FATAL — fallback map_telethon_exception
     }
 )
