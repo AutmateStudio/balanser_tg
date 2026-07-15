@@ -337,7 +337,11 @@ class AccountEndpointTests(unittest.TestCase):
         upsert_account("Client1", display_name="C1")
         self.assertTrue(session_file_exists("Client1"))
 
-        resp = self.client.delete("/discovery-api/parser/accounts/Client1")
+        with patch(
+            "discovery_api.parser_router._sync_accounts_pg",
+            new_callable=AsyncMock,
+        ):
+            resp = self.client.delete("/discovery-api/parser/accounts/Client1")
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["deleted"])
         self.assertFalse(session_file_exists("Client1"))
@@ -357,6 +361,10 @@ class AccountEndpointTests(unittest.TestCase):
                 "discovery_api.session_dialogs.scan_account_channel_membership",
                 new_callable=AsyncMock,
                 return_value=AccountMembershipSnapshot(3, 5, 2),
+            ),
+            patch(
+                "discovery_api.parser_router._sync_accounts_pg",
+                new_callable=AsyncMock,
             ),
         ):
             resp = self.client.post(

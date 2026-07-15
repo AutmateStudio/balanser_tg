@@ -540,6 +540,14 @@ async def _health_check_once() -> None:
                 continue
             client = _clients.get(_canonical_key(pc.session_name))
             if client is None:
+                # STARTING без клиента (enroll без каналов / после рестарта) —
+                # пробуем подключить, иначе сессия навсегда «невидима» для health.
+                if reauth_enabled and health.should_attempt_reauth(
+                    reauth_interval, allow_starting=True
+                ):
+                    reauth_checked += 1
+                    if await _attempt_session_reauth(pc):
+                        reauth_recovered += 1
                 continue
             try:
                 connected = bool(client.is_connected())
