@@ -207,13 +207,27 @@ class SessionHealth:
             self.last_error_at = None
         return True
 
-    def should_attempt_reauth(self, min_interval_seconds: float) -> bool:
-        """Account-auth watchdog: пора ли повторить проверку авторизации ERROR-сессии.
+    def should_attempt_reauth(
+        self,
+        min_interval_seconds: float,
+        *,
+        allow_starting: bool = False,
+    ) -> bool:
+        """Account-auth watchdog: пора ли повторить проверку авторизации.
 
-        Только для unauthorized (status=ERROR, не banned) — на бан/ревок
-        сессии повторная попытка бессмысленна, нужен новый .session-файл.
+        По умолчанию только unauthorized (status=ERROR, не banned) — на бан/ревок
+        повторная попытка бессмысленна, нужен новый .session-файл.
+
+        ``allow_starting=True`` — также для STARTING без Telethon-клиента
+        (зачисленная сессия без каналов / после рестарта до первого listener).
         """
-        if self.banned or self.status != SessionStatus.ERROR:
+        if self.banned:
+            return False
+        if self.status == SessionStatus.ERROR:
+            pass
+        elif allow_starting and self.status == SessionStatus.STARTING:
+            pass
+        else:
             return False
         if self.last_reauth_attempt_at is None:
             return True

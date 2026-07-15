@@ -111,7 +111,8 @@ class ParserStartRequest(BaseModel):
         None, description="Имя clump для логов (не id в URL)"
     )
     channel_list: list[str] = Field(
-        ..., min_length=1, description="@username каналов/чатов или числовые id"
+        default_factory=list,
+        description="@username каналов/чатов или числовые id (может быть пустым)",
     )
     webhook_url: HttpUrl = Field(..., description="URL для JSON POST при новом сообщении")
 
@@ -478,6 +479,13 @@ def _persist_clump_state(parser_id: str, clump: SessionClump) -> None:
     persist_upsert_job(clump_to_record(clump, parser_id=parser_id))
 
 
+async def _sync_accounts_pg(context: str) -> None:
+    """Best-effort sync SQLite+disk+clump → PG после изменения состава clump."""
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+
+    await sync_accounts_to_pg_best_effort(context=context)
+
+
 def _require_clump_job(parser_id: str) -> _ClumpJob:
     job = _jobs.get(parser_id)
     if job is None:
@@ -550,7 +558,7 @@ async def parser_start(body: ParserStartRequest) -> ParserStartResponse:
         if sn:
             assignments[str(raw)] = str(sn)
 
-    if errors and not assignments:
+    if body.channel_list and errors and not assignments:
         await remove_clump(parser_id)
         _jobs.pop(parser_id, None)
         raise HTTPException(
@@ -568,8 +576,13 @@ async def parser_start(body: ParserStartRequest) -> ParserStartResponse:
 
     _jobs[parser_id] = _ClumpJob(clump=clump, parser_id=parser_id)
     _persist_clump_state(parser_id, clump)
+    await _sync_accounts_pg(f"parser-start:{parser_id}")
 
-    detail = "Clump запущен, слушатели активны"
+    detail = (
+        "Clump запущен, слушатели активны"
+        if body.channel_list
+        else "Clump создан без каналов (сессии зачислены)"
+    )
     if errors:
         detail += f"; частичные ошибки: {len(errors)}"
 
@@ -1019,6 +1032,7 @@ async def parser_account_delete(
     await release_client(session_name)
     await release_client(norm)
     delete_account_full(norm)
+    await _sync_accounts_pg(f"delete-account:{norm}")
     return {"ok": True, "session_name": norm, "deleted": True}
 
 
@@ -1041,6 +1055,7 @@ async def parser_enroll_session(
     from discovery_api.session_dialogs import scan_account_channel_membership
 
     membership = await scan_account_channel_membership(norm, job.clump)
+    await _sync_accounts_pg(f"enroll:{norm}")
 
     rows = list_all_accounts_merged(_jobs)
     row = next((r for r in rows if r["session_name"] == norm), None)
@@ -1192,6 +1207,7 @@ async def parser_add_session(parser_id: str, body: SessionBody) -> SessionOpResp
     job = _require_running_clump(parser_id)
     await job.clump.add_session(body.session_name)
     _persist_clump_state(parser_id, job.clump)
+    await _sync_accounts_pg(f"add-session:{body.session_name}")
     return SessionOpResponse(
         parser_id=parser_id,
         session_name_list=list(job.clump.session_name_list),
@@ -1209,6 +1225,7 @@ async def parser_remove_session(parser_id: str, body: SessionBody) -> SessionOpR
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     _persist_clump_state(parser_id, job.clump)
+    await _sync_accounts_pg(f"remove-session:{body.session_name}")
     return SessionOpResponse(
         parser_id=parser_id,
         session_name_list=list(job.clump.session_name_list),
@@ -1294,11 +1311,6 @@ async def restore_persisted_parsers() -> None:
         channel_list = rec.get("channel_list")
         if not webhook_url or not isinstance(channel_list, list):
             log.warning("Пропуск некорректной записи парсера: %s", rec)
-            continue
-
-        ch_list = [str(x) for x in channel_list]
-        if not ch_list:
-            log.warning("Пропуск записи без каналов: %s", parser_id)
             continue
 
         try:

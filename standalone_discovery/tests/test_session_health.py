@@ -133,6 +133,19 @@ class AccountAuthWatchdogTests(unittest.TestCase):
         h.mark_connected()
         self.assertFalse(h.should_attempt_reauth(0.0))
 
+    def test_should_attempt_reauth_starting_requires_flag(self) -> None:
+        h = SessionHealth()
+        self.assertEqual(h.status, SessionStatus.STARTING)
+        self.assertFalse(h.should_attempt_reauth(0.0))
+        self.assertTrue(h.should_attempt_reauth(0.0, allow_starting=True))
+
+    def test_should_attempt_reauth_starting_respects_interval(self) -> None:
+        h = SessionHealth()
+        h.record_reauth_attempt()
+        self.assertFalse(h.should_attempt_reauth(300.0, allow_starting=True))
+        h.last_reauth_attempt_at = time.time() - 301.0
+        self.assertTrue(h.should_attempt_reauth(300.0, allow_starting=True))
+
     def test_record_reauth_attempt_increments_counter(self) -> None:
         h = SessionHealth()
         h.mark_unauthorized("не авторизована")
