@@ -202,7 +202,22 @@ docker build -f standalone_discovery/Dockerfile.pg-queue -t standalone-discovery
 
 cd "$SD"
 docker compose up -d --force-recreate discovery-api
-sleep 10
+
+# API за VPN-namespace часто готов позже Docker "Started" (health: starting).
+echo "=== ожидание /health (до ~60с) ==="
+READY=false
+for _ in $(seq 1 12); do
+  code="$(curl -sS --connect-timeout 2 --max-time 5 \
+    -o /dev/null -w '%{http_code}' "http://127.0.0.1:8100/health" 2>/dev/null || true)"
+  code="$(printf '%s' "$code" | tr -d '\r\n')"
+  if [ "$code" = "200" ]; then
+    READY=true
+    echo "health OK"
+    break
+  fi
+  sleep 5
+done
+[ "$READY" = true ] || echo "WARN: /health ещё не 200 — verify попробует ещё раз"
 
 fix_data_permissions
 restore_parser_jobs_if_needed

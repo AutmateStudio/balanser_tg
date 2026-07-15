@@ -21,7 +21,20 @@ API_KEY="$(grep ^API_KEY= "$ENV" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\
 echo "--- PORT=${PORT} ---"
 
 echo "--- health ---"
-HTTP="$(curl -sS -o /tmp/lidogen-health.json -w '%{http_code}' "http://127.0.0.1:${PORT}/health" 2>/dev/null || echo 000)"
+# Не делать `curl || echo 000`: при fail curl уже пишет http_code=000 → получится 000000.
+HTTP="000"
+rm -f /tmp/lidogen-health.json
+for attempt in 1 2 3 4 5 6; do
+  HTTP="$(curl -sS --connect-timeout 2 --max-time 5 \
+    -o /tmp/lidogen-health.json -w '%{http_code}' \
+    "http://127.0.0.1:${PORT}/health" 2>/dev/null || true)"
+  HTTP="$(printf '%s' "$HTTP" | tr -d '\r\n')"
+  if [ "$HTTP" = "200" ]; then
+    break
+  fi
+  echo "попытка ${attempt}/6: HTTP=${HTTP:-000}, ждём 5с…"
+  sleep 5
+done
 cat /tmp/lidogen-health.json 2>/dev/null || true
 echo ""
 echo "HTTP: ${HTTP}"
