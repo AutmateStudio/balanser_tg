@@ -651,19 +651,53 @@ curl -sS "$BASE/discovery-api/parser/queue/tasks/12345" -H "X-API-Key: $KEY"
 
 Агрегированные метрики PG-очереди и аккаунтов (G3). Требует `USE_PG_QUEUE=true`.
 
+Полный гайд (in→out, watchdogs, что нужно оператору): [`balancer-ops-monitoring.md`](balancer-ops-monitoring.md).
+
 **Ответ** (`MetricsResponse`):
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `queue` | object | `total`, `by_status`, `by_type`, `oldest_queued_age_seconds`, `stuck_count`, `done_last_5_min` |
+| `queue` | object | `total`, `by_status`, `by_type`, `oldest_queued_age_seconds`, `stuck_count`, `done_last_5_min`, **`flow`** (in→out) |
+| `queue.flow` | object | `enqueued_last_{5,10}_min`, `done_last_{5,10}_min`, `failed_last_{5,10}_min`, `attempts_last_{5,10}_min`, `pickable_now`, `in_progress` |
 | `accounts` | object | `active`, `in_cooldown`, `without_resource`, `per_op[]`, `worst_by_account[]` |
-| `alerts_preview` | object | `high_postpone_count` |
+| `alerts_preview` | object | `high_postpone_count`, `pickable_starved` |
+| `channels` | object | `active_accounts`, `assigned_channels_total`, `fleet_capacity`, `usage_percent` |
+| `error_rates` | object | `by_task_type[]`, `by_account[]` (за последний час) |
 | `generated_at` | string | ISO-время снимка |
 
 **Ошибки:** `503` (PG-очередь выключена или недоступна).
 
 ```bash
 curl -sS "$BASE/discovery-api/parser/queue/metrics" -H "X-API-Key: $KEY"
+```
+
+### GET /discovery-api/parser/queue/watchdogs
+
+Heartbeat фоновых циклов: `stuck_task_watchdog`, `session_health_monitor`,
+`account_auth_watchdog`, `queue_monitor`. Пишется в PG `monitor_heartbeats` + in-memory.
+
+**Ответ:** `{ generated_at, watchdogs: [{ name, last_tick_at, last_duration_ms, last_result, last_error, interval_seconds, enabled, process, stale }] }`
+
+```bash
+curl -sS "$BASE/discovery-api/parser/queue/watchdogs" -H "X-API-Key: $KEY"
+```
+
+### GET /discovery-api/parser/queue/alerts
+
+On-demand оценка правил G4/G7 (без webhook). Те же условия, что у `queue-monitor`.
+
+**Ответ:** `{ generated_at, alerts: [{ code, severity, message, scope_key }] }`
+
+```bash
+curl -sS "$BASE/discovery-api/parser/queue/alerts" -H "X-API-Key: $KEY"
+```
+
+### GET /discovery-api/parser/queue/resource-adjustments
+
+Аудит G6 (`resource_limit_adjustments`). Query: `limit` (1–200, default 50), `op_code?`, `error_code?`.
+
+```bash
+curl -sS "$BASE/discovery-api/parser/queue/resource-adjustments?limit=20" -H "X-API-Key: $KEY"
 ```
 
 ### GET /discovery-api/parser/queue/task-types
@@ -788,7 +822,10 @@ curl -sS "$BASE/discovery-api/parser/queue/accounts/Test2/summary" -H "X-API-Key
 | GET | `/discovery-api/parser/actions` | Список задач |
 | GET | `/discovery-api/parser/actions/{action_id}` | Задача по id |
 | GET | `/discovery-api/parser/queue/tasks/{task_id}` | Задача PG-очереди |
-| GET | `/discovery-api/parser/queue/metrics` | Метрики очереди (G3) |
+| GET | `/discovery-api/parser/queue/metrics` | Метрики очереди (G3) + flow/channels/error_rates |
+| GET | `/discovery-api/parser/queue/watchdogs` | Heartbeat watchdog |
+| GET | `/discovery-api/parser/queue/alerts` | Активные алерты G4/G7 |
+| GET | `/discovery-api/parser/queue/resource-adjustments` | Аудит G6 RPH |
 | GET | `/discovery-api/parser/queue/task-types` | Типы задач + RPH |
 | GET | `/discovery-api/parser/queue/task-types/{code}` | Деталь типа задачи |
 | PATCH | `/discovery-api/parser/queue/task-types/{code}` | Изменить RPH типа |

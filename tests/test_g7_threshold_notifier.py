@@ -16,7 +16,9 @@ from app_balance.queue.monitoring.metrics_repo import (
     AccountsMetrics,
     AlertsPreview,
     ChannelCapacityMetrics,
+    ErrorRatesMetrics,
     MetricsSnapshot,
+    QueueFlowMetrics,
     QueueMetrics,
 )
 from app_balance.queue.monitoring.notify import AlertNotifier
@@ -64,6 +66,18 @@ def _snapshot(
             oldest_queued_age_seconds=0,
             stuck_count=0,
             done_last_5_min=0,
+            flow=QueueFlowMetrics(
+                enqueued_last_5_min=0,
+                enqueued_last_10_min=0,
+                done_last_5_min=0,
+                done_last_10_min=0,
+                failed_last_5_min=0,
+                failed_last_10_min=0,
+                attempts_last_5_min=0,
+                attempts_last_10_min=0,
+                pickable_now=0,
+                in_progress=0,
+            ),
         ),
         accounts=AccountsMetrics(
             active=active,
@@ -78,6 +92,7 @@ def _snapshot(
             fleet_capacity=fleet_capacity,
             usage_percent=usage_percent,
         ),
+        error_rates=ErrorRatesMetrics(),
         generated_at=datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc),
     )
 

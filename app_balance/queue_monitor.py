@@ -26,6 +26,11 @@ from app_balance.queue.monitoring.metrics_repo import MetricsRepo
 from app_balance.queue.monitoring.notify import AlertNotifier
 from app_balance.queue.monitoring.queue_growth import QueueGrowthTracker
 from app_balance.queue.monitoring.threshold_rules import evaluate_threshold_alerts
+from app_balance.queue.monitoring.watchdog_heartbeat import (
+    WATCHDOG_QUEUE_MONITOR,
+    TickTimer,
+    get_watchdog_registry,
+)
 
 logger = logging.getLogger("queue_monitor")
 
@@ -83,16 +88,33 @@ async def run_combined_tick(
     growth: QueueGrowthTracker,
     notifier: AlertNotifier,
     detector_repo: ErrorDetectorRepo,
+    interval_seconds: float | None = None,
 ) -> int:
+    timer = TickTimer()
+    error: str | None = None
     total = 0
-    if mode in ("alerts", "all"):
-        total += await run_alerts_tick(repo, alert_config, growth, notifier)
-    if mode in ("detector", "all"):
-        total += await run_detector_tick(
-            detector_repo,
-            detector_config,
-            notifier=notifier,
-            alert_config=alert_config,
+    try:
+        if mode in ("alerts", "all"):
+            total += await run_alerts_tick(repo, alert_config, growth, notifier)
+        if mode in ("detector", "all"):
+            total += await run_detector_tick(
+                detector_repo,
+                detector_config,
+                notifier=notifier,
+                alert_config=alert_config,
+            )
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+        raise
+    finally:
+        await get_watchdog_registry().record_tick(
+            WATCHDOG_QUEUE_MONITOR,
+            duration_ms=timer.duration_ms(),
+            result={"mode": mode, "emitted_or_actions": total},
+            error=error,
+            interval_seconds=interval_seconds,
+            enabled=True,
+            process="queue-monitor",
         )
     return total
 
@@ -112,6 +134,12 @@ async def run_loop(
     growth = QueueGrowthTracker(window_seconds=alerts_cfg.queue_growth_window_seconds)
     notifier = AlertNotifier(alerts_cfg)
     detector_repo = ErrorDetectorRepo()
+    get_watchdog_registry().configure(
+        WATCHDOG_QUEUE_MONITOR,
+        interval_seconds=interval_seconds,
+        enabled=True,
+        process="queue-monitor",
+    )
 
     while not stop.is_set():
         await run_combined_tick(
@@ -122,6 +150,7 @@ async def run_loop(
             growth=growth,
             notifier=notifier,
             detector_repo=detector_repo,
+            interval_seconds=interval_seconds,
         )
         if once:
             return

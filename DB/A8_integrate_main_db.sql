@@ -319,6 +319,25 @@ SELECT
   count(*) FILTER (WHERE "status" = 'failed')      AS "failed_tasks_count",
   count(*) FILTER (WHERE "status" IN ('scheduled', 'retry') AND "postpone_count" > 0) AS "postponed_tasks_count",
   count(*) FILTER (WHERE "status" = 'done' AND "finished_at" >= now() - interval '5 minutes') AS "done_tasks_last_5_min",
+  count(*) FILTER (WHERE "status" = 'done' AND "finished_at" >= now() - interval '10 minutes') AS "done_tasks_last_10_min",
+  count(*) FILTER (WHERE "status" = 'failed' AND "finished_at" >= now() - interval '5 minutes') AS "failed_tasks_last_5_min",
+  count(*) FILTER (WHERE "status" = 'failed' AND "finished_at" >= now() - interval '10 minutes') AS "failed_tasks_last_10_min",
+  count(*) FILTER (WHERE "created_at" >= now() - interval '5 minutes') AS "enqueued_last_5_min",
+  count(*) FILTER (WHERE "created_at" >= now() - interval '10 minutes') AS "enqueued_last_10_min",
+  count(*) FILTER (
+    WHERE "status" IN ('queued', 'scheduled', 'retry')
+      AND "run_after" <= now()
+  ) AS "pickable_now",
+  COALESCE(
+    (SELECT count(*)::bigint FROM "task_attempts"
+     WHERE "started_at" >= now() - interval '5 minutes'),
+    0
+  ) AS "attempts_last_5_min",
+  COALESCE(
+    (SELECT count(*)::bigint FROM "task_attempts"
+     WHERE "started_at" >= now() - interval '10 minutes'),
+    0
+  ) AS "attempts_last_10_min",
   COALESCE(
     EXTRACT(EPOCH FROM (now() - min("created_at") FILTER (WHERE "status" IN ('queued', 'scheduled'))))::bigint,
     0

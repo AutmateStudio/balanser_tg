@@ -85,12 +85,20 @@ async def test_fetch_snapshot_structure(g3_clean) -> None:
     assert "queue" in data
     assert "accounts" in data
     assert "alerts_preview" in data
+    assert "channels" in data
+    assert "error_rates" in data
     assert "generated_at" in data
     assert data["queue"]["total"] >= 0
+    assert "flow" in data["queue"]
+    assert "pickable_now" in data["queue"]["flow"]
+    assert "enqueued_last_5_min" in data["queue"]["flow"]
+    assert "pickable_starved" in data["alerts_preview"]
     assert isinstance(data["queue"]["by_status"], dict)
     assert isinstance(data["queue"]["by_type"], dict)
     assert isinstance(data["accounts"]["per_op"], list)
     assert isinstance(data["accounts"]["worst_by_account"], list)
+    assert isinstance(data["error_rates"]["by_task_type"], list)
+    assert isinstance(data["error_rates"]["by_account"], list)
 
 
 @pytest.mark.asyncio

@@ -17,8 +17,11 @@ def _sample_metrics_response():
     from discovery_api.queue.metrics import (
         AccountsMetricsResponse,
         AlertsPreviewResponse,
+        ChannelsMetricsResponse,
+        ErrorRatesResponse,
         MetricsResponse,
         PerOpUsageResponse,
+        QueueFlowResponse,
         QueueMetricsResponse,
         AccountResourceResponse,
     )
@@ -31,6 +34,18 @@ def _sample_metrics_response():
             oldest_queued_age_seconds=120,
             stuck_count=0,
             done_last_5_min=10,
+            flow=QueueFlowResponse(
+                enqueued_last_5_min=3,
+                enqueued_last_10_min=8,
+                done_last_5_min=10,
+                done_last_10_min=18,
+                failed_last_5_min=0,
+                failed_last_10_min=1,
+                attempts_last_5_min=12,
+                attempts_last_10_min=20,
+                pickable_now=10,
+                in_progress=2,
+            ),
         ),
         accounts=AccountsMetricsResponse(
             active=5,
@@ -60,7 +75,17 @@ def _sample_metrics_response():
                 )
             ],
         ),
-        alerts_preview=AlertsPreviewResponse(high_postpone_count=3),
+        alerts_preview=AlertsPreviewResponse(
+            high_postpone_count=3,
+            pickable_starved=False,
+        ),
+        channels=ChannelsMetricsResponse(
+            active_accounts=5,
+            assigned_channels_total=100,
+            fleet_capacity=2500,
+            usage_percent=4.0,
+        ),
+        error_rates=ErrorRatesResponse(),
         generated_at=datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc).isoformat(),
     )
 
@@ -85,11 +110,17 @@ class PgQueueMetricsApiTests(unittest.TestCase):
         self.assertIn("queue", body)
         self.assertIn("accounts", body)
         self.assertIn("alerts_preview", body)
+        self.assertIn("channels", body)
+        self.assertIn("error_rates", body)
         self.assertIn("generated_at", body)
         self.assertEqual(body["queue"]["total"], 42)
         self.assertEqual(body["queue"]["oldest_queued_age_seconds"], 120)
+        self.assertEqual(body["queue"]["flow"]["pickable_now"], 10)
+        self.assertEqual(body["queue"]["flow"]["done_last_10_min"], 18)
         self.assertEqual(body["accounts"]["active"], 5)
         self.assertEqual(body["alerts_preview"]["high_postpone_count"], 3)
+        self.assertFalse(body["alerts_preview"]["pickable_starved"])
+        self.assertEqual(body["channels"]["fleet_capacity"], 2500)
         mock_get.assert_awaited_once()
 
     @patch("discovery_api.parser_router.get_queue_metrics", new_callable=AsyncMock)

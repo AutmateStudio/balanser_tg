@@ -269,7 +269,7 @@ iter_messages -> GetParticipants -> LeaveChannel` (`collect_pipeline.py`).
 **Раздельные роли (vps-101 worker + vps-104 discovery):**
 
 ```bash
-# 1. Миграции (включая A11: G6 audit + VIEW)
+# 1. Миграции (DSN = QUEUE_DATABASE_URL из standalone_discovery/.env)
 docker compose run --rm migrate
 
 # 2. Исполнение очереди
@@ -364,7 +364,7 @@ Discovery-api с `USE_PG_QUEUE=true` отдаёт G3 metrics и может по�
 | Симптом | Действия |
 |---------|----------|
 | Очередь растёт | `curl …/queue/metrics` → `queue.total`, `oldest_queued_age_seconds`; G4 `queue_growth` / `high_postpone`; проверить `accounts.without_resource` |
-| Нет выполнений | `done_last_5_min=0` при `queue.total>0` → G4 `queue_no_progress`; worker/discovery-api живы? |
+| Нет выполнений при наличии работы | `pickable_now>0` / `enqueued_5m>0` и `done=0`/`attempts=0` → G4 `queue_no_progress`; worker жив? |
 | Задачи stuck | `stuck_count>0` → логи worker; G5 только если осознанно включён |
 | RPH снижен автоматически | `SELECT * FROM resource_limit_adjustments ORDER BY created_at DESC LIMIT 10`; rollback — [§G6](#g6--детектор-повторяющихся-ошибок) |
 | Спам Telegram | увеличить `ALERT_COOLDOWN_SECONDS` или `THRESHOLD_ALERT_ENABLED=false` |
@@ -449,6 +449,8 @@ SELECT * FROM v_account_error_rate_last_hour ORDER BY error_rate_percent DESC LI
 
 Единая HTTP-точка метрик для админки и n8n. Агрегирует VIEW G1/G2 в JSON.
 
+Операторский гайд по всем информационным эндпойнтам: [`balancer-ops-monitoring.md`](balancer-ops-monitoring.md).
+
 **Требования:** `USE_PG_QUEUE=true`, инициализированный пул PG (`QUEUE_DATABASE_URL`),
 API key (как у остальных маршрутов discovery-api).
 
@@ -473,13 +475,27 @@ curl -s -H "X-API-Key: $DISCOVERY_API_KEY" \
 | `queue.oldest_queued_age_seconds` | `v_queue_metrics` (queued + scheduled) |
 | `queue.stuck_count` | `v_queue_metrics.stuck_tasks_count` |
 | `queue.done_last_5_min` | `v_queue_metrics.done_tasks_last_5_min` |
+| `queue.flow.*` | in→out: enqueued/done/failed/attempts (5/10 мин), `pickable_now`, `in_progress` |
 | `accounts.active` | `v_accounts_overview.active_accounts_count` |
 | `accounts.in_cooldown` | `v_accounts_overview.accounts_in_cooldown` |
 | `accounts.without_resource` | `v_accounts_overview.accounts_without_resource` |
 | `accounts.per_op[]` | `v_account_op_usage_last_hour` (per-op §0.5) |
 | `accounts.worst_by_account[]` | `v_account_resource_summary` |
 | `alerts_preview.high_postpone_count` | `COUNT(*)` из `v_high_postpone_tasks` |
+| `alerts_preview.pickable_starved` | demand без attempts/done за 5 мин |
+| `channels.*` | `v_channel_capacity_usage` + `MAX_CHANNELS_PER_SESSION` |
+| `error_rates.*` | `v_task_type_error_rate_last_hour`, `v_account_error_rate_last_hour` |
 | `generated_at` | UTC ISO timestamp снимка |
+
+Доп. эндпойнты мониторинга:
+
+| Метод | URL | Назначение |
+|-------|-----|------------|
+| GET | `/discovery-api/parser/queue/watchdogs` | last tick watchdog (`monitor_heartbeats`) |
+| GET | `/discovery-api/parser/queue/alerts` | on-demand G4/G7 |
+| GET | `/discovery-api/parser/queue/resource-adjustments` | audit G6 |
+
+Миграция flow/heartbeats: `DB/A19_ops_metrics_flow.sql`.
 
 **Код:** `app_balance/queue/monitoring/metrics_repo.py` (data layer),
 `standalone_discovery/discovery_api/queue/metrics.py` (HTTP).
@@ -522,8 +538,10 @@ python -m app_balance.queue_monitor --interval 120
 | `no_active_accounts` | ERROR | active=0 |
 | `task_type_error_spike` | ERROR | `ALERT_ERROR_RATE_MIN_PERCENT` + `ALERT_ERROR_RATE_MIN_ATTEMPTS` |
 | `account_error_spike` | ERROR | аналогично |
-| `stuck_no_progress` | ERROR | stuck>0 и done_5min=0 |
-| `queue_no_progress` | ERROR | queue>0 и done_5min=0 |
+| `stuck_no_progress` | ERROR | `stuck_count > 0` |
+| `queue_no_progress` | ERROR | `(pickable_now>0 OR enqueued_5m>0) AND done_5m=0 AND attempts_5m=0 AND active>0` |
+
+`queue_no_progress` **не** срабатывает при простое (нет новых задач и нет pickable backlog).
 
 Debounce: `{alert_code}:{scope_key}`, интервал `ALERT_COOLDOWN_SECONDS` (default 1800).
 

@@ -53,6 +53,14 @@ from discovery_api.queue.producer import (
     enqueue_parser_remove_channels,
 )
 from discovery_api.queue.metrics import MetricsResponse, get_queue_metrics
+from discovery_api.queue.ops_status import (
+    AlertsResponse,
+    ResourceAdjustmentsResponse,
+    WatchdogsResponse,
+    get_queue_alerts,
+    get_queue_watchdogs,
+    get_resource_adjustments,
+)
 from discovery_api.queue.task_types import (
     TaskTypeDetailResponse,
     TaskTypeListItemResponse,
@@ -1097,6 +1105,30 @@ async def parser_queue_task_get(task_id: int) -> TaskQueueItemResponse:
 @parser_router.get("/queue/metrics", response_model=MetricsResponse)
 async def parser_queue_metrics() -> MetricsResponse:
     return await get_queue_metrics()
+
+
+@parser_router.get("/queue/watchdogs", response_model=WatchdogsResponse)
+async def parser_queue_watchdogs() -> WatchdogsResponse:
+    return await get_queue_watchdogs()
+
+
+@parser_router.get("/queue/alerts", response_model=AlertsResponse)
+async def parser_queue_alerts() -> AlertsResponse:
+    return await get_queue_alerts()
+
+
+@parser_router.get(
+    "/queue/resource-adjustments",
+    response_model=ResourceAdjustmentsResponse,
+)
+async def parser_queue_resource_adjustments(
+    limit: int = Query(50, ge=1, le=200),
+    op_code: str | None = Query(None),
+    error_code: str | None = Query(None),
+) -> ResourceAdjustmentsResponse:
+    return await get_resource_adjustments(
+        limit=limit, op_code=op_code, error_code=error_code
+    )
 
 
 @parser_router.get(

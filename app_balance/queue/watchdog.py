@@ -6,6 +6,11 @@ import logging
 import os
 from dataclasses import dataclass
 
+from app_balance.queue.monitoring.watchdog_heartbeat import (
+    WATCHDOG_STUCK,
+    TickTimer,
+    get_watchdog_registry,
+)
 from app_balance.queue.task_queue import StuckTaskResult, TaskQueueRepo
 
 logger = logging.getLogger(__name__)
@@ -58,43 +63,74 @@ class StuckTaskWatchdog:
 
     async def tick_once(self) -> list[StuckTaskResult]:
         """Один проход: перевод зависших задач + лог по исходу каждой."""
-        results = await self._queue.mark_stuck_timed_out(
-            limit=self._batch_limit,
-            auto_retry=self._auto_retry,
-        )
-        for task in results:
-            if task.outcome == "retry":
-                logger.info(
-                    "watchdog: auto-retry id=%s type=%s → retry "
-                    "(run_after=+%ds, watchdog_retry=%d, attempt=%d/%d)",
-                    task.id,
-                    task.task_type_code,
-                    self._auto_retry.delay_seconds,
-                    task.watchdog_retry_count,
-                    task.attempt_count,
-                    task.max_attempts,
-                )
-            elif task.outcome == "failed":
-                logger.warning(
-                    "watchdog: auto-retry исчерпан id=%s type=%s → failed "
-                    "(watchdog_retry=%d, attempt=%d/%d)",
-                    task.id,
-                    task.task_type_code,
-                    task.watchdog_retry_count,
-                    task.attempt_count,
-                    task.max_attempts,
-                )
-            else:
-                logger.warning(
-                    "watchdog: задача id=%s type=%s locked_by=%s → stuck",
-                    task.id,
-                    task.task_type_code,
-                    task.locked_by,
-                )
+        timer = TickTimer()
+        error: str | None = None
+        results: list[StuckTaskResult] = []
+        try:
+            results = await self._queue.mark_stuck_timed_out(
+                limit=self._batch_limit,
+                auto_retry=self._auto_retry,
+            )
+            for task in results:
+                if task.outcome == "retry":
+                    logger.info(
+                        "watchdog: auto-retry id=%s type=%s → retry "
+                        "(run_after=+%ds, watchdog_retry=%d, attempt=%d/%d)",
+                        task.id,
+                        task.task_type_code,
+                        self._auto_retry.delay_seconds,
+                        task.watchdog_retry_count,
+                        task.attempt_count,
+                        task.max_attempts,
+                    )
+                elif task.outcome == "failed":
+                    logger.warning(
+                        "watchdog: auto-retry исчерпан id=%s type=%s → failed "
+                        "(watchdog_retry=%d, attempt=%d/%d)",
+                        task.id,
+                        task.task_type_code,
+                        task.watchdog_retry_count,
+                        task.attempt_count,
+                        task.max_attempts,
+                    )
+                else:
+                    logger.warning(
+                        "watchdog: задача id=%s type=%s locked_by=%s → stuck",
+                        task.id,
+                        task.task_type_code,
+                        task.locked_by,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            error = str(exc)
+            raise
+        finally:
+            marked = sum(1 for t in results if t.outcome == "stuck")
+            retried = sum(1 for t in results if t.outcome == "retry")
+            failed = sum(1 for t in results if t.outcome == "failed")
+            await get_watchdog_registry().record_tick(
+                WATCHDOG_STUCK,
+                duration_ms=timer.duration_ms(),
+                result={
+                    "marked": marked,
+                    "retried": retried,
+                    "failed": failed,
+                    "total": len(results),
+                },
+                error=error,
+                interval_seconds=self._interval_seconds,
+                enabled=True,
+                process="queue-worker",
+            )
         return results
 
     async def run(self) -> None:
         """Периодический цикл до сигнала stop."""
+        get_watchdog_registry().configure(
+            WATCHDOG_STUCK,
+            interval_seconds=self._interval_seconds,
+            enabled=True,
+            process="queue-worker",
+        )
         logger.info(
             "watchdog: старт (interval=%.1fs, batch=%d, auto_retry=%s)",
             self._interval_seconds,
