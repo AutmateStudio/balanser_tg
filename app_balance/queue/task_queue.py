@@ -35,10 +35,12 @@ ACTIVE_STATUSES = ("queued", "scheduled", "retry", "in_progress")
 # включает retryable/resource-коды (flood_wait, insufficient_resource,
 # account_reserve_failed, clump_error, join_pending, transient_error,
 # watchdog:*) — те могут пройти при следующей попытке, поэтому re-enqueue
-# для них не блокируется. Партиальный unique-индекс уже не пускает дубль,
-# пока такая задача активна (queued/scheduled/retry/in_progress) — здесь
-# закрывается оставшийся случай: задача уже terminal failed с постоянной
-# причиной, но dedup_key снова свободен.
+# для них не блокируется.
+# account_unauthorized — тоже НЕ здесь: это проблема сессии/аккаунта, а не
+# канала; после re-auth или на другом живом аккаунте канал нужно ставить снова.
+# Партиальный unique-индекс уже не пускает дубль, пока такая задача активна
+# (queued/scheduled/retry/in_progress) — здесь закрывается оставшийся случай:
+# задача уже terminal failed с постоянной причиной, но dedup_key снова свободен.
 FATAL_ERROR_CODES = frozenset(
     {
         ErrorCode.INVALID_PAYLOAD,
@@ -47,7 +49,6 @@ FATAL_ERROR_CODES = frozenset(
         ErrorCode.UNKNOWN_TASK_TYPE,
         ErrorCode.CHANNEL_PRIVATE,
         ErrorCode.BANNED,
-        ErrorCode.ACCOUNT_UNAUTHORIZED,
         ErrorCode.USERNAME_NOT_FOUND,
         "fatal",  # app_balance.queue.errors.FATAL — fallback map_telethon_exception
     }
@@ -527,7 +528,8 @@ class TaskQueueRepo:
 
         Не блокирует retry после временных/ресурсных ошибок — только после
         кодов из FATAL_ERROR_CODES (banned, channel_private, invalid_payload,
-        account_unauthorized, fatal и т.п.). Активные статусы (queued/
+        username_not_found, fatal и т.п.). account_unauthorized сюда не
+        входит — проблема аккаунта, не канала. Активные статусы (queued/
         scheduled/retry/in_progress) сюда не попадают — их уже отсекает
         partial unique index (idx_task_queue_dedup_active) в enqueue().
         """

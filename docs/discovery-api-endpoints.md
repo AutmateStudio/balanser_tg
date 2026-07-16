@@ -375,7 +375,7 @@ curl -sS "$BASE/discovery-api/parser/PARSER_ID/channels" -H "X-API-Key: $KEY"
 | `assignments` | object | канал→сессия (sync) |
 | `action_id` | string\|null | id задачи (async) |
 | `task_ids` | array<int> | id задач PG-очереди (async + PG); для каналов, уже активных (queued/scheduled/retry/in_progress), возвращается id существующей задачи — дубль не создаётся |
-| `skipped_fatal` | object<string, string> | B12: канал → код ошибки; задача НЕ поставлена, т.к. прошлая попытка для этого dedup_key уже terminal failed с постоянной причиной (`banned`, `channel_private`, `invalid_payload`, `account_not_found`, `unsupported_task_type`, `unknown_task_type`, `account_unauthorized`, `username_not_found`, `fatal`). Повтор — `?force_retry=1` |
+| `skipped_fatal` | object<string, string> | B12: канал → код ошибки; задача НЕ поставлена, т.к. прошлая попытка для этого dedup_key уже terminal failed с постоянной причиной канала (`banned`, `channel_private`, `invalid_payload`, `account_not_found`, `unsupported_task_type`, `unknown_task_type`, `username_not_found`, `fatal`). `account_unauthorized` сюда **не** входит (проблема сессии, не канала) — канал ставится снова. Повтор для остальных fatal — `?force_retry=1` |
 | `async_mode` | bool | режим обработки |
 
 **Ошибки:** `404` (нет clump), `409` (clump остановлен / квота).
@@ -391,9 +391,10 @@ curl -sS "$BASE/discovery-api/parser/PARSER_ID/channels" -H "X-API-Key: $KEY"
 - канал уже **terminal failed** с постоянной причиной — новая задача не
   создаётся вовсе, канал попадает в `skipped_fatal` (см. `TaskQueueRepo.
   find_fatal_history`, `FATAL_ERROR_CODES` в `app_balance/queue/task_queue.py`).
-  Retryable-причины (`flood_wait`, `clump_error`, `join_pending`,
-  `insufficient_resource`, `account_reserve_failed`, `transient_error`, …) в
-  `skipped_fatal` не попадают — такие каналы ставятся в очередь заново как обычно.
+  Retryable-причины и проблемы аккаунта (`flood_wait`, `clump_error`, `join_pending`,
+  `insufficient_resource`, `account_reserve_failed`, `transient_error`,
+  `account_unauthorized`, …) в `skipped_fatal` не попадают — такие каналы
+  ставятся в очередь заново как обычно.
 
 ```bash
 # асинхронно (по умолчанию)

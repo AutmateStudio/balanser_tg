@@ -40,7 +40,7 @@
 | `username_not_found` | Telethon `No user has "X" as username` — юзернейм не занят (удалён/сменён), `ResolveUsernameRequest` стабильно вернёт то же | failed | Не пытаться повторно этот канал; удалить/актуализировать ссылку в источнике |
 | `account_not_found` | Аккаунт отсутствует в PG | failed | Синхронизировать аккаунты |
 | `unsupported_task_type` | Adapter не поддерживает тип | failed | Дождаться реализации adapter-ветки |
-| `account_unauthorized` | Сессия аккаунта не авторизована в Telegram | failed + sync health | Переавторизовать аккаунт (сессия/2FA) |
+| `account_unauthorized` | Сессия аккаунта не авторизована в Telegram | failed + sync health | Переавторизовать аккаунт (сессия/2FA). **Не** блокирует B12 fatal-dedup по каналу — после re-auth / на другом аккаунте канал можно ставить снова без `force_retry` |
 
 ### Postpone (отложить без расхода attempt)
 
