@@ -1,5 +1,7 @@
 -- A19 — операционный мониторинг: in→out flow в v_queue_metrics + heartbeats watchdog.
 -- Идемпотентно (CREATE OR REPLACE / IF NOT EXISTS).
+-- PostgreSQL CREATE OR REPLACE VIEW не позволяет вставлять колонки в середину —
+-- только DROP + CREATE.
 
 CREATE TABLE IF NOT EXISTS "monitor_heartbeats" (
   "name" text PRIMARY KEY,
@@ -13,7 +15,9 @@ CREATE TABLE IF NOT EXISTS "monitor_heartbeats" (
   "updated_at" timestamptz NOT NULL DEFAULT (now())
 );
 
-CREATE OR REPLACE VIEW "v_queue_metrics" AS
+DROP VIEW IF EXISTS "v_queue_metrics";
+
+CREATE VIEW "v_queue_metrics" AS
 SELECT
   count(*) FILTER (WHERE "status" IN ('queued', 'scheduled', 'retry', 'in_progress')) AS "queue_size_total",
   count(*) FILTER (WHERE "status" = 'queued')      AS "queued_count",
