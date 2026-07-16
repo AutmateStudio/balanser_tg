@@ -42,6 +42,14 @@ def _rows_to_by_type(rows: list[Any]) -> dict[str, dict[str, int]]:
     return result
 
 
+def _col(summary: Any, key: str, default: int = 0) -> int:
+    """Безопасно читать колонку VIEW (до A19 часть полей может отсутствовать)."""
+    try:
+        return _int_val(summary[key])
+    except (KeyError, IndexError):
+        return default
+
+
 @dataclass(frozen=True, slots=True)
 class ChannelCapacityMetrics:
     active_accounts: int
@@ -74,6 +82,22 @@ class AccountResourceRow:
 
 
 @dataclass(frozen=True, slots=True)
+class QueueFlowMetrics:
+    """In → out за фиксированные окна 5/10 мин + pickable backlog."""
+
+    enqueued_last_5_min: int
+    enqueued_last_10_min: int
+    done_last_5_min: int
+    done_last_10_min: int
+    failed_last_5_min: int
+    failed_last_10_min: int
+    attempts_last_5_min: int
+    attempts_last_10_min: int
+    pickable_now: int
+    in_progress: int
+
+
+@dataclass(frozen=True, slots=True)
 class QueueMetrics:
     total: int
     by_status: dict[str, int]
@@ -81,6 +105,7 @@ class QueueMetrics:
     oldest_queued_age_seconds: int
     stuck_count: int
     done_last_5_min: int
+    flow: QueueFlowMetrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +120,7 @@ class AccountsMetrics:
 @dataclass(frozen=True, slots=True)
 class AlertsPreview:
     high_postpone_count: int
+    pickable_starved: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +136,14 @@ class ErrorRateRow:
     attempts_last_hour: int
     errors_last_hour: int
     error_rate_percent: float
+    session_name: str | None = None
+    task_type_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ErrorRatesMetrics:
+    by_task_type: tuple[ErrorRateRow, ...] = field(default_factory=tuple)
+    by_account: tuple[ErrorRateRow, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,10 +159,12 @@ class MetricsSnapshot:
     accounts: AccountsMetrics
     alerts_preview: AlertsPreview
     channels: ChannelCapacityMetrics
+    error_rates: ErrorRatesMetrics
     generated_at: datetime
 
     def to_response_dict(self) -> dict[str, Any]:
-        """JSON-сериализуемый dict по контракту §26 (G3) + channels (G7)."""
+        """JSON-сериализуемый dict по контракту §26 (G3) + flow/channels/error_rates."""
+        flow = self.queue.flow
         return {
             "queue": {
                 "total": self.queue.total,
@@ -140,6 +176,18 @@ class MetricsSnapshot:
                 "oldest_queued_age_seconds": self.queue.oldest_queued_age_seconds,
                 "stuck_count": self.queue.stuck_count,
                 "done_last_5_min": self.queue.done_last_5_min,
+                "flow": {
+                    "enqueued_last_5_min": flow.enqueued_last_5_min,
+                    "enqueued_last_10_min": flow.enqueued_last_10_min,
+                    "done_last_5_min": flow.done_last_5_min,
+                    "done_last_10_min": flow.done_last_10_min,
+                    "failed_last_5_min": flow.failed_last_5_min,
+                    "failed_last_10_min": flow.failed_last_10_min,
+                    "attempts_last_5_min": flow.attempts_last_5_min,
+                    "attempts_last_10_min": flow.attempts_last_10_min,
+                    "pickable_now": flow.pickable_now,
+                    "in_progress": flow.in_progress,
+                },
             },
             "accounts": {
                 "active": self.accounts.active,
@@ -173,12 +221,35 @@ class MetricsSnapshot:
             },
             "alerts_preview": {
                 "high_postpone_count": self.alerts_preview.high_postpone_count,
+                "pickable_starved": self.alerts_preview.pickable_starved,
             },
             "channels": {
                 "active_accounts": self.channels.active_accounts,
                 "assigned_channels_total": self.channels.assigned_channels_total,
                 "fleet_capacity": self.channels.fleet_capacity,
                 "usage_percent": self.channels.usage_percent,
+            },
+            "error_rates": {
+                "by_task_type": [
+                    {
+                        "entity_id": row.entity_id,
+                        "task_type_code": row.task_type_code,
+                        "attempts_last_hour": row.attempts_last_hour,
+                        "errors_last_hour": row.errors_last_hour,
+                        "error_rate_percent": row.error_rate_percent,
+                    }
+                    for row in self.error_rates.by_task_type
+                ],
+                "by_account": [
+                    {
+                        "entity_id": row.entity_id,
+                        "session_name": row.session_name,
+                        "attempts_last_hour": row.attempts_last_hour,
+                        "errors_last_hour": row.errors_last_hour,
+                        "error_rate_percent": row.error_rate_percent,
+                    }
+                    for row in self.error_rates.by_account
+                ],
             },
             "generated_at": self.generated_at.isoformat(),
         }
@@ -202,6 +273,30 @@ def _build_channel_capacity(
     )
 
 
+def _pickable_starved(flow: QueueFlowMetrics) -> bool:
+    return (
+        (flow.pickable_now > 0 or flow.enqueued_last_5_min > 0)
+        and flow.done_last_5_min == 0
+        and flow.attempts_last_5_min == 0
+    )
+
+
+def _build_flow(summary: Any, by_status: dict[str, int]) -> QueueFlowMetrics:
+    done_5 = _col(summary, "done_tasks_last_5_min")
+    return QueueFlowMetrics(
+        enqueued_last_5_min=_col(summary, "enqueued_last_5_min"),
+        enqueued_last_10_min=_col(summary, "enqueued_last_10_min"),
+        done_last_5_min=done_5,
+        done_last_10_min=_col(summary, "done_tasks_last_10_min"),
+        failed_last_5_min=_col(summary, "failed_tasks_last_5_min"),
+        failed_last_10_min=_col(summary, "failed_tasks_last_10_min"),
+        attempts_last_5_min=_col(summary, "attempts_last_5_min"),
+        attempts_last_10_min=_col(summary, "attempts_last_10_min"),
+        pickable_now=_col(summary, "pickable_now"),
+        in_progress=by_status.get("in_progress", _col(summary, "in_progress_count")),
+    )
+
+
 def _build_snapshot(
     *,
     summary: Any,
@@ -212,15 +307,19 @@ def _build_snapshot(
     worst_rows: list[Any],
     high_postpone_count: int,
     channels: ChannelCapacityMetrics,
+    error_rates: ErrorRatesMetrics,
     generated_at: datetime,
 ) -> MetricsSnapshot:
+    by_status = _rows_to_by_status(by_status_rows)
+    flow = _build_flow(summary, by_status)
     queue = QueueMetrics(
         total=_int_val(summary["queue_size_total"]),
-        by_status=_rows_to_by_status(by_status_rows),
+        by_status=by_status,
         by_type=_rows_to_by_type(by_type_rows),
         oldest_queued_age_seconds=_int_val(summary["oldest_queued_task_age_seconds"]),
         stuck_count=_int_val(summary["stuck_tasks_count"]),
-        done_last_5_min=_int_val(summary["done_tasks_last_5_min"]),
+        done_last_5_min=flow.done_last_5_min,
+        flow=flow,
     )
     accounts = AccountsMetrics(
         active=_int_val(overview["active_accounts_count"]),
@@ -255,8 +354,12 @@ def _build_snapshot(
     return MetricsSnapshot(
         queue=queue,
         accounts=accounts,
-        alerts_preview=AlertsPreview(high_postpone_count=_int_val(high_postpone_count)),
+        alerts_preview=AlertsPreview(
+            high_postpone_count=_int_val(high_postpone_count),
+            pickable_starved=_pickable_starved(flow),
+        ),
         channels=channels,
+        error_rates=error_rates,
         generated_at=generated_at,
     )
 
@@ -314,6 +417,34 @@ class MetricsRepo:
                 """,
                 config.high_postpone_min,
             )
+            task_type_error_all = await conn.fetch(
+                """
+                SELECT
+                    v.task_type_id,
+                    tt.code AS task_type_code,
+                    v.attempts_last_hour,
+                    v.errors_last_hour,
+                    v.error_rate_percent
+                FROM v_task_type_error_rate_last_hour v
+                LEFT JOIN task_types tt ON tt.id = v.task_type_id
+                ORDER BY v.error_rate_percent DESC, v.attempts_last_hour DESC
+                LIMIT 100
+                """
+            )
+            account_error_all = await conn.fetch(
+                """
+                SELECT
+                    v.account_id,
+                    a.session_name,
+                    v.attempts_last_hour,
+                    v.errors_last_hour,
+                    v.error_rate_percent
+                FROM v_account_error_rate_last_hour v
+                LEFT JOIN accounts a ON a.id = v.account_id
+                ORDER BY v.error_rate_percent DESC, v.attempts_last_hour DESC
+                LIMIT 100
+                """
+            )
             task_type_error_rows = await conn.fetch(
                 """
                 SELECT task_type_id, attempts_last_hour, errors_last_hour,
@@ -345,6 +476,36 @@ class MetricsRepo:
         channels = _build_channel_capacity(
             channel_row, config.max_channels_per_session
         )
+        error_rates = ErrorRatesMetrics(
+            by_task_type=tuple(
+                ErrorRateRow(
+                    entity_id=_int_val(row["task_type_id"]),
+                    attempts_last_hour=_int_val(row["attempts_last_hour"]),
+                    errors_last_hour=_int_val(row["errors_last_hour"]),
+                    error_rate_percent=_float_val(row["error_rate_percent"]),
+                    task_type_code=(
+                        str(row["task_type_code"])
+                        if row["task_type_code"] is not None
+                        else None
+                    ),
+                )
+                for row in task_type_error_all
+            ),
+            by_account=tuple(
+                ErrorRateRow(
+                    entity_id=_int_val(row["account_id"]),
+                    attempts_last_hour=_int_val(row["attempts_last_hour"]),
+                    errors_last_hour=_int_val(row["errors_last_hour"]),
+                    error_rate_percent=_float_val(row["error_rate_percent"]),
+                    session_name=(
+                        str(row["session_name"])
+                        if row["session_name"] is not None
+                        else None
+                    ),
+                )
+                for row in account_error_all
+            ),
+        )
         snapshot = _build_snapshot(
             summary=summary,
             overview=overview,
@@ -354,6 +515,7 @@ class MetricsRepo:
             worst_rows=worst_rows,
             high_postpone_count=_int_val(high_postpone_count),
             channels=channels,
+            error_rates=error_rates,
             generated_at=generated_at,
         )
         ctx = AlertContext(

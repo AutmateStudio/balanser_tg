@@ -18,8 +18,10 @@ from app_balance.queue.monitoring.metrics_repo import (
     AlertsPreview,
     ChannelCapacityMetrics,
     ErrorRateRow,
+    ErrorRatesMetrics,
     HighPostponeTaskRow,
     MetricsSnapshot,
+    QueueFlowMetrics,
     QueueMetrics,
 )
 from app_balance.queue.monitoring.notify import AlertNotifier
@@ -44,6 +46,28 @@ def _default_config(**overrides) -> AlertConfig:
     return replace(base, **overrides)
 
 
+def _flow(
+    *,
+    enqueued_5: int = 0,
+    pickable: int = 0,
+    done_5: int = 0,
+    attempts_5: int = 0,
+    in_progress: int = 0,
+) -> QueueFlowMetrics:
+    return QueueFlowMetrics(
+        enqueued_last_5_min=enqueued_5,
+        enqueued_last_10_min=enqueued_5,
+        done_last_5_min=done_5,
+        done_last_10_min=done_5,
+        failed_last_5_min=0,
+        failed_last_10_min=0,
+        attempts_last_5_min=attempts_5,
+        attempts_last_10_min=attempts_5,
+        pickable_now=pickable,
+        in_progress=in_progress,
+    )
+
+
 def _snapshot(
     *,
     total: int = 0,
@@ -55,12 +79,21 @@ def _snapshot(
     usage_percent: float | None = None,
     max_channels_per_session: int = 500,
     worst_by_account: tuple[AccountResourceRow, ...] = (),
+    enqueued_5: int = 0,
+    pickable: int = 0,
+    attempts_5: int = 0,
 ) -> MetricsSnapshot:
     fleet_capacity = active * max_channels_per_session
     if usage_percent is None:
         usage_percent = (
             (assigned_channels / fleet_capacity * 100.0) if fleet_capacity > 0 else 0.0
         )
+    flow = _flow(
+        enqueued_5=enqueued_5,
+        pickable=pickable,
+        done_5=done_5min,
+        attempts_5=attempts_5,
+    )
     return MetricsSnapshot(
         queue=QueueMetrics(
             total=total,
@@ -69,6 +102,7 @@ def _snapshot(
             oldest_queued_age_seconds=oldest_age,
             stuck_count=stuck,
             done_last_5_min=done_5min,
+            flow=flow,
         ),
         accounts=AccountsMetrics(
             active=active,
@@ -76,13 +110,21 @@ def _snapshot(
             without_resource=0,
             worst_by_account=worst_by_account,
         ),
-        alerts_preview=AlertsPreview(high_postpone_count=0),
+        alerts_preview=AlertsPreview(
+            high_postpone_count=0,
+            pickable_starved=(
+                (flow.pickable_now > 0 or flow.enqueued_last_5_min > 0)
+                and flow.done_last_5_min == 0
+                and flow.attempts_last_5_min == 0
+            ),
+        ),
         channels=ChannelCapacityMetrics(
             active_accounts=active,
             assigned_channels_total=assigned_channels,
             fleet_capacity=fleet_capacity,
             usage_percent=usage_percent,
         ),
+        error_rates=ErrorRatesMetrics(),
         generated_at=datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc),
     )
 
@@ -210,13 +252,69 @@ def test_stuck_no_progress() -> None:
     assert "stuck_no_progress" in _codes(alerts)
 
 
-def test_queue_no_progress() -> None:
+def test_stuck_alerts_even_when_done_nonzero() -> None:
     config = _default_config()
     growth = QueueGrowthTracker(window_seconds=900)
     alerts = evaluate_alerts(
-        _snapshot(total=5, done_5min=0), _empty_ctx(), config, growth
+        _snapshot(stuck=1, done_5min=5), _empty_ctx(), config, growth
+    )
+    assert "stuck_no_progress" in _codes(alerts)
+
+
+def test_queue_no_progress_when_pickable_and_idle_worker() -> None:
+    config = _default_config()
+    growth = QueueGrowthTracker(window_seconds=900)
+    alerts = evaluate_alerts(
+        _snapshot(total=5, done_5min=0, pickable=5, attempts_5=0, active=1),
+        _empty_ctx(),
+        config,
+        growth,
     )
     assert "queue_no_progress" in _codes(alerts)
+
+
+def test_queue_no_progress_not_when_idle_no_demand() -> None:
+    """Нет ingress и pickable=0 — простой, не инцидент."""
+    config = _default_config()
+    growth = QueueGrowthTracker(window_seconds=900)
+    alerts = evaluate_alerts(
+        _snapshot(total=0, done_5min=0, pickable=0, enqueued_5=0),
+        _empty_ctx(),
+        config,
+        growth,
+    )
+    assert "queue_no_progress" not in _codes(alerts)
+
+
+def test_queue_no_progress_not_when_only_scheduled_backlog() -> None:
+    """total>0, но всё не pickable (run_after в будущем) — не алертим."""
+    config = _default_config()
+    growth = QueueGrowthTracker(window_seconds=900)
+    alerts = evaluate_alerts(
+        _snapshot(total=5, done_5min=0, pickable=0, enqueued_5=0, attempts_5=0),
+        _empty_ctx(),
+        config,
+        growth,
+    )
+    assert "queue_no_progress" not in _codes(alerts)
+
+
+def test_queue_no_progress_not_when_attempts_in_flight() -> None:
+    config = _default_config()
+    growth = QueueGrowthTracker(window_seconds=900)
+    alerts = evaluate_alerts(
+        _snapshot(
+            total=5,
+            done_5min=0,
+            pickable=5,
+            attempts_5=3,
+            active=1,
+        ),
+        _empty_ctx(),
+        config,
+        growth,
+    )
+    assert "queue_no_progress" not in _codes(alerts)
 
 
 @pytest.mark.asyncio

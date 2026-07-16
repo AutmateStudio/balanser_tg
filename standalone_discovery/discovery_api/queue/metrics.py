@@ -29,6 +29,19 @@ class AccountResourceResponse(BaseModel):
     exhausted_ops_count: int
 
 
+class QueueFlowResponse(BaseModel):
+    enqueued_last_5_min: int
+    enqueued_last_10_min: int
+    done_last_5_min: int
+    done_last_10_min: int
+    failed_last_5_min: int
+    failed_last_10_min: int
+    attempts_last_5_min: int
+    attempts_last_10_min: int
+    pickable_now: int
+    in_progress: int
+
+
 class QueueMetricsResponse(BaseModel):
     total: int
     by_status: dict[str, int] = Field(default_factory=dict)
@@ -36,6 +49,7 @@ class QueueMetricsResponse(BaseModel):
     oldest_queued_age_seconds: int
     stuck_count: int
     done_last_5_min: int
+    flow: QueueFlowResponse
 
 
 class AccountsMetricsResponse(BaseModel):
@@ -48,12 +62,43 @@ class AccountsMetricsResponse(BaseModel):
 
 class AlertsPreviewResponse(BaseModel):
     high_postpone_count: int
+    pickable_starved: bool = False
+
+
+class ChannelsMetricsResponse(BaseModel):
+    active_accounts: int
+    assigned_channels_total: int
+    fleet_capacity: int
+    usage_percent: float
+
+
+class TaskTypeErrorRateResponse(BaseModel):
+    entity_id: int
+    task_type_code: str | None = None
+    attempts_last_hour: int
+    errors_last_hour: int
+    error_rate_percent: float
+
+
+class AccountErrorRateResponse(BaseModel):
+    entity_id: int
+    session_name: str | None = None
+    attempts_last_hour: int
+    errors_last_hour: int
+    error_rate_percent: float
+
+
+class ErrorRatesResponse(BaseModel):
+    by_task_type: list[TaskTypeErrorRateResponse] = Field(default_factory=list)
+    by_account: list[AccountErrorRateResponse] = Field(default_factory=list)
 
 
 class MetricsResponse(BaseModel):
     queue: QueueMetricsResponse
     accounts: AccountsMetricsResponse
     alerts_preview: AlertsPreviewResponse
+    channels: ChannelsMetricsResponse
+    error_rates: ErrorRatesResponse
     generated_at: str
 
 

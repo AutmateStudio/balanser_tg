@@ -70,6 +70,18 @@ _SESSION_NAME_BY_ACCOUNT_SQL = """
 SELECT session_name FROM accounts WHERE id = $1
 """
 
+_LIST_ADJUSTMENTS_SQL = """
+SELECT
+  id, error_code, op_code, action,
+  old_rph_limit, new_rph_limit, account_id,
+  error_count, created_at
+FROM resource_limit_adjustments
+WHERE ($1::text IS NULL OR op_code = $1)
+  AND ($2::text IS NULL OR error_code = $2)
+ORDER BY created_at DESC
+LIMIT $3
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class RecurringErrorRow:
@@ -98,6 +110,19 @@ class AdjustmentPlan:
     account_id: int | None
     apply_cooldown: bool
     severity: Severity
+
+
+@dataclass(frozen=True, slots=True)
+class AdjustmentRow:
+    id: int
+    error_code: str
+    op_code: str
+    action: str
+    old_rph_limit: int | None
+    new_rph_limit: int | None
+    account_id: int | None
+    error_count: int
+    created_at: datetime
 
 
 class ErrorDetectorRepo:
@@ -161,6 +186,45 @@ class ErrorDetectorRepo:
                 window_seconds,
             )
         return bool(val)
+
+    async def list_adjustments(
+        self,
+        *,
+        limit: int = 50,
+        op_code: str | None = None,
+        error_code: str | None = None,
+    ) -> list[AdjustmentRow]:
+        async with db.acquire() as conn:
+            rows = await conn.fetch(
+                _LIST_ADJUSTMENTS_SQL,
+                op_code,
+                error_code,
+                limit,
+            )
+        return [
+            AdjustmentRow(
+                id=int(row["id"]),
+                error_code=str(row["error_code"]),
+                op_code=str(row["op_code"]),
+                action=str(row["action"]),
+                old_rph_limit=(
+                    int(row["old_rph_limit"])
+                    if row["old_rph_limit"] is not None
+                    else None
+                ),
+                new_rph_limit=(
+                    int(row["new_rph_limit"])
+                    if row["new_rph_limit"] is not None
+                    else None
+                ),
+                account_id=(
+                    int(row["account_id"]) if row["account_id"] is not None else None
+                ),
+                error_count=int(row["error_count"] or 0),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
     async def apply_plan(self, plan: AdjustmentPlan, config: ErrorDetectorConfig) -> None:
         async with db.transaction() as conn:

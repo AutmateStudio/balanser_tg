@@ -93,7 +93,12 @@
 | Ошибки | `queue.by_status.failed` | Terminal failed |
 | На повторе | `queue.by_status.retry` | Ожидают retry |
 | Часто отложенные | `alerts_preview.high_postpone_count` | Задачи с высоким `postpone_count` (порог — §26.4) |
-| Выполнено за 5 мин | `queue.done_last_5_min` | Пропускная способность |
+| Выполнено за 5 мин | `queue.done_last_5_min` / `queue.flow.done_last_5_min` | Пропускная способность |
+| Вход за 5/10 мин | `queue.flow.enqueued_last_*` | Ingress |
+| Pickable сейчас | `queue.flow.pickable_now` | Готовый к claim backlog |
+| Attempts за 5 мин | `queue.flow.attempts_last_5_min` | Worker жив (попытки) |
+| Загрузка каналов | `channels.usage_percent` | Fleet capacity G7 |
+| Голод очереди | `alerts_preview.pickable_starved` | Demand без прогресса |
 | Возраст старейшей | `queue.oldest_queued_age_seconds` | Секунды; oldest queued/scheduled task |
 
 Дополнительно:
@@ -517,37 +522,35 @@ Fallback до TBI — **§10.5–10.6**.
     "by_type": {"parser_add_channel": {"queued": 10}},
     "oldest_queued_age_seconds": 120,
     "stuck_count": 0,
-    "done_last_5_min": 10
+    "done_last_5_min": 10,
+    "flow": {
+      "enqueued_last_5_min": 3,
+      "enqueued_last_10_min": 8,
+      "done_last_5_min": 10,
+      "done_last_10_min": 18,
+      "failed_last_5_min": 0,
+      "failed_last_10_min": 1,
+      "attempts_last_5_min": 12,
+      "attempts_last_10_min": 20,
+      "pickable_now": 10,
+      "in_progress": 2
+    }
   },
   "accounts": {
     "active": 5,
     "in_cooldown": 1,
     "without_resource": 2,
-    "per_op": [
-      {
-        "account_id": 1,
-        "session_name": "acc1",
-        "account_status": "active",
-        "op_type_id": 10,
-        "op_code": "get_entity",
-        "effective_rph": 6,
-        "used_last_hour": 2,
-        "available_resource": 4,
-        "available_resource_percent": 66.67
-      }
-    ],
-    "worst_by_account": [
-      {
-        "account_id": 1,
-        "session_name": "acc1",
-        "account_status": "active",
-        "worst_available_percent": 66.67,
-        "any_op_exhausted": false,
-        "exhausted_ops_count": 0
-      }
-    ]
+    "per_op": [],
+    "worst_by_account": []
   },
-  "alerts_preview": {"high_postpone_count": 3},
+  "alerts_preview": {"high_postpone_count": 3, "pickable_starved": false},
+  "channels": {
+    "active_accounts": 5,
+    "assigned_channels_total": 100,
+    "fleet_capacity": 2500,
+    "usage_percent": 4.0
+  },
+  "error_rates": {"by_task_type": [], "by_account": []},
   "generated_at": "2026-06-25T12:00:00+00:00"
 }
 ```
@@ -1262,10 +1265,13 @@ curl -sS "$BASE/discovery-api/parser/queue/tasks/12345" -H "X-API-Key: $KEY"
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `queue` | object | `total`, `by_status`, `by_type`, `oldest_queued_age_seconds`, `stuck_count`, `done_last_5_min` |
+| `queue` | object | `total`, `by_status`, `by_type`, `oldest_queued_age_seconds`, `stuck_count`, `done_last_5_min`, `flow` |
+| `queue.flow` | object | in→out 5/10 мин + `pickable_now` |
 | `accounts` | object | `active`, `in_cooldown`, `without_resource`, `per_op[]`, `worst_by_account[]` |
-| `alerts_preview` | object | `high_postpone_count` |
-| `generated_at` | string | ISO-время снимка |
+| `alerts_preview` | object | `high_postpone_count`, `pickable_starved` |
+| `channels` | object | fleet capacity G7 |
+| `error_rates` | object | `by_task_type[]`, `by_account[]` |
+| `generated_at` | string (ISO) | Время снимка |
 
 **Ошибки:** `503` (PG-очередь выключена или недоступна).
 
@@ -1413,20 +1419,21 @@ curl -sS "$BASE/discovery-api/parser/queue/metrics" -H "X-API-Key: $KEY"
 
 ### 11.3. Блок «Проблемы» — правила и пороги
 
-**Из API сейчас:** только `alerts_preview.high_postpone_count` (число задач в VIEW `v_high_postpone_tasks`).
+**Предпочтительно:** `GET /discovery-api/parser/queue/alerts` (серверные правила G4/G7).
 
-**Дополнительно считаем на клиенте** из одного снимка `queue/metrics` (константы = дефолты backend):
+**Из metrics:** `alerts_preview.high_postpone_count`, `alerts_preview.pickable_starved`,
+`error_rates.by_task_type` / `by_account`.
 
 | Код алерта | Условие | Severity | Текст UI (пример) |
 |------------|---------|----------|-------------------|
 | `high_postpone` | `alerts_preview.high_postpone_count > 0` | warning | «{n} задач с частыми отложениями (≥10)» |
 | `oldest_queue_stale` | `queue.oldest_queued_age_seconds > 3600` | warning | «Старейшая задача ждёт {age} (порог 1 ч)» |
 | `no_active_accounts` | `accounts.active === 0` | error | «Нет активных аккаунтов» |
-| `stuck_no_progress` | `queue.stuck_count > 0 && queue.done_last_5_min === 0` | error | «Зависшие задачи, нет завершений за 5 мин» |
-| `queue_no_progress` | `queue.total > 0 && queue.done_last_5_min === 0` | error | «Очередь не двигается» |
+| `stuck_no_progress` | `queue.stuck_count > 0` | error | «Есть зависшие задачи» |
+| `queue_no_progress` | `(flow.pickable_now>0 \|\| flow.enqueued_last_5_min>0) && flow.done_last_5_min===0 && flow.attempts_last_5_min===0 && accounts.active>0` | error | «Есть работа, но нет attempts/done» |
 | `accounts_without_resource` | `accounts.without_resource === accounts.active && accounts.active > 0` | warning | «У всех активных аккаунтов исчерпан ресурс» |
 
-**Не в MVP на клиенте:** `queue_growth` (нужна история 900 с), `task_type_error_spike`, `account_error_spike` (нужны VIEW error_rate — **TBI** поле в metrics или отдельный эндпойнт).
+**Не в MVP на клиенте:** `queue_growth` (нужна история 900 с) — доступен через `/queue/alerts` после warm-up monitor.
 
 Порог **high_postpone:** `postpone_count >= 10` (`ALERT_HIGH_POSTPONE_MIN`, default 10).
 
@@ -1558,9 +1565,13 @@ MVP: блок скрыт.
 
 Выбор clump: dropdown `parser_id` из `GET /parser/list`; если пусто — empty state «Нет активных clump».
 
-### 11.12. Поле `channels` в metrics (backend уже отдаёт)
+### 11.12. Поле `channels` в metrics
 
-Backend `MetricsSnapshot.to_response_dict()` включает `channels` (G7), но Pydantic `MetricsResponse` API может отрезать. **TBI:** добавить в OpenAPI. UI (Phase 2): KPI «Загрузка каналов fleet» — `channels.usage_percent`.
+В `GET /queue/metrics` отдаётся блок `channels` (`active_accounts`, `assigned_channels_total`,
+`fleet_capacity`, `usage_percent`). UI: KPI «Загрузка каналов fleet» — `channels.usage_percent`.
+
+Также: `error_rates`, `queue.flow`, `GET /queue/watchdogs`, `GET /queue/alerts`,
+`GET /queue/resource-adjustments`.
 
 ### 11.13. Контракт overlay PG cooldown (входящие данные)
 

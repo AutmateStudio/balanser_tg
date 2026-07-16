@@ -13,7 +13,8 @@
 # По умолчанию режим определяется автоматически по наличию platforms+source_channels.
 #
 # Использование:
-#   QUEUE_DATABASE_URL=postgres://user:pass@host:5432/db ./scripts/migrate_queue.sh
+#   ./scripts/migrate_queue.sh                    # DSN из standalone_discovery/.env
+#   QUEUE_DATABASE_URL=postgres://... ./scripts/migrate_queue.sh
 #   ./scripts/migrate_queue.sh --dsn "postgres://..." --mode integrate
 #   ./scripts/migrate_queue.sh --dry-run
 #   ./scripts/migrate_queue.sh --no-seed
@@ -27,8 +28,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_DIR="$(cd "$SCRIPT_DIR/../DB" && pwd)"
+DISCOVERY_ENV="$SCRIPT_DIR/../standalone_discovery/.env"
 
 DSN="${QUEUE_DATABASE_URL:-}"
+if [[ -z "$DSN" && -f "$DISCOVERY_ENV" ]]; then
+  DSN="$(grep -E '^QUEUE_DATABASE_URL=' "$DISCOVERY_ENV" | tail -1 | cut -d= -f2- | tr -d '\r')"
+fi
 MODE="auto"
 RUN_SEED=1
 DRY_RUN=0
@@ -51,7 +56,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v psql >/dev/null 2>&1 || die "psql не найден в PATH."
-[[ -n "$DSN" ]] || die "Не задан DSN. Укажите QUEUE_DATABASE_URL или --dsn."
+[[ -n "$DSN" ]] || die "Не задан DSN. Задайте QUEUE_DATABASE_URL в standalone_discovery/.env, в окружении или через --dsn."
 
 PSQL=(psql "$DSN" -v ON_ERROR_STOP=1 --quiet --no-psqlrc)
 
@@ -127,7 +132,8 @@ for mig in \
   A15_parser_add_channel_threshold_20.sql \
   A16_min_available_resource_percent_uniform.sql \
   A17_telegram_discover_rph_120_per_hour.sql \
-  A18_enable_collect_extra_data.sql
+  A18_enable_collect_extra_data.sql \
+  A19_ops_metrics_flow.sql
 do
   MIG_FILE="$DB_DIR/$mig"
   [[ -f "$MIG_FILE" ]] || die "Файл миграции не найден: $MIG_FILE"
@@ -144,7 +150,8 @@ for mig in \
   A15_parser_add_channel_threshold_20.sql \
   A16_min_available_resource_percent_uniform.sql \
   A17_telegram_discover_rph_120_per_hour.sql \
-  A18_enable_collect_extra_data.sql
+  A18_enable_collect_extra_data.sql \
+  A19_ops_metrics_flow.sql
 do
   apply_once "$DB_DIR/$mig"
 done

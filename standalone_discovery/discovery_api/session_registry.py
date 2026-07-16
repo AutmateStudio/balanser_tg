@@ -48,6 +48,12 @@ from discovery_api.config import (
     get_session_resolve_min_interval,
     get_use_pg_queue,
 )
+from app_balance.queue.monitoring.watchdog_heartbeat import (
+    WATCHDOG_ACCOUNT_AUTH,
+    WATCHDOG_SESSION_HEALTH,
+    TickTimer,
+    get_watchdog_registry,
+)
 from discovery_api.session_health import (
     SessionHealth,
     SessionStatus,
@@ -520,74 +526,118 @@ async def _attempt_session_reauth(pc: "Parser_client") -> bool:
 
 async def _health_check_once() -> None:
     """Один тик HealthMonitor: обновить health всех сессий и добить миграции."""
+    health_timer = TickTimer()
+    health_error: str | None = None
     reauth_enabled = get_account_auth_recheck_enabled()
     reauth_interval = get_account_auth_recheck_interval_seconds()
     reauth_error_total = 0
     reauth_checked = 0
     reauth_recovered = 0
-    for clump in list(_clumps.values()):
-        for pc in list(clump.parser_client_list):
-            health = pc.health
-            health.clear_flood_if_expired()
-            if health.banned:
-                continue
-            if health.status == SessionStatus.ERROR:
-                reauth_error_total += 1
-                if reauth_enabled and health.should_attempt_reauth(reauth_interval):
-                    reauth_checked += 1
-                    if await _attempt_session_reauth(pc):
-                        reauth_recovered += 1
-                continue
-            client = _clients.get(_canonical_key(pc.session_name))
-            if client is None:
-                # STARTING без клиента (enroll без каналов / после рестарта) —
-                # пробуем подключить, иначе сессия навсегда «невидима» для health.
-                if reauth_enabled and health.should_attempt_reauth(
-                    reauth_interval, allow_starting=True
-                ):
-                    reauth_checked += 1
-                    if await _attempt_session_reauth(pc):
-                        reauth_recovered += 1
-                continue
-            try:
-                connected = bool(client.is_connected())
-                authorized = connected and await is_authorized_uncached(client)
-            except Exception:
-                connected = False
-                authorized = False
-            if connected and authorized:
-                if not health.in_flood():
-                    health.mark_connected()
-            else:
-                health.mark_disconnected()
-        # Добиваем осиротевшие каналы, если появились здоровые сессии.
-        if clump.pending_channels and clump.config.eff_auto_migrate():
-            try:
-                await clump.retry_pending_channels()
-            except Exception:
-                log.exception(
-                    "Ошибка повторного размещения pending-каналов clump %s",
-                    clump.clump_name,
-                )
-        if clump.config.eff_rebalance_enabled():
-            try:
-                await clump.rebalance_idle()
-            except Exception:
-                log.exception(
-                    "Ошибка idle-rebalance clump %s", clump.clump_name
-                )
-    if reauth_error_total:
-        log.info(
-            "account-auth-watchdog: тик завершён — ERROR-сессий=%d, "
-            "проверено=%d, восстановлено=%d",
-            reauth_error_total,
-            reauth_checked,
-            reauth_recovered,
+    try:
+        for clump in list(_clumps.values()):
+            for pc in list(clump.parser_client_list):
+                health = pc.health
+                health.clear_flood_if_expired()
+                if health.banned:
+                    continue
+                if health.status == SessionStatus.ERROR:
+                    reauth_error_total += 1
+                    if reauth_enabled and health.should_attempt_reauth(reauth_interval):
+                        reauth_checked += 1
+                        if await _attempt_session_reauth(pc):
+                            reauth_recovered += 1
+                    continue
+                client = _clients.get(_canonical_key(pc.session_name))
+                if client is None:
+                    # STARTING без клиента (enroll без каналов / после рестарта) —
+                    # пробуем подключить, иначе сессия навсегда «невидима» для health.
+                    if reauth_enabled and health.should_attempt_reauth(
+                        reauth_interval, allow_starting=True
+                    ):
+                        reauth_checked += 1
+                        if await _attempt_session_reauth(pc):
+                            reauth_recovered += 1
+                    continue
+                try:
+                    connected = bool(client.is_connected())
+                    authorized = connected and await is_authorized_uncached(client)
+                except Exception:
+                    connected = False
+                    authorized = False
+                if connected and authorized:
+                    if not health.in_flood():
+                        health.mark_connected()
+                else:
+                    health.mark_disconnected()
+            # Добиваем осиротевшие каналы, если появились здоровые сессии.
+            if clump.pending_channels and clump.config.eff_auto_migrate():
+                try:
+                    await clump.retry_pending_channels()
+                except Exception:
+                    log.exception(
+                        "Ошибка повторного размещения pending-каналов clump %s",
+                        clump.clump_name,
+                    )
+            if clump.config.eff_rebalance_enabled():
+                try:
+                    await clump.rebalance_idle()
+                except Exception:
+                    log.exception(
+                        "Ошибка idle-rebalance clump %s", clump.clump_name
+                    )
+        if reauth_error_total:
+            log.info(
+                "account-auth-watchdog: тик завершён — ERROR-сессий=%d, "
+                "проверено=%d, восстановлено=%d",
+                reauth_error_total,
+                reauth_checked,
+                reauth_recovered,
+            )
+    except Exception as exc:  # noqa: BLE001
+        health_error = str(exc)
+        raise
+    finally:
+        registry = get_watchdog_registry()
+        health_interval = get_session_health_check_interval()
+        await registry.record_tick(
+            WATCHDOG_SESSION_HEALTH,
+            duration_ms=health_timer.duration_ms(),
+            result={"clumps": len(_clumps)},
+            error=health_error,
+            interval_seconds=health_interval,
+            enabled=True,
+            process="discovery-api",
+        )
+        await registry.record_tick(
+            WATCHDOG_ACCOUNT_AUTH,
+            duration_ms=health_timer.duration_ms(),
+            result={
+                "error_sessions": reauth_error_total,
+                "checked": reauth_checked,
+                "recovered": reauth_recovered,
+            },
+            error=health_error,
+            interval_seconds=reauth_interval,
+            enabled=reauth_enabled,
+            process="discovery-api",
         )
 
 
 async def _health_monitor_loop() -> None:
     interval = get_session_health_check_interval()
+    registry = get_watchdog_registry()
+    registry.configure(
+        WATCHDOG_SESSION_HEALTH,
+        interval_seconds=interval,
+        enabled=True,
+        process="discovery-api",
+    )
+    registry.configure(
+        WATCHDOG_ACCOUNT_AUTH,
+        interval_seconds=get_account_auth_recheck_interval_seconds(),
+        enabled=get_account_auth_recheck_enabled(),
+        process="discovery-api",
+    )
     while True:
         try:
             await asyncio.sleep(interval)

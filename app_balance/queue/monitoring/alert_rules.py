@@ -114,28 +114,38 @@ def evaluate_alerts(
             )
         )
 
-    if snapshot.queue.stuck_count > 0 and snapshot.queue.done_last_5_min == 0:
+    # stuck сам по себе — инцидент; не привязываем к done=0 (ложные срабатывания в простое).
+    if snapshot.queue.stuck_count > 0:
         alerts.append(
             Alert(
                 code="stuck_no_progress",
                 severity="ERROR",
                 message=(
-                    f"Есть зависшие задачи (stuck={snapshot.queue.stuck_count}), "
-                    "но за 5 минут ничего не завершено"
+                    f"Есть зависшие задачи (stuck={snapshot.queue.stuck_count})"
                 ),
                 scope_key="global",
                 metrics_snapshot=metrics,
             )
         )
 
-    if snapshot.queue.total > 0 and snapshot.queue.done_last_5_min == 0:
+    # In→out: алерт только если есть работа (pickable или новый ingress)
+    # и worker не делает попыток и не завершает задачи.
+    flow = snapshot.queue.flow
+    has_demand = flow.pickable_now > 0 or flow.enqueued_last_5_min > 0
+    if (
+        has_demand
+        and flow.done_last_5_min == 0
+        and flow.attempts_last_5_min == 0
+        and snapshot.accounts.active > 0
+    ):
         alerts.append(
             Alert(
                 code="queue_no_progress",
                 severity="ERROR",
                 message=(
-                    f"Активная очередь ({snapshot.queue.total} задач), "
-                    "но за 5 минут ничего не завершено"
+                    f"Есть доступная работа (pickable={flow.pickable_now}, "
+                    f"enqueued_5m={flow.enqueued_last_5_min}), "
+                    "но за 5 минут нет attempts и done"
                 ),
                 scope_key="global",
                 metrics_snapshot=metrics,
