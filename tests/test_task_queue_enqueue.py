@@ -6,7 +6,9 @@ import uuid
 import pytest
 
 from app_balance.queue import db
+from app_balance.queue.error_codes import ErrorCode
 from app_balance.queue.task_queue import (
+    FATAL_ERROR_CODES,
     EnqueueInput,
     TaskQueueRepo,
     UnknownTaskTypeError,
@@ -18,6 +20,13 @@ _DEDUP_PREFIX = "test_b3_"
 
 def _unique_key() -> str:
     return f"{_DEDUP_PREFIX}{uuid.uuid4().hex}"
+
+
+def test_account_unauthorized_not_in_fatal_dedup_codes() -> None:
+    """Проблема сессии не должна навсегда блокировать канал в B12 fatal-dedup."""
+    assert ErrorCode.ACCOUNT_UNAUTHORIZED not in FATAL_ERROR_CODES
+    assert ErrorCode.BANNED in FATAL_ERROR_CODES
+    assert ErrorCode.CHANNEL_PRIVATE in FATAL_ERROR_CODES
 
 
 @pytest.fixture
@@ -219,6 +228,35 @@ async def test_enqueue_allows_retry_after_transient_failure(clean_queue) -> None
 
     assert second.created is True
     assert second.skipped_reason is None
+    assert second.task_id != first.task_id
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_enqueue_allows_retry_after_account_unauthorized(clean_queue) -> None:
+    """account_unauthorized — проблема аккаунта, не канала: re-enqueue разрешён."""
+    repo = TaskQueueRepo()
+    key = _unique_key()
+
+    first = await repo.enqueue(
+        EnqueueInput(task_type_code="parser_add_channel", dedup_key=key)
+    )
+    async with db.acquire() as conn:
+        await conn.execute(
+            "UPDATE task_queue SET status = 'failed', "
+            "last_error = 'account_unauthorized:session not authorized' "
+            "WHERE id = $1",
+            first.task_id,
+        )
+
+    second = await repo.enqueue(
+        EnqueueInput(task_type_code="parser_add_channel", dedup_key=key)
+    )
+
+    assert second.created is True
+    assert second.skipped_reason is None
+    assert second.fatal_error_code is None
     assert second.task_id != first.task_id
 
 
