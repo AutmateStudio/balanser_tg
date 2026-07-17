@@ -111,6 +111,7 @@ available_at = max(
 |----------|----------------|------------------|----------------|-----|
 | Свободен | `active` | `null` | `null` | зелёный / «доступен» |
 | FloodWait только PG (после рестарта API) | `cooldown` | ISO | = cooldown | таймер до ISO |
+| PG cooldown **истёк**, status ещё не сброшен | после health/API → `active` | `null` | `null` | автосброс `clear_expired_cooldowns` |
 | FloodWait только runtime | `active` или `null` | `null` | из `flood_until` | таймер |
 | PG cooldown > runtime flood | `cooldown` | ISO (дольше) | = PG | показывать PG |
 | Занят задачей | `active` | `null` | `null` | `current_task_id` ≠ null |

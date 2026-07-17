@@ -510,6 +510,11 @@ curl -s -H "X-API-Key: $DISCOVERY_API_KEY" \
 (overlay `available_at`, `queue_status`, `cooldown_until`). Спецификация:
 [`docs/account-cooldown-overlay-api.md`](account-cooldown-overlay-api.md).
 
+**Автосброс истёкшего cooldown:** `AccountsRepo.clear_expired_cooldowns` —
+`status=cooldown` + (`cooldown_until IS NULL` или `<= now()`) → `active`.
+Вызывается на тике HealthMonitor и перед снимком `/accounts/all`. Без этого
+UI «залипал» на cooldown после истечения таймера (сброс был только в `pick`).
+
 ---
 
 ## G4 — Алерты §26.4

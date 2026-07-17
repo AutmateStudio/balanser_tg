@@ -278,6 +278,49 @@ async def test_expired_cooldown_pickable_with_cooldown_status(cooldown_account) 
 @requires_pg
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_clear_expired_cooldowns_resets_status(cooldown_account) -> None:
+    """Истёкший cooldown не должен навсегда оставаться status=cooldown в PG."""
+    session_name, account_id = cooldown_account
+    repo = AccountsRepo()
+    until = datetime.now(timezone.utc) - timedelta(minutes=1)
+    await repo.set_cooldown(session_name, until)
+
+    cleared = await repo.clear_expired_cooldowns()
+    assert session_name in cleared
+
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, cooldown_until FROM accounts WHERE id = $1",
+            account_id,
+        )
+    assert row["status"] == "active"
+    assert row["cooldown_until"] is None
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_clear_expired_cooldowns_keeps_active_timer(cooldown_account) -> None:
+    session_name, account_id = cooldown_account
+    repo = AccountsRepo()
+    until = datetime.now(timezone.utc) + timedelta(minutes=10)
+    await repo.set_cooldown(session_name, until)
+
+    cleared = await repo.clear_expired_cooldowns()
+    assert session_name not in cleared
+
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, cooldown_until FROM accounts WHERE id = $1",
+            account_id,
+        )
+    assert row["status"] == "cooldown"
+    assert row["cooldown_until"] is not None
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_list_queue_states_for_dashboard_overlay(cooldown_account) -> None:
     from discovery_api.queue.account_queue_overlay import overlay_queue_state
 

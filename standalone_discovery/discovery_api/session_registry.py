@@ -585,6 +585,16 @@ async def _health_check_once() -> None:
                     log.exception(
                         "Ошибка idle-rebalance clump %s", clump.clump_name
                     )
+        # PG cooldown зеркалит runtime flood: после истечения таймера status
+        # должен стать active (раньше сбрасывался только при pick).
+        try:
+            from app_balance.queue.account_health_sync import (
+                clear_expired_account_cooldowns,
+            )
+
+            await clear_expired_account_cooldowns()
+        except Exception:
+            log.exception("health: clear_expired_account_cooldowns")
         if reauth_error_total:
             log.info(
                 "account-auth-watchdog: тик завершён — ERROR-сессий=%d, "

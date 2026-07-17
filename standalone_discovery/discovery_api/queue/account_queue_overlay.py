@@ -48,6 +48,15 @@ async def fetch_pg_queue_states() -> dict[str, AccountQueueState]:
         from app_balance.queue import db
 
         await db.init_pool()
+        # Сброс залипших cooldown до снимка — иначе UI вечно показывает cooldown
+        # после истечения таймера (status сбрасывался только в pick_and_reserve).
+        cleared = await _repo.clear_expired_cooldowns()
+        if cleared:
+            log.info(
+                "account_queue_overlay: сброшен истёкший cooldown у %d акк.: %s",
+                len(cleared),
+                ", ".join(cleared[:10]) + ("…" if len(cleared) > 10 else ""),
+            )
         return await _repo.list_queue_states()
     except Exception:
         log.warning("account_queue_overlay: не удалось прочитать PG accounts", exc_info=True)

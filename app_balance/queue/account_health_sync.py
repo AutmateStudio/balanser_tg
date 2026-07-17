@@ -121,3 +121,23 @@ async def persist_account_reauthorized(session_name: str) -> bool:
             exc_info=True,
         )
         return False
+
+
+async def clear_expired_account_cooldowns() -> list[str]:
+    """PG: status=cooldown → active после истечения таймера (зеркало runtime clear_flood)."""
+    if not await _ensure_pool():
+        return []
+    try:
+        cleared = await _repo.clear_expired_cooldowns()
+        if cleared:
+            log.info(
+                "account_health_sync: сброшен истёкший cooldown у %d акк.",
+                len(cleared),
+            )
+        return cleared
+    except Exception:
+        log.warning(
+            "account_health_sync: clear_expired_cooldowns не удался",
+            exc_info=True,
+        )
+        return []
