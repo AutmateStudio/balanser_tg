@@ -115,6 +115,19 @@ WHERE session_name = $1
 RETURNING id
 """
 
+# Истёкший / «залипший» cooldown: таймера уже нет, но status остался cooldown.
+# Без этого UI и metrics.accounts.in_cooldown показывают cooldown вечно,
+# пока аккаунт не попадёт в pick_and_reserve (который ставит active).
+_CLEAR_EXPIRED_COOLDOWNS_SQL = """
+UPDATE accounts
+SET status = 'active',
+    cooldown_until = NULL,
+    updated_at = now()
+WHERE status = 'cooldown'
+  AND (cooldown_until IS NULL OR cooldown_until <= now())
+RETURNING session_name
+"""
+
 _SET_BANNED_SQL = """
 UPDATE accounts
 SET status = 'banned',
@@ -318,6 +331,16 @@ class AccountsRepo:
         async with acquire() as conn:
             row = await conn.fetchrow(_SET_COOLDOWN_SQL, name, until)
             return row is not None
+
+    async def clear_expired_cooldowns(self) -> list[str]:
+        """Сбрасывает status=cooldown → active, если таймер истёк или NULL.
+
+        is_enabled / banned / error не трогает. Pick и так допускает истёкший
+        cooldown, но UI/metrics без этого «залипают» на cooldown.
+        """
+        async with acquire() as conn:
+            rows = await conn.fetch(_CLEAR_EXPIRED_COOLDOWNS_SQL)
+        return [str(r["session_name"]) for r in rows]
 
     async def set_banned(self, session_name: str, *, reason: str | None = None) -> bool:
         """Telegram ban: status → banned, сбрасывает cooldown."""
