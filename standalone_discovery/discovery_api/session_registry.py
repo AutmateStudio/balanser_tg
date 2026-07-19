@@ -31,6 +31,7 @@ from discovery_api.config import (
     get_api_id,
     get_add_channels_per_hour,
     get_channel_count_refresh_enabled,
+    get_channel_count_refresh_initial_delay_seconds,
     get_channel_count_refresh_interval_seconds,
     get_channel_count_refresh_stagger_seconds,
     get_max_channels_per_session,
@@ -747,6 +748,25 @@ async def _channel_count_refresh_once() -> None:
 
 async def _channel_count_refresh_loop() -> None:
     registry = get_watchdog_registry()
+    registry.configure(
+        WATCHDOG_CHANNEL_COUNT,
+        interval_seconds=get_channel_count_refresh_interval_seconds(),
+        enabled=get_channel_count_refresh_enabled(),
+        process="discovery-api",
+    )
+    # Первый проход — почти сразу после старта (небольшая задержка, чтобы
+    # restore_persisted_parsers успел поднять clump'ы), а не через полный
+    # interval (иначе telegram_channel_count был бы null на /accounts/all
+    # до получаса после каждого деплоя/рестарта).
+    try:
+        await asyncio.sleep(get_channel_count_refresh_initial_delay_seconds())
+        if get_channel_count_refresh_enabled():
+            await _channel_count_refresh_once()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("Ошибка в первом проходе channel-count-refresher")
+
     while True:
         interval = get_channel_count_refresh_interval_seconds()
         registry.configure(

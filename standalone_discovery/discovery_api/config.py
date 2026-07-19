@@ -185,6 +185,17 @@ def get_channel_count_refresh_stagger_seconds() -> float:
     return max(0.0, _get_float_env("CHANNEL_COUNT_REFRESH_STAGGER_SECONDS", 2.0))
 
 
+def get_channel_count_refresh_initial_delay_seconds() -> float:
+    """Задержка (сек) перед первым проходом после старта процесса.
+
+    Без неё после каждого деплоя/рестарта telegram_channel_count был бы
+    null на /accounts/all до истечения полного CHANNEL_COUNT_REFRESH_INTERVAL_SECONDS
+    (по умолчанию 30 мин) — тик приходил только "после" сна на interval.
+    Небольшая, а не нулевая задержка — чтобы clump успел restore/connect сессии.
+    """
+    return max(0.0, _get_float_env("CHANNEL_COUNT_REFRESH_INITIAL_DELAY_SECONDS", 30.0))
+
+
 def get_add_channels_per_hour() -> int:
     """Лимит успешных добавлений каналов на сессию в час (0 = без лимита)."""
     return max(0, _get_int_env("ADD_CHANNELS_PER_HOUR", 0))

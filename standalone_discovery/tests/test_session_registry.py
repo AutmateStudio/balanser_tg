@@ -467,5 +467,34 @@ class AccountAuthWatchdogHealthCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pc.health.status, SessionStatus.ERROR)
 
 
+class ChannelCountRefreshLoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_first_pass_uses_initial_delay_not_full_interval(self) -> None:
+        """Регресс: без initial-delay первый тик приходил только через полный
+        CHANNEL_COUNT_REFRESH_INTERVAL_SECONDS (по умолчанию 30 мин) — все
+        аккаунты на /accounts/all оставались с telegram_channel_count=null
+        до получаса после каждого деплоя/рестарта."""
+        from discovery_api import session_registry as sr
+
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            if len(sleep_calls) >= 2:
+                raise asyncio.CancelledError()
+
+        with (
+            patch("discovery_api.session_registry.get_channel_count_refresh_initial_delay_seconds", return_value=30.0),
+            patch("discovery_api.session_registry.get_channel_count_refresh_interval_seconds", return_value=1800.0),
+            patch("discovery_api.session_registry.get_channel_count_refresh_enabled", return_value=True),
+            patch("discovery_api.session_registry.asyncio.sleep", side_effect=_fake_sleep),
+            patch.object(sr, "_channel_count_refresh_once", new_callable=AsyncMock) as once_mock,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await sr._channel_count_refresh_loop()
+
+        self.assertEqual(sleep_calls, [30.0, 1800.0])
+        once_mock.assert_awaited_once()
+
+
 if __name__ == "__main__":
     unittest.main()
