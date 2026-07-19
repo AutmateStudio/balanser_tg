@@ -71,6 +71,8 @@
     },
     {
       "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ filteringPrompt: $('Code in JavaScript').item.json.lead_search_prompt || '', companyContext: (($('Execute a SQL query').item.json.company_context || '').trim() !== '' ? $('Execute a SQL query').item.json.company_context : (($('Code in JavaScript').item.json.search_filters || {}).aiCompanyContext || '')), servicesContext: (($('Execute a SQL query').item.json.services_context || '').trim() !== '' ? $('Execute a SQL query').item.json.services_context : (($('Code in JavaScript').item.json.search_filters || {}).aiServicesContext || '')) }) }}",
         "options": {}
       },
       "type": "n8n-nodes-base.respondToWebhook",
