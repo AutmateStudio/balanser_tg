@@ -6,7 +6,7 @@ name: lidogen-telegram-balancer
 #   docker builder prune -f                # очистка битого кэша BuildKit
 #
 # Локальная PG (profile local):  docker compose --profile local up -d postgres
-# Миграции (любая БД):           docker compose run --rm migrate
+# Миграции (БД из standalone_discovery/.env):  docker compose run --rm migrate
 # Тесты все (БД из .env):        docker compose run --rm test
 #   (на Linux dev-сервере: network_mode: host + .env с vps-100; preflight + pytest)
 # Тесты все (локальная PG):      docker compose --profile local run --rm test-local
@@ -43,12 +43,11 @@ services:
   migrate:
     <<: *balancer-image
     # Tailscale/MagicDNS на хосте (Linux dev-сервер); иначе vps-100 из контейнера недоступен.
+    # DSN очереди — тот же, что у discovery-api/worker (standalone_discovery/.env).
     network_mode: host
     env_file:
-      - path: .env
+      - path: standalone_discovery/.env
         required: false
-    environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
     command: ["bash", "scripts/migrate_queue.sh", "--mode", "${MIGRATE_MODE:-auto}"]
 
   migrate-local:
@@ -71,11 +70,13 @@ services:
     <<: *balancer-image
     network_mode: "container:standalone-discovery-vpn"
     restart: unless-stopped
+    # DSN очереди — standalone_discovery/.env (после корневого .env, чтобы перекрыть).
     env_file:
       - path: .env
         required: false
+      - path: standalone_discovery/.env
+        required: false
     environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WORKER_TASK_ADAPTER: ${WORKER_TASK_ADAPTER:-mock}
       WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-1.0}
@@ -89,9 +90,11 @@ services:
       API_ID: ${API_ID:-}
       API_HASH: ${API_HASH:-}
       # Пути внутри контейнера (не путать с HOST_SESSIONS_DIR — bind mount на хосте).
-      # PARSER_STORE_PATH = тот же файл, что пишет standalone_discovery (./data → /app/discovery_api/data).
+      # PARSER_STORE_PATH / ACCOUNT_STORE_PATH = тот же каталог, что пишет discovery-api
+      # (./standalone_discovery/data → /app/discovery_api/data).
       SESSIONS_DIR: /app/sessions
       PARSER_STORE_PATH: /app/discovery_api/data/parser_jobs.json
+      ACCOUNT_STORE_PATH: /app/discovery_api/data/telegram_accounts.db
     volumes:
       # Bind mount: путь на хосте должен начинаться с ./ или / (Compose иначе считает volume name).
       - ${HOST_SESSIONS_DIR:-./standalone_discovery/sessions}:/app/sessions
@@ -111,8 +114,9 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: standalone_discovery/.env
+        required: false
     environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PRODUCER_INTERVAL_SECONDS: ${PRODUCER_COLLECT_INTERVAL_SECONDS:-300}
     stop_signal: SIGTERM
@@ -126,8 +130,9 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: standalone_discovery/.env
+        required: false
     environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PRODUCER_INTERVAL_SECONDS: ${PRODUCER_UPDATE_INTERVAL_SECONDS:-3600}
       UPDATE_CHANNEL_STALE_AFTER_SECONDS: ${UPDATE_CHANNEL_STALE_AFTER_SECONDS:-}
@@ -144,8 +149,9 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: standalone_discovery/.env
+        required: false
     environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PRODUCER_INTERVAL_SECONDS: ${PRODUCER_BALANCER_INTERVAL_SECONDS:-300}
       WORKER_TASK_ADAPTER: ${WORKER_TASK_ADAPTER:-mock}
@@ -168,8 +174,9 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: standalone_discovery/.env
+        required: false
     environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MONITOR_INTERVAL_SECONDS: ${MONITOR_INTERVAL_SECONDS:-120}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
@@ -213,11 +220,14 @@ services:
     build: .
     # Доступ к vps-100 через Tailscale хоста (vps-101 и др. Linux dev-серверы).
     network_mode: host
+    # DSN очереди — тот же файл, что у migrate/discovery-api (standalone_discovery/.env).
     env_file:
       - path: .env
         required: false
+      - path: standalone_discovery/.env
+        required: false
     environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
+      # Не перекрываем пустым ${QUEUE_DATABASE_URL:-}: берём из env_file выше.
       PYTEST_TEST_PRIORITY: ${PYTEST_TEST_PRIORITY:-2000000000}
       DISCOVERY_BASE_URL: ${DISCOVERY_BASE_URL:-}
       DISCOVERY_API_KEY: ${DISCOVERY_API_KEY:-}

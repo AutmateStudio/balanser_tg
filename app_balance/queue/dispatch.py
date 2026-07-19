@@ -44,8 +44,21 @@ from app_balance.queue.task_queue import ClaimedTask, TaskQueueRepo
 
 logger = logging.getLogger(__name__)
 
-
-
+# Аккаунт-зависимые retryable-коды: при auto-pick сбрасываем account_id,
+# чтобы следующая попытка выбрала другой аккаунт.
+_ACCOUNT_SCOPED_RETRY_CODES = frozenset(
+    {
+        ErrorCode.CHANNELS_TOO_MUCH,
+        ErrorCode.ACCOUNT_UNAUTHORIZED,
+    }
+)
+_AUTO_PICK_TASK_TYPES = frozenset(
+    {
+        "parser_add_channel",
+        "telegram_discover",
+        "discover_groups",
+    }
+)
 
 
 class DispatchResult(str, Enum):
@@ -294,6 +307,7 @@ class TaskDispatcher:
                 account=account_name,
             )
             await self._sync_account_health_on_error(execute_account, exc)
+            await self._maybe_unassign_account_on_retry(task, task_type, exc)
             delay = (
                 exc.retry_after_seconds
                 if exc.retry_after_seconds is not None
@@ -694,6 +708,34 @@ class TaskDispatcher:
 
         return check.reason_code or ErrorCode.INSUFFICIENT_RESOURCE
 
+    async def _maybe_unassign_account_on_retry(
+        self,
+        task: ClaimedTask,
+        task_type: TaskType | None,
+        exc: RetryableError,
+    ) -> None:
+        """Сбрасывает account_id при аккаунт-зависимой ошибке auto-pick задач."""
+        code = normalize_error_code(exc.code)
+        if code not in _ACCOUNT_SCOPED_RETRY_CODES:
+            return
+        if task_type is None or task_type.code not in _AUTO_PICK_TASK_TYPES:
+            return
+        if task_type.uses_two_accounts:
+            return
+        try:
+            await self._queue.unassign_account(task.id)
+            logger.info(
+                "dispatch: unassign account_id после %s task_id=%s (смена аккаунта на retry)",
+                code,
+                task.id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "dispatch: не удалось unassign_account task_id=%s",
+                task.id,
+                exc_info=True,
+            )
+
     async def _finish_attempt(
         self,
         attempt_id: int | None,
@@ -748,6 +790,7 @@ class TaskDispatcher:
                         exc_info=True,
                     )
         elif isinstance(exc, PermanentError) and code == ErrorCode.BANNED:
+            # Только глобальный бан аккаунта — не banned_in_channel.
             try:
                 await self._accounts.set_banned(
                     account.session_name,
@@ -759,7 +802,7 @@ class TaskDispatcher:
                     account.session_name,
                     exc_info=True,
                 )
-        elif isinstance(exc, PermanentError) and code == ErrorCode.ACCOUNT_UNAUTHORIZED:
+        elif code == ErrorCode.ACCOUNT_UNAUTHORIZED:
             message = getattr(exc, "message", None) or str(exc)
             try:
                 from discovery_api.session_registry import notify_session_unauthorized

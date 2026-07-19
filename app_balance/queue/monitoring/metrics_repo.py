@@ -258,10 +258,15 @@ class MetricsSnapshot:
 def _build_channel_capacity(
     channel_row: Any,
     max_channels_per_session: int,
+    *,
+    fleet_capacity_override: int | None = None,
 ) -> ChannelCapacityMetrics:
     active_accounts = _int_val(channel_row["active_accounts_count"])
     assigned_total = _int_val(channel_row["assigned_channels_total"])
-    fleet_capacity = active_accounts * max(1, max_channels_per_session)
+    if fleet_capacity_override is not None and fleet_capacity_override > 0:
+        fleet_capacity = fleet_capacity_override
+    else:
+        fleet_capacity = active_accounts * max(1, max_channels_per_session)
     usage_percent = (
         (assigned_total / fleet_capacity * 100.0) if fleet_capacity > 0 else 0.0
     )
@@ -473,8 +478,33 @@ class MetricsRepo:
         if channel_row is None:
             raise RuntimeError("v_channel_capacity_usage вернул пустой результат")
 
+        # Ёмкость флота: сумма per-account лимитов из account store (если доступен),
+        # иначе active_accounts * global max_channels_per_session.
+        fleet_override: int | None = None
+        try:
+            from discovery_api.account_registry import (
+                eff_channel_limit_info,
+                list_accounts,
+            )
+
+            total_cap = 0
+            for rec in list_accounts():
+                if rec.get("admin_blocked"):
+                    continue
+                limit, _src = eff_channel_limit_info(
+                    str(rec.get("session_name") or ""),
+                    config.max_channels_per_session,
+                )
+                total_cap += max(1, int(limit))
+            if total_cap > 0:
+                fleet_override = total_cap
+        except Exception:
+            fleet_override = None
+
         channels = _build_channel_capacity(
-            channel_row, config.max_channels_per_session
+            channel_row,
+            config.max_channels_per_session,
+            fleet_capacity_override=fleet_override,
         )
         error_rates = ErrorRatesMetrics(
             by_task_type=tuple(

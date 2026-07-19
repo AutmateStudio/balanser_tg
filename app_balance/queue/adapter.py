@@ -16,6 +16,8 @@ from app_balance.queue.errors import (
     PermanentError,
     QueueTaskError,
     RetryableError,
+    account_unauthorized_retry_seconds,
+    join_pending_retry_seconds,
     map_clump_error_message,
     map_telethon_exception,
 )
@@ -148,6 +150,43 @@ def _default_account_getter() -> AccountGetter:
     return repo.get_by_id
 
 
+def _raise_clump_result_error(result: dict[str, Any]) -> None:
+    """Поднимает typed error из ответа clump (предпочитает error_code)."""
+    error = result.get("error")
+    if not error:
+        return
+    error_code = result.get("error_code")
+    if isinstance(error_code, str) and error_code.strip():
+        code = error_code.strip()
+        if code in (
+            ErrorCode.CHANNEL_PRIVATE,
+            ErrorCode.CHANNEL_HAS_NO_DISCUSSION,
+            ErrorCode.USERNAME_NOT_FOUND,
+            ErrorCode.INVALID_PAYLOAD,
+            ErrorCode.BANNED_IN_CHANNEL,
+            ErrorCode.BANNED,
+        ):
+            raise PermanentError(code, str(error))
+        if code == ErrorCode.JOIN_PENDING:
+            raise RetryableError(
+                code,
+                str(error),
+                retry_after_seconds=join_pending_retry_seconds(),
+            )
+        if code == ErrorCode.ACCOUNT_UNAUTHORIZED:
+            raise RetryableError(
+                code,
+                str(error),
+                retry_after_seconds=account_unauthorized_retry_seconds(),
+            )
+        if code == ErrorCode.CHANNELS_TOO_MUCH:
+            raise RetryableError(code, str(error), retry_after_seconds=1800)
+        if code == ErrorCode.FLOOD_WAIT:
+            raise map_clump_error_message(str(error))
+        raise RetryableError(code, str(error))
+    raise map_clump_error_message(str(error))
+
+
 async def _start_clump_after_execute(*, parser_id: str, clump: ClumpLike) -> None:
     try:
         await clump.start()
@@ -187,7 +226,7 @@ async def _execute_parser_add_channel(
         raise map_telethon_exception(exc) from exc
     error = result.get("error")
     if error:
-        raise map_clump_error_message(str(error))
+        _raise_clump_result_error(result)
 
     log.info(
         "execute_task: parser_add_channel OK task_id=%s ref=%s session=%s chat_id=%s",
@@ -251,7 +290,7 @@ async def _execute_move_channel(
         raise map_telethon_exception(exc) from exc
     error = result.get("error")
     if error:
-        raise map_clump_error_message(str(error))
+        _raise_clump_result_error(result)
 
     await sync_after_move(task, target, clump)
     await _start_clump_after_execute(parser_id=parser_id, clump=clump)

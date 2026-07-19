@@ -1,0 +1,194 @@
+{
+  "name": "Эндпойнты ТГ парсер (новый prod API)",
+  "nodes": [
+    {
+      "id": "561c9807-4d62-4ed0-923d-bb2a2c3c4548",
+      "name": "QR авторизация",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -240,
+        -176
+      ],
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/auth/qr",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "authentication": "genericCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_name",
+              "value": "Lidochka_main"
+            }
+          ]
+        },
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      },
+      "typeVersion": 4.4
+    },
+    {
+      "id": "c4a2adda-aaaf-431b-a41e-cbe7d0b26526",
+      "name": "QR проверка статуса",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        176,
+        -176
+      ],
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/auth/qr/35c9ffca58284ee885f78586c6d5f9ea/status",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      },
+      "typeVersion": 4.4
+    },
+    {
+      "id": "17061c08-a73e-444b-a67f-b1dbdf29b796",
+      "name": "List parsers",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -528,
+        80
+      ],
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/list",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      },
+      "executeOnce": true,
+      "typeVersion": 4.2
+    },
+    {
+      "id": "8d0c696d-6cb8-485a-8934-fab0cfbf594b",
+      "name": "Delete",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -240,
+        64
+      ],
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/506cbb8d033c47598e83cf9253f90eae",
+        "method": "DELETE",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      },
+      "executeOnce": true,
+      "typeVersion": 4.2
+    },
+    {
+      "id": "eab370e7-d0da-4e81-8f88-0b0ca9d5820f",
+      "name": "Start",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        0,
+        80
+      ],
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/start",
+        "method": "POST",
+        "options": {},
+        "jsonBody": "{\n  \"session_name\": \"/app/sessions/Lidochka_main\",\n  \"webhook_url\": \"https://n8n-lidogen.web.oboyma.ai/webhook/telegram-messages\",\n  \"channel_list\": [\n    \"@pravoalpha\",\n    \"@grpolidotest\",\n    \"@balichat\"\n  ]\n}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      },
+      "executeOnce": true,
+      "typeVersion": 4.2
+    },
+    {
+      "id": "cecd0562-b0d2-4b86-ab5e-a07ab1976224",
+      "name": "Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        240,
+        64
+      ],
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/status/3dbd2ebb9cbd4e3b8207609af35a0806",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      },
+      "executeOnce": true,
+      "typeVersion": 4.2
+    },
+    {
+      "id": "50cc781e-bfd5-4da3-825c-8c0f5f2c5d81",
+      "name": "Stop",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        688,
+        32
+      ],
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/stop/={{ $json.parser_id || $json.id }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "authentication": "genericCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      },
+      "typeVersion": 4.4
+    }
+  ],
+  "connections": {},
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null
+}

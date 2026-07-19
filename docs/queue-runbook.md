@@ -31,6 +31,7 @@
 | `clump_not_loaded` | Parser clump не загружен | retry | Убедиться, что парсер запущен (`/parser/start`) |
 | `transient_error` | Timeout / временный сбой сети | retry | Обычно проходит сам; при массовости — проверить сеть/сервер |
 | `unknown_task_type:*` | Тип задачи не найден или выключен | retry → failed | Проверить seed `task_types`, включить тип |
+| `account_unauthorized` | Сессия аккаунта не авторизована в Telegram | retry через 30 мин (`ACCOUNT_UNAUTHORIZED_RETRY_SECONDS`) + sync health | Переавторизовать аккаунт (сессия/2FA); задача повторится после re-auth. **Не** блокирует B12 fatal-dedup по каналу |
 
 ### Permanent (немедленный `failed`)
 
@@ -40,7 +41,6 @@
 | `username_not_found` | Telethon `No user has "X" as username` — юзернейм не занят (удалён/сменён), `ResolveUsernameRequest` стабильно вернёт то же | failed | Не пытаться повторно этот канал; удалить/актуализировать ссылку в источнике |
 | `account_not_found` | Аккаунт отсутствует в PG | failed | Синхронизировать аккаунты |
 | `unsupported_task_type` | Adapter не поддерживает тип | failed | Дождаться реализации adapter-ветки |
-| `account_unauthorized` | Сессия аккаунта не авторизована в Telegram | failed + sync health | Переавторизовать аккаунт (сессия/2FA). **Не** блокирует B12 fatal-dedup по каналу — после re-auth / на другом аккаунте канал можно ставить снова без `force_retry` |
 
 ### Postpone (отложить без расхода attempt)
 

@@ -60,6 +60,8 @@ class SessionStatus:
 
 # Ошибки, означающие, что аккаунт заблокирован/сессия отозвана — миграция каналов
 # на здоровые сессии и остановка listener'а.
+# UnauthorizedError сюда НЕ входит: это часто временная/иная auth-ошибка,
+# классифицируется отдельно как kind=unauthorized.
 _BANNED_ERRORS: Tuple[type[BaseException], ...] = (
     te.UserDeactivatedBanError,
     te.UserDeactivatedError,
@@ -68,7 +70,6 @@ _BANNED_ERRORS: Tuple[type[BaseException], ...] = (
     te.SessionRevokedError,
     te.SessionExpiredError,
     te.PhoneNumberBannedError,
-    te.UnauthorizedError,
 )
 
 # Временные ошибки сети/сервера — переподключение с backoff.
@@ -88,6 +89,8 @@ def is_session_unauthorized_error(exc: BaseException) -> bool:
     """True, если .session есть, но login отсутствует (не путать с ban/revoke)."""
     if isinstance(exc, _BANNED_ERRORS):
         return False
+    if isinstance(exc, te.UnauthorizedError):
+        return True
     msg = str(exc).lower()
     return any(marker in msg for marker in _UNAUTHORIZED_MESSAGE_MARKERS)
 
@@ -98,6 +101,7 @@ def classify_telethon_error(exc: BaseException) -> Tuple[ErrorKind, Optional[int
     Возвращает кортеж `(kind, seconds)`, где `kind`:
     - `flood` — `FloodWaitError`/`FloodError`; `seconds` = время ожидания;
     - `banned` — аккаунт заблокирован/сессия отозвана; `seconds` = None;
+    - `unauthorized` — сессия без login / UnauthorizedError; `seconds` = None;
     - `transient` — временная ошибка сети/сервера, нужен reconnect; `seconds` = None;
     - `fatal` — всё остальное (неизвестная ошибка); `seconds` = None.
 
@@ -109,10 +113,10 @@ def classify_telethon_error(exc: BaseException) -> Tuple[ErrorKind, Optional[int
         return "flood", seconds
     if isinstance(exc, _BANNED_ERRORS):
         return "banned", None
+    if isinstance(exc, te.UnauthorizedError) or is_session_unauthorized_error(exc):
+        return "unauthorized", None
     if isinstance(exc, _TRANSIENT_ERRORS):
         return "transient", None
-    if is_session_unauthorized_error(exc):
-        return "unauthorized", None
     return "fatal", None
 
 

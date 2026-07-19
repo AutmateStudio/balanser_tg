@@ -4,6 +4,9 @@ import os
 import sqlite3
 from typing import Dict, Iterable, Optional
 
+# TTL записей entity_cache (дни). По умолчанию 7.
+_DEFAULT_TTL_DAYS = 7
+
 
 def _get_db_path() -> str:
     base_dir = os.path.join(os.path.dirname(__file__), "data")
@@ -14,6 +17,14 @@ def _ensure_parent_dir(path: str) -> None:
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
+
+
+def _ttl_days() -> int:
+    raw = os.getenv("ENTITY_CACHE_TTL_DAYS", str(_DEFAULT_TTL_DAYS)).strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _DEFAULT_TTL_DAYS
 
 
 def init_entity_cache_db(db_path: Optional[str] = None) -> str:
@@ -30,6 +41,14 @@ def init_entity_cache_db(db_path: Optional[str] = None) -> str:
             """
         )
         conn.commit()
+        # Периодическая чистка просроченных записей (на каждый init — дёшево).
+        conn.execute(
+            f"""
+            DELETE FROM entity_cache
+            WHERE resolved_at < datetime('now', '-{_ttl_days()} days')
+            """
+        )
+        conn.commit()
     return path
 
 
@@ -42,10 +61,15 @@ def get_cached_chat_ids(
 
     path = init_entity_cache_db(db_path)
     placeholders = ",".join("?" for _ in names)
+    ttl = _ttl_days()
     with sqlite3.connect(path) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.execute(
-            f"SELECT username, chat_id FROM entity_cache WHERE username IN ({placeholders})",
+            f"""
+            SELECT username, chat_id FROM entity_cache
+            WHERE username IN ({placeholders})
+              AND resolved_at >= datetime('now', '-{ttl} days')
+            """,
             tuple(names),
         )
         rows = cur.fetchall()
@@ -76,4 +100,3 @@ def set_cached_chat_id(username: str, chat_id: int, *, db_path: Optional[str] = 
         )
         cur.close()
         conn.commit()
-

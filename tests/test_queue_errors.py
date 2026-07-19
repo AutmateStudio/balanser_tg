@@ -63,7 +63,7 @@ def test_map_clump_error_no_discussion_is_permanent() -> None:
     msg = "У канала «Test» нет чата обсуждений — прослушивание невозможно"
     mapped = map_clump_error_message(msg)
     assert isinstance(mapped, PermanentError)
-    assert mapped.code == "channel_private"
+    assert mapped.code == "channel_has_no_discussion"
 
 
 def test_map_clump_error_username_not_found_is_permanent() -> None:
@@ -82,6 +82,26 @@ def test_map_clump_error_join_pending_retries_in_30_min() -> None:
     assert isinstance(mapped, RetryableError)
     assert mapped.code == "join_pending"
     assert mapped.retry_after_seconds == 1800
+
+
+def test_map_clump_error_channels_too_much_is_retryable() -> None:
+    mapped = map_clump_error_message(
+        "не удалось вступить (channels_too_much); не участник"
+    )
+    assert isinstance(mapped, RetryableError)
+    assert mapped.code == "channels_too_much"
+
+
+def test_map_clump_error_banned_in_channel() -> None:
+    mapped = map_clump_error_message("UserBannedInChannelError: banned in channel")
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "banned_in_channel"
+
+
+def test_map_clump_error_unauthorized_word_is_retryable() -> None:
+    mapped = map_clump_error_message("Unauthorized: please login")
+    assert isinstance(mapped, RetryableError)
+    assert mapped.code == "account_unauthorized"
 
 
 def test_map_telethon_exception_flood_wait() -> None:
@@ -114,12 +134,14 @@ def test_map_telethon_exception_fatal() -> None:
 def test_map_telethon_exception_unauthorized_runtime() -> None:
     msg = "Сессия '/app/sessions/test4' не авторизована; войдите в аккаунт"
     mapped = map_telethon_exception(RuntimeError(msg))
-    assert isinstance(mapped, PermanentError)
+    assert isinstance(mapped, RetryableError)
     assert mapped.code == "account_unauthorized"
+    assert mapped.retry_after_seconds == 1800
 
 
 def test_map_clump_error_unauthorized_russian() -> None:
     msg = "Сессия '/app/sessions/Test3' не авторизована; войдите в аккаунт"
     mapped = map_clump_error_message(msg)
-    assert isinstance(mapped, PermanentError)
+    assert isinstance(mapped, RetryableError)
     assert mapped.code == "account_unauthorized"
+    assert mapped.retry_after_seconds == 1800

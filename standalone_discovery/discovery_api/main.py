@@ -277,6 +277,12 @@ async def on_shutdown() -> None:
     await stop_action_worker()
     await _stop_inprocess_worker()
     await release_all()
+    try:
+        from discovery_api.parser_functions import shutdown_webhook_dispatch
+
+        await shutdown_webhook_dispatch()
+    except Exception:  # noqa: BLE001
+        log.warning("shutdown: webhook dispatch cleanup failed", exc_info=True)
     if get_use_pg_queue():
         from app_balance.queue import db
 

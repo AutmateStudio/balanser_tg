@@ -800,7 +800,7 @@ class Parser_client:
             "channels": list(self.channels),
             "allowed_chat_ids": sorted(int(x) for x in self.allowed_chat_ids),
             "running": self.is_running(),
-            "channel_count": len(self.channels),
+            "channel_count": max(len(self.channels), len(self.allowed_chat_ids)),
             "health": self.health.to_dict(),
         }
 
@@ -915,13 +915,23 @@ class Parser_client:
             self._stop_requested = True
             task = self._supervisor_task
             self._supervisor_task = None
-            if task is None or task.done():
-                return
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            client = find_registered_client(self.session_name)
+            if client is not None:
+                try:
+                    if client.is_connected():
+                        await client.disconnect()
+                except Exception:  # noqa: BLE001
+                    log.debug(
+                        "parser stop: disconnect failed session=%s",
+                        self.session_name,
+                        exc_info=True,
+                    )
 
     async def _respect_resolve_pacing(self) -> None:
         """Гарантирует минимальный интервал между resolve-RPC на одну сессию."""
@@ -936,13 +946,13 @@ class Parser_client:
 
     async def add_channel(
         self, raw: str, *, webhook_url: Optional[str] = None
-    ) -> tuple[Optional[int], Optional[str]]:
+    ) -> tuple[Optional[int], Optional[str], Optional[str]]:
         from discovery_api.parser_functions import resolve_channel_to_chat_id
 
         wh = (webhook_url or self._webhook_url or "").strip()
         client = await self.get_client()
         await self._respect_resolve_pacing()
-        chat_id, err = await resolve_channel_to_chat_id(client, raw)
+        chat_id, err, error_code = await resolve_channel_to_chat_id(client, raw, join=True)
         if err or chat_id is None:
             # FloodWait при resolve гасится в строку — поднимаем его в health,
             # чтобы балансировщик увёл следующие каналы на другую сессию.
@@ -950,11 +960,15 @@ class Parser_client:
             if flood_secs is not None:
                 self.health.mark_flood(flood_secs)
                 await _persist_flood_cooldown_pg(self.session_name, flood_secs)
-            return None, err
+            return None, err, error_code
 
         cid = int(chat_id)
         if cid in self.allowed_chat_ids:
-            return cid, None
+            # already_present: синхронизируем channels/ref_to_chat_id
+            self.ref_to_chat_id[raw] = cid
+            if raw not in self.channels:
+                self.channels.append(raw)
+            return cid, None, None
 
         self.allowed_chat_ids.add(cid)
         self.ref_to_chat_id[raw] = cid
@@ -971,7 +985,7 @@ class Parser_client:
             cid,
             self.is_running(),
         )
-        return cid, None
+        return cid, None, None
 
     async def remove_channel(self, raw: str) -> bool:
         from discovery_api.parser_functions import resolve_channel_to_chat_id
@@ -979,7 +993,10 @@ class Parser_client:
         cid = self.ref_to_chat_id.get(raw)
         if cid is None:
             client = await self.get_client()
-            resolved, err = await resolve_channel_to_chat_id(client, raw)
+            # join=False — не вступать в канал при удалении
+            resolved, err, _code = await resolve_channel_to_chat_id(
+                client, raw, join=False
+            )
             if err or resolved is None:
                 return False
             cid = int(resolved)
@@ -1050,7 +1067,20 @@ class SessionClump:
         return snapshot
 
     def has_session(self, session_name: str) -> bool:
-        return session_name in self._session_index
+        if session_name in self._session_index:
+            return True
+        key = _canonical_key(session_name)
+        return any(_canonical_key(name) == key for name in self._session_index)
+
+    def _resolve_pc(self, session_name: str) -> Optional[Parser_client]:
+        pc = self._session_index.get(session_name)
+        if pc is not None:
+            return pc
+        key = _canonical_key(session_name)
+        for name, candidate in self._session_index.items():
+            if _canonical_key(name) == key:
+                return candidate
+        return None
 
     @staticmethod
     def _default_display_name(session_name: str) -> str:
@@ -1104,7 +1134,7 @@ class SessionClump:
             "flood_remaining_seconds": flood_remaining,
             "connected": h.connected,
             "running": pc.is_running(),
-            "channel_count": len(pc.channels),
+            "channel_count": max(len(pc.channels), len(pc.allowed_chat_ids)),
             "max_channels_per_session": self.config.eff_max_channels_per_session(),
         }
 
@@ -1113,23 +1143,25 @@ class SessionClump:
 
     def account_detail(self, session_name: str) -> Optional[dict[str, Any]]:
         """Полная карточка аккаунта для формы редактирования."""
-        pc = self._session_index.get(session_name)
+        pc = self._resolve_pc(session_name)
         if pc is None:
             return None
-        meta = self.get_account_meta(session_name)
+        meta = self.get_account_meta(pc.session_name)
         return {
             "session_name": pc.session_name,
             "display_name": meta["display_name"],
             "description": meta["description"],
             "clump_name": self.clump_name,
             "running": pc.is_running(),
-            "channel_count": len(pc.channels),
+            # UI: фактическое число слушаемых каналов (allowed_chat_ids),
+            # не только refs в channels (могут расходиться при already_present).
+            "channel_count": max(len(pc.channels), len(pc.allowed_chat_ids)),
             "limits": self.config.to_dict(),
             "health": pc.health.to_dict(),
         }
 
     def account_channels(self, session_name: str) -> Optional[list[str]]:
-        pc = self._session_index.get(session_name)
+        pc = self._resolve_pc(session_name)
         if pc is None:
             return None
         return list(pc.channels)
@@ -1314,11 +1346,13 @@ class SessionClump:
                 }
 
         existing_ids = self.all_allowed_chat_ids()
-        chat_id, err = await pc.add_channel(ref, webhook_url=wh)
+        chat_id, err, error_code = await pc.add_channel(ref, webhook_url=wh)
         already_present = False
         if chat_id is not None and err is None:
             if int(chat_id) in existing_ids:
                 already_present = True
+                # Синхронизируем assignments даже при already_present
+                self.assignments[ref] = session_name
                 log.info(
                     "clump add_channel_on_session OK parser=%s session=%s ref=%s chat_id=%s already_present=true",
                     self.clump_name,
@@ -1331,6 +1365,7 @@ class SessionClump:
                     "session_name": session_name,
                     "chat_id": int(chat_id),
                     "error": None,
+                    "error_code": None,
                     "already_present": True,
                 }
             self.assignments[ref] = session_name
@@ -1347,6 +1382,7 @@ class SessionClump:
             "session_name": session_name,
             "chat_id": chat_id,
             "error": err,
+            "error_code": error_code,
             "already_present": already_present,
         }
 
@@ -1441,7 +1477,7 @@ class SessionClump:
                 self.assignments.pop(channel_ref, None)
 
         wh = (webhook_url or self.webhook_url or "").strip() or None
-        chat_id, err = await target.add_channel(channel_ref, webhook_url=wh)
+        chat_id, err, error_code = await target.add_channel(channel_ref, webhook_url=wh)
         if chat_id is not None and err is None:
             self.assignments[channel_ref] = to_session
 
@@ -1452,6 +1488,7 @@ class SessionClump:
             "session_name": to_session,
             "chat_id": chat_id,
             "error": err,
+            "error_code": error_code,
             "already_present": False,
             "moved": chat_id is not None and err is None,
         }
@@ -1478,12 +1515,13 @@ class SessionClump:
                     "error": None,
                     "already_present": True,
                 }
-            chat_id, err = await owner.add_channel(ref, webhook_url=self.webhook_url)
+            chat_id, err, error_code = await owner.add_channel(ref, webhook_url=self.webhook_url)
             return {
                 "channel": ref,
                 "session_name": owner.session_name,
                 "chat_id": chat_id,
                 "error": err,
+                "error_code": error_code,
                 "already_present": False,
             }
 
@@ -1499,17 +1537,20 @@ class SessionClump:
                 "session_name": None,
                 "chat_id": None,
                 "error": str(e),
+                "error_code": None,
                 "already_present": False,
                 "deferred": True,
             }
-        chat_id, err = await pc.add_channel(ref, webhook_url=self.webhook_url)
+        chat_id, err, error_code = await pc.add_channel(ref, webhook_url=self.webhook_url)
         if chat_id is not None and err is None:
             if int(chat_id) in existing_ids:
+                self.assignments[ref] = pc.session_name
                 return {
                     "channel": ref,
                     "session_name": pc.session_name,
                     "chat_id": int(chat_id),
                     "error": None,
+                    "error_code": None,
                     "already_present": True,
                 }
             self.assignments[ref] = pc.session_name
@@ -1518,6 +1559,7 @@ class SessionClump:
             "session_name": pc.session_name,
             "chat_id": chat_id,
             "error": err,
+            "error_code": error_code,
             "already_present": False,
         }
 
@@ -1678,7 +1720,7 @@ class SessionClump:
                     errors.append(f"{ref}: {e!s}")
                     continue
 
-                chat_id, err = await target.add_channel(
+                chat_id, err, error_code = await target.add_channel(
                     ref, webhook_url=self.webhook_url
                 )
                 if err or chat_id is None:
@@ -1727,7 +1769,7 @@ class SessionClump:
                     still_pending.append(ref)
                     errors.append(f"{ref}: {e!s}")
                     continue
-                chat_id, err = await target.add_channel(
+                chat_id, err, error_code = await target.add_channel(
                     ref, webhook_url=self.webhook_url
                 )
                 if err or chat_id is None:
@@ -1814,7 +1856,7 @@ class SessionClump:
                     source.ref_to_chat_id.pop(ref, None)
                     source.channels[:] = [c for c in source.channels if c != ref]
                     self.assignments.pop(ref, None)
-                    chat_id, err = await target.add_channel(
+                    chat_id, err, error_code = await target.add_channel(
                         ref, webhook_url=self.webhook_url
                     )
                     if err or chat_id is None:
@@ -1935,6 +1977,15 @@ class SessionClump:
         if isinstance(allowed_raw, list):
             allowed_set = {int(x) for x in allowed_raw}
 
+        ref_map_raw = record.get("ref_to_chat_id")
+        ref_map: dict[str, int] = {}
+        if isinstance(ref_map_raw, dict):
+            for k, v in ref_map_raw.items():
+                try:
+                    ref_map[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    continue
+
         # Legacy: один session_name в записи
         legacy_session = record.get("session_name")
         if legacy_session and str(legacy_session) in self._session_index:
@@ -1949,7 +2000,9 @@ class SessionClump:
             pc = self._session_index.get(session_name) if session_name else default_pc
             if pc is None:
                 pc = default_pc
-            cid = pc.ref_to_chat_id.get(ref)
+            cid = ref_map.get(ref)
+            if cid is None:
+                cid = pc.ref_to_chat_id.get(ref)
             if cid is None:
                 try:
                     numeric = int(ref)
@@ -1958,9 +2011,13 @@ class SessionClump:
                 except ValueError:
                     pass
             if cid is None:
-                try:
-                    cid = next(chat_ids_iter)
-                except StopIteration:
+                # Legacy fallback: только если нет ref_to_chat_id в записи
+                if not ref_map:
+                    try:
+                        cid = next(chat_ids_iter)
+                    except StopIteration:
+                        continue
+                else:
                     continue
             pc.restore_channel(ref, int(cid), webhook_url=wh)
             if ref not in self.assignments:

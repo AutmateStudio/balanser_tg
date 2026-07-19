@@ -67,11 +67,12 @@ class AddChannelListenResolveTests(unittest.TestCase):
             new_callable=AsyncMock,
             return_value=target,
         ):
-            chat_id, err = __import__("asyncio").run(
+            chat_id, err, code = __import__("asyncio").run(
                 resolve_channel_to_chat_id(client, "https://t.me/news")
             )
 
         self.assertIsNone(err)
+        self.assertIsNone(code)
         self.assertEqual(chat_id, -100222)
 
     def test_resolve_channel_to_chat_id_join_flood_wait_returns_flood_string(self) -> None:
@@ -89,12 +90,13 @@ class AddChannelListenResolveTests(unittest.TestCase):
             new_callable=AsyncMock,
             side_effect=FloodWaitError(request=None, capture=270),
         ):
-            chat_id, err = __import__("asyncio").run(
+            chat_id, err, code = __import__("asyncio").run(
                 resolve_channel_to_chat_id(client, unique_ref)
             )
 
         self.assertIsNone(chat_id)
         self.assertIn("FloodWait 270s", err or "")
+        self.assertEqual(code, "flood_wait")
 
 
 if __name__ == "__main__":
