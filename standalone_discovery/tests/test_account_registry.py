@@ -35,6 +35,43 @@ class AccountStoreTests(unittest.TestCase):
         self.assertTrue(rec2["admin_blocked"])
         self.assertEqual(rec2["block_reason"], "test")
 
+    def test_telegram_channel_count_absent_by_default(self) -> None:
+        from discovery_api.account_store import get_account, upsert_account
+
+        upsert_account("Client1")
+        rec = get_account("Client1")
+        self.assertIsNone(rec["telegram_channel_count"])
+        self.assertIsNone(rec["telegram_channel_count_synced_at"])
+
+    def test_set_telegram_channel_count_creates_record_and_persists(self) -> None:
+        from discovery_api.account_store import get_account, set_telegram_channel_count
+
+        rec = set_telegram_channel_count("NewAccount", 17)
+        self.assertEqual(rec["telegram_channel_count"], 17)
+        self.assertIsNotNone(rec["telegram_channel_count_synced_at"])
+
+        rec2 = get_account("NewAccount")
+        self.assertEqual(rec2["telegram_channel_count"], 17)
+
+    def test_set_telegram_channel_count_does_not_reset_other_fields(self) -> None:
+        from discovery_api.account_store import (
+            get_account,
+            set_telegram_channel_count,
+            upsert_account,
+        )
+
+        upsert_account("Client1", display_name="C1", max_channels=10)
+        set_telegram_channel_count("Client1", 500)
+        rec = get_account("Client1")
+        self.assertEqual(rec["display_name"], "C1")
+        self.assertEqual(rec["max_channels"], 10)
+        self.assertEqual(rec["telegram_channel_count"], 500)
+
+        # Обычный upsert (без явного значения) не должен стирать кэш счётчика.
+        upsert_account("Client1", description="new desc")
+        rec2 = get_account("Client1")
+        self.assertEqual(rec2["telegram_channel_count"], 500)
+
 
 class AccountRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -253,6 +290,45 @@ class AccountEndpointTests(unittest.TestCase):
         self.assertGreaterEqual(data["total"], 1)
         names = {a["session_name"] for a in data["accounts"]}
         self.assertIn("Client1", names)
+
+    def test_accounts_all_exposes_cached_telegram_channel_count(self) -> None:
+        """channel_count (балансировщик) и telegram_channel_count (честный, из
+        Telegram) — разные числа; /accounts/all должен отдавать оба."""
+        from discovery_api.account_store import set_telegram_channel_count
+
+        set_telegram_channel_count("Client1", 483)
+
+        resp = self.client.get("/discovery-api/parser/accounts/all")
+        self.assertEqual(resp.status_code, 200)
+        row = next(a for a in resp.json()["accounts"] if a["session_name"] == "Client1")
+        self.assertEqual(row["telegram_channel_count"], 483)
+        self.assertIsNotNone(row["telegram_channel_count_synced_at"])
+
+    def test_refresh_channel_count_endpoint_persists_and_returns_count(self) -> None:
+        from discovery_api.session_dialogs import AccountMembershipSnapshot
+
+        with patch(
+            "discovery_api.session_dialogs.scan_account_channel_membership",
+            new_callable=AsyncMock,
+            return_value=AccountMembershipSnapshot(42, 0, 0),
+        ):
+            resp = self.client.post(
+                "/discovery-api/parser/accounts/Client1/refresh-channel-count"
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["telegram_channel_count"], 42)
+
+        from discovery_api.account_store import get_account
+
+        rec = get_account("Client1")
+        self.assertEqual(rec["telegram_channel_count"], 42)
+
+    def test_refresh_channel_count_endpoint_404_for_missing_session_file(self) -> None:
+        resp = self.client.post(
+            "/discovery-api/parser/accounts/NoSuchAccount/refresh-channel-count"
+        )
+        self.assertEqual(resp.status_code, 404)
 
     def test_block_and_unblock(self) -> None:
         resp = self.client.patch(

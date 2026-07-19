@@ -30,6 +30,9 @@ from discovery_api.config import (
     get_api_hash,
     get_api_id,
     get_add_channels_per_hour,
+    get_channel_count_refresh_enabled,
+    get_channel_count_refresh_interval_seconds,
+    get_channel_count_refresh_stagger_seconds,
     get_max_channels_per_session,
     get_rebalance_cooldown_hours,
     get_rebalance_enabled,
@@ -50,6 +53,7 @@ from discovery_api.config import (
 )
 from app_balance.queue.monitoring.watchdog_heartbeat import (
     WATCHDOG_ACCOUNT_AUTH,
+    WATCHDOG_CHANNEL_COUNT,
     WATCHDOG_SESSION_HEALTH,
     TickTimer,
     get_watchdog_registry,
@@ -68,6 +72,7 @@ _session_strings: dict[str, str] = {}
 _locks: dict[str, asyncio.Lock] = {}
 _clumps: dict[str, "SessionClump"] = {}
 _health_monitor_task: asyncio.Task[None] | None = None
+_channel_count_refresh_task: asyncio.Task[None] | None = None
 
 # F3: однократный warning о выключении idle-rebalance при активном PG-балансере.
 _warned_rebalance_disabled = False
@@ -677,6 +682,107 @@ async def stop_health_monitor() -> None:
     global _health_monitor_task
     task = _health_monitor_task
     _health_monitor_task = None
+    if task is None or task.done():
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+async def _channel_count_refresh_once() -> None:
+    """Один проход: honest telegram_channel_count для уже подключённых сессий.
+
+    Ограничивается сессиями, у которых уже есть живой клиент в реестре
+    (`_clients`) — новых подключений ради этой сверки не открываем, чтобы не
+    трогать аккаунты вне clump/офлайн без явного enroll/reactivate.
+    """
+    from discovery_api.session_dialogs import refresh_and_persist_channel_count
+
+    timer = TickTimer()
+    error: str | None = None
+    refreshed = 0
+    failed = 0
+    stagger = get_channel_count_refresh_stagger_seconds()
+    try:
+        seen: set[str] = set()
+        for clump in list(_clumps.values()):
+            for pc in list(clump.parser_client_list):
+                session_name = pc.session_name
+                key = _canonical_key(session_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if key not in _clients or not pc.health.is_available():
+                    continue
+                snapshot = await refresh_and_persist_channel_count(session_name, clump)
+                if snapshot.error is None:
+                    refreshed += 1
+                else:
+                    failed += 1
+                if stagger > 0:
+                    await asyncio.sleep(stagger)
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+        raise
+    finally:
+        registry = get_watchdog_registry()
+        await registry.record_tick(
+            WATCHDOG_CHANNEL_COUNT,
+            duration_ms=timer.duration_ms(),
+            result={"refreshed": refreshed, "failed": failed},
+            error=error,
+            interval_seconds=get_channel_count_refresh_interval_seconds(),
+            enabled=get_channel_count_refresh_enabled(),
+            process="discovery-api",
+        )
+        if refreshed or failed:
+            log.info(
+                "channel-count-refresher: тик завершён — обновлено=%d, ошибок=%d",
+                refreshed,
+                failed,
+            )
+
+
+async def _channel_count_refresh_loop() -> None:
+    registry = get_watchdog_registry()
+    while True:
+        interval = get_channel_count_refresh_interval_seconds()
+        registry.configure(
+            WATCHDOG_CHANNEL_COUNT,
+            interval_seconds=interval,
+            enabled=get_channel_count_refresh_enabled(),
+            process="discovery-api",
+        )
+        try:
+            await asyncio.sleep(interval)
+            if get_channel_count_refresh_enabled():
+                await _channel_count_refresh_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Ошибка в цикле channel-count-refresher")
+
+
+def start_channel_count_refresher() -> None:
+    """Запускает периодическую сверку honest telegram_channel_count (идемпотентно)."""
+    global _channel_count_refresh_task
+    if _channel_count_refresh_task is not None and not _channel_count_refresh_task.done():
+        return
+    try:
+        _channel_count_refresh_task = asyncio.create_task(
+            _channel_count_refresh_loop(), name="channel-count-refresher"
+        )
+        log.info("ChannelCountRefresher запущен")
+    except RuntimeError:
+        log.debug("ChannelCountRefresher не запущен: нет активного event loop")
+
+
+async def stop_channel_count_refresher() -> None:
+    global _channel_count_refresh_task
+    task = _channel_count_refresh_task
+    _channel_count_refresh_task = None
     if task is None or task.done():
         return
     task.cancel()

@@ -32,6 +32,14 @@ class FailingDialogsClient:
         yield  # noqa: unreachable — оставляет метод асинхронным генератором
 
 
+class ChannelPeerIdTests(unittest.TestCase):
+    def test_matches_telegram_marked_id_convention(self) -> None:
+        from discovery_api.session_dialogs import _channel_peer_id
+
+        # Реальный пример: raw channel_id 1234567890 -> "-100" + digits.
+        self.assertEqual(_channel_peer_id(1234567890), -1001234567890)
+
+
 class ScanClientChannelMembershipTests(unittest.IsolatedAsyncioTestCase):
     async def test_counts_only_channels_and_supergroups(self) -> None:
         from discovery_api.session_dialogs import scan_client_channel_membership
@@ -53,13 +61,18 @@ class ScanClientChannelMembershipTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cross_references_required_channels_from_clump(self) -> None:
         from discovery_api import session_registry as sr
-        from discovery_api.session_dialogs import scan_client_channel_membership
+        from discovery_api.session_dialogs import _channel_peer_id, scan_client_channel_membership
 
         sr.reset_for_tests()
         try:
             clump = sr.SessionClump(["/sess/a", "/sess/b"], "c", webhook_url="http://h")
-            clump.parser_client_list[0].ref_to_chat_id = {"@ref1": 100, "@ref2": 101}
-            clump.parser_client_list[1].ref_to_chat_id = {"@ref3": 999}
+            # ref_to_chat_id хранит marked peer_id (как в проде, через
+            # telethon.utils.get_peer_id при resolve) — не «голые» entity.id.
+            clump.parser_client_list[0].ref_to_chat_id = {
+                "@ref1": _channel_peer_id(100),
+                "@ref2": _channel_peer_id(101),
+            }
+            clump.parser_client_list[1].ref_to_chat_id = {"@ref3": _channel_peer_id(999)}
 
             client = FakeDialogsClient(
                 [_dialog(100, broadcast=True), _dialog(200, broadcast=True)]
@@ -68,6 +81,28 @@ class ScanClientChannelMembershipTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(snapshot.telegram_channel_count, 2)
             self.assertEqual(snapshot.required_channel_total, 3)
+            self.assertEqual(snapshot.required_channel_present, 1)
+        finally:
+            sr.reset_for_tests()
+
+    async def test_marks_raw_entity_id_before_comparing_with_ref_to_chat_id(self) -> None:
+        """Регресс: entity.id «голый» (без -100), ref_to_chat_id — marked peer_id.
+
+        Без преобразования пересечение было бы всегда пустым, даже если канал
+        на аккаунте реально есть (required_channel_present=0 при непустом clump).
+        """
+        from discovery_api import session_registry as sr
+        from discovery_api.session_dialogs import _channel_peer_id, scan_client_channel_membership
+
+        sr.reset_for_tests()
+        try:
+            clump = sr.SessionClump(["/sess/a"], "c", webhook_url="http://h")
+            clump.parser_client_list[0].ref_to_chat_id = {"@ref1": _channel_peer_id(555)}
+
+            client = FakeDialogsClient([_dialog(555, broadcast=True)])
+            snapshot = await scan_client_channel_membership(client, clump)
+
+            self.assertEqual(snapshot.required_channel_total, 1)
             self.assertEqual(snapshot.required_channel_present, 1)
         finally:
             sr.reset_for_tests()
@@ -106,6 +141,54 @@ class ScanAccountChannelMembershipTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(snapshot.telegram_channel_count, 1)
         self.assertIsNone(snapshot.error)
+
+
+class RefreshAndPersistChannelCountTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmpdir = tempfile.mkdtemp()
+        os.environ["ACCOUNT_STORE_PATH"] = os.path.join(self._tmpdir, "acc.db")
+        from discovery_api.account_store import reset_account_db_for_tests
+
+        reset_account_db_for_tests()
+
+    def tearDown(self) -> None:
+        os.environ.pop("ACCOUNT_STORE_PATH", None)
+
+    async def test_persists_count_on_success(self) -> None:
+        from discovery_api.account_store import get_account
+        from discovery_api.session_dialogs import refresh_and_persist_channel_count
+
+        fake_client = FakeDialogsClient(
+            [_dialog(1, broadcast=True), _dialog(2, megagroup=True)]
+        )
+        with patch(
+            "discovery_api.session_dialogs.get_or_create_client",
+            AsyncMock(return_value=fake_client),
+        ):
+            snapshot = await refresh_and_persist_channel_count("Client1")
+
+        self.assertEqual(snapshot.telegram_channel_count, 2)
+        rec = get_account("Client1")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["telegram_channel_count"], 2)
+        self.assertIsNotNone(rec["telegram_channel_count_synced_at"])
+
+    async def test_does_not_persist_on_error(self) -> None:
+        from discovery_api.account_store import get_account, upsert_account
+        from discovery_api.session_dialogs import refresh_and_persist_channel_count
+
+        upsert_account("Client1")
+        with patch(
+            "discovery_api.session_dialogs.get_or_create_client",
+            AsyncMock(side_effect=RuntimeError("не авторизована")),
+        ):
+            snapshot = await refresh_and_persist_channel_count("Client1")
+
+        self.assertIsNotNone(snapshot.error)
+        rec = get_account("Client1")
+        self.assertIsNone(rec["telegram_channel_count"])
 
 
 class FindClumpForSessionTests(unittest.IsolatedAsyncioTestCase):

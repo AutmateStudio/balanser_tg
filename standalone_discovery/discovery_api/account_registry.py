@@ -158,6 +158,15 @@ def list_all_accounts_merged(
             "running": rt[2].get("running", False) if rt else False,
             "channel_count": rt[2].get("channel_count", 0) if rt else 0,
             "last_error": rt[2].get("last_error") if rt else None,
+            # Honest-счётчик из Telegram (iter_dialogs) — кэш из account_store,
+            # обновляется периодическим watchdog'ом и enroll/reactivate/refresh
+            # (см. session_dialogs.refresh_and_persist_channel_count). В отличие
+            # от channel_count (сколько закреплено за аккаунтом в балансировщике),
+            # это ВСЕ каналы/супергруппы, в которых аккаунт реально состоит.
+            "telegram_channel_count": (rec or {}).get("telegram_channel_count"),
+            "telegram_channel_count_synced_at": (rec or {}).get(
+                "telegram_channel_count_synced_at"
+            ),
         }
         result.append(row)
 

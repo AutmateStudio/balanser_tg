@@ -15,7 +15,12 @@ from discovery_api.bot_registry import start_bot_polling_once, stop_bot_polling
 from discovery_api.config import get_inprocess_worker, get_inprocess_worker_count, get_use_pg_queue
 from discovery_api.parser_router import parser_router, restore_persisted_parsers, setup_parser_services
 from discovery_api.router import router
-from discovery_api.session_registry import release_all, start_health_monitor
+from discovery_api.session_registry import (
+    release_all,
+    start_channel_count_refresher,
+    start_health_monitor,
+    stop_channel_count_refresher,
+)
 from discovery_api.account_registry import sync_accounts_from_disk
 
 log = logging.getLogger(__name__)
@@ -259,6 +264,7 @@ async def on_startup() -> None:
     await restore_persisted_parsers()
     setup_parser_services()
     start_health_monitor()
+    start_channel_count_refresher()
     if get_use_pg_queue():
         if get_inprocess_worker():
             await _start_inprocess_worker()
@@ -276,6 +282,7 @@ async def on_shutdown() -> None:
     stop_bot_polling()
     await stop_action_worker()
     await _stop_inprocess_worker()
+    await stop_channel_count_refresher()
     await release_all()
     try:
         from discovery_api.parser_functions import shutdown_webhook_dispatch

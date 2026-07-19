@@ -16,12 +16,14 @@ WATCHDOG_STUCK = "stuck_task_watchdog"
 WATCHDOG_SESSION_HEALTH = "session_health_monitor"
 WATCHDOG_ACCOUNT_AUTH = "account_auth_watchdog"
 WATCHDOG_QUEUE_MONITOR = "queue_monitor"
+WATCHDOG_CHANNEL_COUNT = "channel_count_refresher"
 
 KNOWN_WATCHDOGS: tuple[str, ...] = (
     WATCHDOG_STUCK,
     WATCHDOG_SESSION_HEALTH,
     WATCHDOG_ACCOUNT_AUTH,
     WATCHDOG_QUEUE_MONITOR,
+    WATCHDOG_CHANNEL_COUNT,
 )
 
 _UPSERT_SQL = """

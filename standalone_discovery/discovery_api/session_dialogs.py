@@ -49,6 +49,19 @@ class AccountMembershipSnapshot:
 
 _EMPTY = AccountMembershipSnapshot(0, 0, 0)
 
+# Telethon-формула marked peer_id канала/супергруппы: -(1_000_000_000_000 + id)
+# (см. telethon.utils.get_peer_id — тот же вызов используется в chat_resolve.py
+# при резолве ref → chat_id). Считаем её вручную, а не через
+# telethon.utils.get_peer_id(entity), чтобы не требовать полноценный TL-объект
+# (entity.id вместе с broadcast/megagroup/gigagroup достаточно) и получить
+# ID, сравнимые с `ref_to_chat_id`/`allowed_chat_ids` без ложных несовпадений.
+_CHANNEL_PEER_BASE = 1_000_000_000_000
+
+
+def _channel_peer_id(entity_id: int) -> int:
+    """Marked peer_id (`-100<id>`) для канала/супергруппы — см. `_CHANNEL_PEER_BASE`."""
+    return -(_CHANNEL_PEER_BASE + int(entity_id))
+
 
 def _required_chat_ids(clump: "SessionClump") -> set[int]:
     """Chat_id уже требуемых парсеру каналов — union `ref_to_chat_id` всех сессий clump'а.
@@ -63,7 +76,14 @@ def _required_chat_ids(clump: "SessionClump") -> set[int]:
 
 
 async def _collect_dialog_channel_ids(client: TelegramClient) -> set[int]:
-    """Id всех каналов/супергрупп, в которых состоит клиент (без обычных чатов/ЛС)."""
+    """Marked peer_id всех каналов/супергрупп, в которых состоит клиент (без обычных чатов/ЛС).
+
+    ``entity.id`` у Telethon — «голый» id без маркировки `-100`, тогда как
+    `ref_to_chat_id`/`allowed_chat_ids` в балансировщике хранят marked peer_id
+    (через `telethon.utils.get_peer_id`). Без преобразования пересечение с
+    требуемыми каналами почти всегда пустое (`required_channel_present=0`),
+    даже если канал на аккаунте есть.
+    """
     ids: set[int] = set()
     async for dialog in client.iter_dialogs():
         entity = dialog.entity
@@ -72,7 +92,7 @@ async def _collect_dialog_channel_ids(client: TelegramClient) -> set[int]:
             or getattr(entity, "megagroup", False)
             or getattr(entity, "gigagroup", False)
         ):
-            ids.add(int(entity.id))
+            ids.add(_channel_peer_id(entity.id))
     return ids
 
 
@@ -130,3 +150,29 @@ async def scan_account_channel_membership(
         )
         return AccountMembershipSnapshot(0, 0, 0, error=str(exc))
     return await scan_client_channel_membership(client, clump, session_name=session_name)
+
+
+async def refresh_and_persist_channel_count(
+    session_name: str,
+    clump: Optional["SessionClump"] = None,
+) -> AccountMembershipSnapshot:
+    """Сканирует честное число каналов в Telegram и сохраняет его в account_store.
+
+    В отличие от голого `scan_account_channel_membership`, результат переживает
+    рестарт процесса и сразу виден на `/accounts/all` и `/accounts` (не только
+    в разовом ответе enroll/reactivate). При ошибке скана (`snapshot.error`)
+    ничего не пишет в store — старое (последнее успешное) значение остаётся.
+    """
+    from discovery_api.account_registry import normalize_session_name
+    from discovery_api.account_store import set_telegram_channel_count
+
+    norm = normalize_session_name(session_name)
+    snapshot = await scan_account_channel_membership(norm, clump)
+    if snapshot.error is None:
+        try:
+            set_telegram_channel_count(norm, snapshot.telegram_channel_count)
+        except Exception:  # noqa: BLE001 — персист не должен ронять диагностику
+            log.exception(
+                "Membership-check: не удалось сохранить telegram_channel_count для %s", norm
+            )
+    return snapshot

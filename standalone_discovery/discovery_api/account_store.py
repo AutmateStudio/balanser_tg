@@ -23,6 +23,12 @@ def _ensure_parent_dir(path: str) -> None:
         os.makedirs(parent, exist_ok=True)
 
 
+_TELEGRAM_CHANNEL_COUNT_COLUMNS = (
+    ("telegram_channel_count", "INTEGER"),
+    ("telegram_channel_count_synced_at", "TEXT"),
+)
+
+
 def init_account_db() -> None:
     path = _get_db_path()
     _ensure_parent_dir(path)
@@ -42,6 +48,15 @@ def init_account_db() -> None:
             )
             """
         )
+        # Миграция: honest-счётчик каналов из Telegram (iter_dialogs), отдельно
+        # от channel_count балансировщика — старые базы дозаполняем ALTER'ом.
+        for column, col_type in _TELEGRAM_CHANNEL_COUNT_COLUMNS:
+            try:
+                conn.execute(
+                    f"ALTER TABLE telegram_accounts ADD COLUMN {column} {col_type}"
+                )
+            except sqlite3.OperationalError:
+                pass  # колонка уже существует
         conn.commit()
 
 
@@ -57,6 +72,8 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     d["admin_blocked"] = bool(d.get("admin_blocked"))
     if d.get("max_channels") is not None:
         d["max_channels"] = int(d["max_channels"])
+    if d.get("telegram_channel_count") is not None:
+        d["telegram_channel_count"] = int(d["telegram_channel_count"])
     return d
 
 
@@ -154,6 +171,32 @@ def set_admin_blocked(
         admin_blocked=blocked,
         block_reason=reason if blocked else None,
     )
+
+
+def set_telegram_channel_count(session_name: str, count: int) -> Dict[str, Any]:
+    """Сохраняет honest-счётчик каналов из Telegram (iter_dialogs) + время синка.
+
+    В отличие от ``upsert_account``, не создаёт запись с чужими defaults —
+    если аккаунта ещё нет в store, сначала upsert'ит минимальную запись.
+    """
+    init_account_db()
+    path = _get_db_path()
+    if get_account(session_name) is None:
+        upsert_account(session_name, source="import")
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            UPDATE telegram_accounts
+            SET telegram_channel_count = ?,
+                telegram_channel_count_synced_at = datetime('now')
+            WHERE session_name = ?
+            """,
+            (int(count), session_name),
+        )
+        conn.commit()
+    rec = get_account(session_name)
+    assert rec is not None
+    return rec
 
 
 def update_account_fields(

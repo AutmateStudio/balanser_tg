@@ -236,6 +236,11 @@ class AccountSummary(AccountQueueOverlayFields):
     running: bool = False
     channel_count: int = 0
     max_channels_per_session: int = 0
+    telegram_channel_count: Optional[int] = Field(
+        default=None,
+        description="Honest-число каналов/супергрупп в Telegram (iter_dialogs), кэш из account_store",
+    )
+    telegram_channel_count_synced_at: Optional[str] = None
 
 
 class AccountListResponse(BaseModel):
@@ -298,6 +303,10 @@ class AccountFullSummary(AccountQueueOverlayFields):
     telegram_channel_count: Optional[int] = Field(
         default=None,
         description="Сколько каналов/супергрупп аккаунт реально слушает в Telegram (iter_dialogs), из лимита MAX_CHANNELS_PER_SESSION",
+    )
+    telegram_channel_count_synced_at: Optional[str] = Field(
+        default=None,
+        description="Когда последний раз обновлялся telegram_channel_count (UTC, из account_store)",
     )
     required_channel_total: Optional[int] = Field(
         default=None,
@@ -850,6 +859,8 @@ async def parser_accounts_all() -> AccountAllListResponse:
 
 @parser_router.get("/accounts", response_model=AccountListResponse)
 async def parser_accounts() -> AccountListResponse:
+    from discovery_api.account_store import get_account as get_account_store_rec
+
     now = datetime.now(timezone.utc)
     pg_states = await fetch_pg_queue_states()
     accounts: list[AccountSummary] = []
@@ -860,6 +871,12 @@ async def parser_accounts() -> AccountListResponse:
                 dict(summary),
                 pg_states.get(norm) or pg_states.get(summary["session_name"]),
                 now=now,
+            )
+            store_rec = get_account_store_rec(norm) or {}
+            row.setdefault("telegram_channel_count", store_rec.get("telegram_channel_count"))
+            row.setdefault(
+                "telegram_channel_count_synced_at",
+                store_rec.get("telegram_channel_count_synced_at"),
             )
             accounts.append(AccountSummary(parser_id=pid, **row))
     return AccountListResponse(total=len(accounts), accounts=accounts)
@@ -1013,10 +1030,42 @@ async def parser_account_reactivate(session_name: str) -> AccountFullSummary:
         raise HTTPException(status_code=409, detail=err)
     await notify_session_reauthorized(norm)
 
-    from discovery_api.session_dialogs import scan_account_channel_membership
+    from discovery_api.session_dialogs import refresh_and_persist_channel_count
     from discovery_api.session_registry import find_clump_for_session
 
-    membership = await scan_account_channel_membership(norm, find_clump_for_session(norm))
+    membership = await refresh_and_persist_channel_count(norm, find_clump_for_session(norm))
+
+    rows = list_all_accounts_merged(_jobs)
+    row = next((r for r in rows if r["session_name"] == norm), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Аккаунт не найден")
+    return AccountFullSummary(**{**row, **membership.to_dict()})
+
+
+@parser_router.post(
+    "/accounts/{session_name:path}/refresh-channel-count",
+    response_model=AccountFullSummary,
+)
+async def parser_account_refresh_channel_count(session_name: str) -> AccountFullSummary:
+    """Пересчитывает honest telegram_channel_count (iter_dialogs) и сохраняет в store.
+
+    В отличие от `reactivate`, не трогает health/reauth — только сверяет
+    диалоги уже подключённого (или подключаемого) клиента и обновляет кэш
+    в account_store, который отдаётся на `/accounts/all` и `/accounts`.
+    """
+    from discovery_api.session_dialogs import refresh_and_persist_channel_count
+    from discovery_api.session_registry import find_clump_for_session
+
+    norm = normalize_session_name(session_name)
+    if not session_file_exists(norm):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Файл сессии не найден: {norm}.session",
+        )
+
+    membership = await refresh_and_persist_channel_count(norm, find_clump_for_session(norm))
+    if membership.error is not None:
+        raise HTTPException(status_code=409, detail=membership.error)
 
     rows = list_all_accounts_merged(_jobs)
     row = next((r for r in rows if r["session_name"] == norm), None)
@@ -1083,9 +1132,9 @@ async def parser_enroll_session(
     await job.clump.start()
     _persist_clump_state(parser_id, job.clump)
 
-    from discovery_api.session_dialogs import scan_account_channel_membership
+    from discovery_api.session_dialogs import refresh_and_persist_channel_count
 
-    membership = await scan_account_channel_membership(norm, job.clump)
+    membership = await refresh_and_persist_channel_count(norm, job.clump)
     await _sync_accounts_pg(f"enroll:{norm}")
 
     rows = list_all_accounts_merged(_jobs)

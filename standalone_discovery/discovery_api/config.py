@@ -165,6 +165,26 @@ def get_account_auth_recheck_interval_seconds() -> float:
     return max(30.0, _get_float_env("ACCOUNT_AUTH_RECHECK_INTERVAL_SECONDS", 300.0))
 
 
+def get_channel_count_refresh_enabled() -> bool:
+    """Периодически сверять honest-число каналов в Telegram (iter_dialogs)."""
+    return _get_bool_env("CHANNEL_COUNT_REFRESH_ENABLED", True)
+
+
+def get_channel_count_refresh_interval_seconds() -> float:
+    """Интервал (сек) между проходами по всем connected-сессиям для honest channel-count.
+
+    `iter_dialogs` — дорогой RPC (может вернуть сотни диалогов), поэтому
+    интервал по умолчанию заметно больше SESSION_HEALTH_CHECK_INTERVAL —
+    иначе это будет постоянно грузить Telegram и течь во флуд-лимиты.
+    """
+    return max(60.0, _get_float_env("CHANNEL_COUNT_REFRESH_INTERVAL_SECONDS", 1800.0))
+
+
+def get_channel_count_refresh_stagger_seconds() -> float:
+    """Пауза (сек) между сессиями внутри одного прохода — не бить Telegram пачкой."""
+    return max(0.0, _get_float_env("CHANNEL_COUNT_REFRESH_STAGGER_SECONDS", 2.0))
+
+
 def get_add_channels_per_hour() -> int:
     """Лимит успешных добавлений каналов на сессию в час (0 = без лимита)."""
     return max(0, _get_int_env("ADD_CHANNELS_PER_HOUR", 0))
