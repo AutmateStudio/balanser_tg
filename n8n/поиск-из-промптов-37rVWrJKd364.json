@@ -2,6 +2,21 @@
   "name": "Поиск из промптов",
   "nodes": [
     {
+      "id": "sticky-workflowid-note",
+      "name": "NOTE: workflowId",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        -200
+      ],
+      "parameters": {
+        "content": "### Важно\\n\\nworkflowId под-workflow 2ObVjDauzM2ZjWTd захардкожен под prod-инстанс.\\nНа другом n8n замените ID на актуальный «Поиск по направлению ТГ».",
+        "height": 220,
+        "width": 360
+      }
+    },
+    {
       "parameters": {
         "workflowId": {
           "__rl": true,
@@ -46,6 +61,53 @@
       "id": "8c24b5e6-ca01-427b-8fdf-191019d7be74",
       "name": "Call 'Поиск по направлению'",
       "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "2ObVjDauzM2ZjWTd",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/2ObVjDauzM2ZjWTd",
+          "cachedResultName": "Поиск по направлению ТГ"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Направление": "={{ $('Loop Over Items2').item.json.direction_description }} {{ $('Loop Over Items2').item.json.direction_name }}"
+          },
+          "matchingColumns": [
+            "Направление"
+          ],
+          "schema": [
+            {
+              "id": "Направление",
+              "displayName": "Направление",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        960,
+        160
+      ],
+      "id": "c4e2a4d0-3f0e-4a11-9a4e-3b6a5e9a2f11",
+      "name": "Call 'Поиск по направлению ТГ'",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {},
@@ -111,6 +173,17 @@
   ],
   "connections": {
     "Call 'Поиск по направлению'": {
+      "main": [
+        [
+          {
+            "node": "Call 'Поиск по направлению ТГ'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'Поиск по направлению ТГ'": {
       "main": [
         [
           {

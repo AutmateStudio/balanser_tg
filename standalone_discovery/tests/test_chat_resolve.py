@@ -89,7 +89,7 @@ class ResolveListenTargetTests(unittest.TestCase):
         with patch.object(telethon.utils, "get_peer_id", side_effect=fake_peer_id), patch(
             "discovery_api.chat_resolve._join_channel_entity",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=(True, None),
         ), patch(
             "discovery_api.chat_resolve._check_listen_access",
             new_callable=AsyncMock,
@@ -111,7 +111,7 @@ class ResolveListenTargetTests(unittest.TestCase):
         with patch.object(telethon.utils, "get_peer_id", return_value=-100333), patch(
             "discovery_api.chat_resolve._join_channel_entity",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=(True, None),
         ), patch(
             "discovery_api.chat_resolve._check_listen_access",
             new_callable=AsyncMock,
@@ -154,14 +154,16 @@ class ResolveListenTargetTests(unittest.TestCase):
         with patch.object(telethon.utils, "get_peer_id", return_value=-100444), patch(
             "discovery_api.chat_resolve._join_channel_entity",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=(False, "join_pending"),
         ), patch(
             "discovery_api.chat_resolve._check_listen_access",
             new_callable=AsyncMock,
             return_value=(False, "не участник"),
         ):
-            with self.assertRaises(ChatAccessError):
+            with self.assertRaises(ChatAccessError) as ctx:
                 _run(resolve_listen_target(client, "@closed_group"))
+            self.assertEqual(ctx.exception.code, "join_pending")
+            self.assertIn("не удалось вступить", str(ctx.exception))
 
     def test_join_flood_wait_propagates_not_join_pending(self) -> None:
         channel = _make_channel(broadcast=True, channel_id=111)

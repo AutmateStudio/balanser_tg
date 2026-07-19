@@ -22,6 +22,8 @@ class ErrorCode(StrEnum):
     FLOOD_WAIT = "flood_wait"
     CLUMP_ERROR = "clump_error"
     CLUMP_NOT_LOADED = "clump_not_loaded"
+    ACCOUNT_UNAUTHORIZED = "account_unauthorized"
+    CHANNELS_TOO_MUCH = "channels_too_much"
 
     # --- permanent ---
     INVALID_PAYLOAD = "invalid_payload"
@@ -29,6 +31,8 @@ class ErrorCode(StrEnum):
     UNSUPPORTED_TASK_TYPE = "unsupported_task_type"
     UNKNOWN_TASK_TYPE = "unknown_task_type"
     USERNAME_NOT_FOUND = "username_not_found"
+    CHANNEL_HAS_NO_DISCUSSION = "channel_has_no_discussion"
+    BANNED_IN_CHANNEL = "banned_in_channel"
 
     # --- resource / postpone ---
     INSUFFICIENT_RESOURCE = "insufficient_resource"
@@ -48,7 +52,6 @@ class ErrorCode(StrEnum):
     CHANNEL_PRIVATE = "channel_private"
     JOIN_PENDING = "join_pending"
     BANNED = "banned"
-    ACCOUNT_UNAUTHORIZED = "account_unauthorized"
     PEER_FLOOD = "peer_flood"
     TRANSIENT_ERROR = "transient_error"
 

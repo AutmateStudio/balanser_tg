@@ -36,8 +36,9 @@ ACTIVE_STATUSES = ("queued", "scheduled", "retry", "in_progress")
 # account_reserve_failed, clump_error, join_pending, transient_error,
 # watchdog:*) — те могут пройти при следующей попытке, поэтому re-enqueue
 # для них не блокируется.
-# account_unauthorized — тоже НЕ здесь: это проблема сессии/аккаунта, а не
-# канала; после re-auth или на другом живом аккаунте канал нужно ставить снова.
+# Аккаунтные ошибки (banned, account_unauthorized, channels_too_much,
+# banned_in_channel) — НЕ здесь: проблема сессии/аккаунта, а не канала;
+# после re-auth или на другом аккаунте канал нужно ставить снова.
 # Партиальный unique-индекс уже не пускает дубль, пока такая задача активна
 # (queued/scheduled/retry/in_progress) — здесь закрывается оставшийся случай:
 # задача уже terminal failed с постоянной причиной, но dedup_key снова свободен.
@@ -48,9 +49,8 @@ FATAL_ERROR_CODES = frozenset(
         ErrorCode.UNSUPPORTED_TASK_TYPE,
         ErrorCode.UNKNOWN_TASK_TYPE,
         ErrorCode.CHANNEL_PRIVATE,
-        ErrorCode.BANNED,
+        ErrorCode.CHANNEL_HAS_NO_DISCUSSION,
         ErrorCode.USERNAME_NOT_FOUND,
-        "fatal",  # app_balance.queue.errors.FATAL — fallback map_telethon_exception
     }
 )
 
@@ -328,6 +328,14 @@ UPDATE task_queue
 SET account_id = $2,
     updated_at = now()
 WHERE id = $1
+"""
+
+_UNASSIGN_ACCOUNT_SQL = """
+UPDATE task_queue
+SET account_id = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'in_progress'
 """
 
 # E6: фиксирует op-код последнего успешного шага multi-op пайплайна в payload
@@ -712,6 +720,11 @@ class TaskQueueRepo:
         """Записывает подобранный аккаунт в task_queue (после pick_and_reserve)."""
         async with acquire() as conn:
             await conn.execute(_ASSIGN_ACCOUNT_SQL, task_id, account_id)
+
+    async def unassign_account(self, task_id: int) -> None:
+        """Сбрасывает закреплённый account_id (смена аккаунта при retry)."""
+        async with acquire() as conn:
+            await conn.execute(_UNASSIGN_ACCOUNT_SQL, task_id)
 
     async def set_last_completed_step(self, task_id: int, step: str) -> None:
         """E6: сохраняет op-код последнего успешного шага в payload (идемпотентность).

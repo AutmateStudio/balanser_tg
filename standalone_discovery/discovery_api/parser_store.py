@@ -18,7 +18,7 @@ from discovery_api.session_registry import SessionClump
 log = __import__("logging").getLogger(__name__)
 
 DEFAULT_FILENAME = "parser_jobs.json"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _store_path() -> str:
@@ -132,11 +132,27 @@ def normalize_persisted_record(rec: dict[str, Any]) -> dict[str, Any]:
     else:
         out["allowed_chat_ids"] = []
 
+    ref_map = out.get("ref_to_chat_id")
+    if isinstance(ref_map, dict):
+        clean_map: dict[str, int] = {}
+        for k, v in ref_map.items():
+            try:
+                clean_map[str(k)] = int(v)
+            except (TypeError, ValueError):
+                continue
+        out["ref_to_chat_id"] = clean_map
+    else:
+        out["ref_to_chat_id"] = {}
+
     out["schema_version"] = int(out.get("schema_version") or SCHEMA_VERSION)
     return out
 
 
 def clump_to_record(clump: SessionClump, *, parser_id: str) -> dict[str, Any]:
+    ref_to_chat_id: dict[str, int] = {}
+    for pc in clump.parser_client_list:
+        for ref, cid in pc.ref_to_chat_id.items():
+            ref_to_chat_id[str(ref)] = int(cid)
     return {
         "parser_id": parser_id,
         "clump_name": clump.clump_name,
@@ -145,6 +161,7 @@ def clump_to_record(clump: SessionClump, *, parser_id: str) -> dict[str, Any]:
         "channel_list": clump.list_channels(),
         "assignments": dict(clump.assignments),
         "allowed_chat_ids": sorted(clump.all_allowed_chat_ids()),
+        "ref_to_chat_id": ref_to_chat_id,
         "config": clump.config.overrides(),
         "account_meta": {k: dict(v) for k, v in clump.account_meta.items()},
         "schema_version": SCHEMA_VERSION,

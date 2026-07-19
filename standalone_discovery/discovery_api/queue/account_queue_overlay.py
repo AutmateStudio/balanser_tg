@@ -123,11 +123,19 @@ async def overlay_account_rows(
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Overlay для списка аккаунтов; pg_states загружается если не передан."""
+    from discovery_api.account_registry import normalize_session_name
+
     states = pg_states if pg_states is not None else await fetch_pg_queue_states()
     now_utc = now or datetime.now(timezone.utc)
+    # Индекс по basename — PG хранит нормализованные имена.
+    states_by_norm: dict[str, AccountQueueState] = {}
+    for key, value in states.items():
+        states_by_norm[normalize_session_name(key)] = value
+        states_by_norm[key] = value
+
     result: list[dict[str, Any]] = []
     for row in rows:
         name = row.get("session_name") or ""
-        pg = states.get(name)
+        pg = states_by_norm.get(name) or states_by_norm.get(normalize_session_name(name))
         result.append(overlay_queue_state(row, pg, now=now_utc))
     return result

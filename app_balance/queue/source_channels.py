@@ -29,6 +29,16 @@ WHERE id = $1
 RETURNING id
 """
 
+_FIND_BY_REF_EXACT_SQL = """
+SELECT id
+FROM source_channels
+WHERE lower(trim(both '@' from coalesce(external_url, ''))) = lower($1)
+   OR lower(trim(both '@' from coalesce(name, ''))) = lower($1)
+   OR lower(coalesce(external_channel_id, '')) = lower($1)
+ORDER BY id DESC
+LIMIT 1
+"""
+
 _FIND_BY_REF_SQL = """
 SELECT id
 FROM source_channels
@@ -225,6 +235,9 @@ class SourceChannelsRepo:
         if not needle:
             return None
         async with acquire() as conn:
+            val = await conn.fetchval(_FIND_BY_REF_EXACT_SQL, needle)
+            if val is not None:
+                return int(val)
             val = await conn.fetchval(_FIND_BY_REF_SQL, needle)
             return int(val) if val is not None else None
 

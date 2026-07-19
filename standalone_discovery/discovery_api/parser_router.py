@@ -819,6 +819,28 @@ async def parser_accounts_all() -> AccountAllListResponse:
     now = datetime.now(timezone.utc)
     pg_states = await fetch_pg_queue_states()
     rows = await overlay_account_rows(rows, pg_states=pg_states, now=now)
+    if get_use_pg_queue():
+        try:
+            from app_balance.queue import db
+            from app_balance.queue.accounts import AccountsRepo
+            from app_balance.queue.source_channels import SourceChannelsRepo
+
+            await db.init_pool()
+            accounts_repo = AccountsRepo()
+            channels_repo = SourceChannelsRepo()
+            for row in rows:
+                if int(row.get("channel_count") or 0) > 0 and row.get("in_clump"):
+                    continue
+                account_id = await accounts_repo.get_id_by_session_name(
+                    row["session_name"]
+                )
+                if account_id is None:
+                    continue
+                pg_count = await channels_repo.count_assigned_by_account(account_id)
+                if pg_count > int(row.get("channel_count") or 0):
+                    row["channel_count"] = pg_count
+        except Exception:
+            log.debug("accounts/all: PG channel_count merge skipped", exc_info=True)
     accounts = [AccountFullSummary(**row) for row in rows]
     generated_at = now.isoformat().replace("+00:00", "Z")
     return AccountAllListResponse(
@@ -833,9 +855,10 @@ async def parser_accounts() -> AccountListResponse:
     accounts: list[AccountSummary] = []
     for pid, job in list(_jobs.items()):
         for summary in job.clump.list_account_summaries():
+            norm = normalize_session_name(summary["session_name"])
             row = overlay_queue_state(
                 dict(summary),
-                pg_states.get(summary["session_name"]),
+                pg_states.get(norm) or pg_states.get(summary["session_name"]),
                 now=now,
             )
             accounts.append(AccountSummary(parser_id=pid, **row))

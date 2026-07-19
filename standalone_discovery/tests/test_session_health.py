@@ -53,6 +53,13 @@ class ClassifyTelethonErrorTests(unittest.TestCase):
             self.assertEqual(kind, "banned", exc)
             self.assertIsNone(seconds)
 
+    def test_unauthorized_error_not_banned(self) -> None:
+        kind, seconds = classify_telethon_error(
+            te.UnauthorizedError(request=None, message="AUTH_KEY_UNREGISTERED")
+        )
+        self.assertEqual(kind, "unauthorized")
+        self.assertIsNone(seconds)
+
     def test_transient_errors(self) -> None:
         for exc in (ConnectionError("boom"), TimeoutError("t")):
             kind, _ = classify_telethon_error(exc)

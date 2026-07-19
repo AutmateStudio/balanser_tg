@@ -1,0 +1,751 @@
+{
+  "name": "tg-parser-sync (новый prod API)",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 1,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "84c763ef-609a-4801-aa41-f2d0a8d8fc69",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "leftValue": "={{ $json.addCount }}",
+              "rightValue": 0
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "69ac17e0-4987-44ce-9735-e8797422e442",
+      "name": "If has new",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        336,
+        272
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 1,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "48bd18de-b4e1-43a7-819e-af0655ec9ca0",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "leftValue": "={{ $json.removeCount }}",
+              "rightValue": 0
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "20e7fdb4-03b9-4758-b3fc-f5a046ea6afe",
+      "name": "If has removed",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        336,
+        448
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/{{ $json.parserId }}/remove-channels?async=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($json.channelsToRemove) }}\n}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "5ff0a408-8a60-4d98-b904-11f2530a78c9",
+      "name": "Remove channels",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        592,
+        432
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "7775abbb-4a9b-4f76-9b9d-ce512001fb7d",
+      "name": "Every 1m1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        -768,
+        352
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "source_channels",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "platform_id",
+              "value": "2"
+            },
+            {
+              "column": "is_active",
+              "value": "True"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "077a7229-6d97-4af9-82d0-4c3ff6a9e864",
+      "name": "Get new channels1",
+      "type": "n8n-nodes-base.postgres",
+      "position": [
+        -560,
+        352
+      ],
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/list",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "9e84bd9e-4a4b-4e11-931c-090d7637b0f9",
+      "name": "List parsers1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -320,
+        352
+      ],
+      "executeOnce": true,
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "873f03c1-ce07-41d3-88f3-8a2e7a3da2eb",
+              "name": "parserId",
+              "type": "string",
+              "value": "={{ $json.parser_id }}"
+            },
+            {
+              "id": "63347cda-8e5e-4c48-ac51-89a8905cc3f5",
+              "name": "channels",
+              "type": "array",
+              "value": "={{ $json.channel_list }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1b4e64ea-1a20-43c8-ac64-b90154bb55ef",
+      "name": "Pick parser1",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -96,
+        352
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "jsCode": "const dbItems = $('Get new channels1').all();\nconst pick = $('Pick parser1').first().json;\n\nconst parserId = pick.parserId;\nconst listenedRaw = Array.isArray(pick.channels) ? pick.channels : [];\n\nconst norm = (raw) => String(raw || '').trim().replace(/^https?:\\/\\/t\\.me\\//i, '').replace(/^@/, '').toLowerCase();\n\nconst listenedSet = new Set(listenedRaw.map(norm));\nconst channelsToAdd = [];\nconst rowsToAdd = [];\nconst activeDbSet = new Set();\n\nfor (const item of dbItems) {\n  const ch = item.json || {};\n  if (ch.is_active === false) continue;\n  let username = ch?.metadata?.username;\n  if (!username && typeof ch.external_url === 'string') {\n    const m = ch.external_url.match(/t\\.me\\/(@?[A-Za-z0-9_]+)/i);\n    if (m) username = m[1];\n  }\n  if (!username) continue;\n  const key = norm(username);\n  activeDbSet.add(key);\n  if (!listenedSet.has(key)) {\n    const ref = '@' + username.replace(/^@/, '');\n    channelsToAdd.push(ref);\n    rowsToAdd.push({ id: ch.id, channel_ref: ref, username, external_url: ch.external_url, name: ch.name });\n  }\n}\n\nconst channelsToRemove = listenedRaw.filter(c => !activeDbSet.has(norm(c)));\n\nreturn [{ json: { parserId, channelsToAdd, addCount: channelsToAdd.length, rowsToAdd, channelsToRemove, removeCount: channelsToRemove.length } }];"
+      },
+      "id": "72e6e46b-b1e4-43eb-ba84-0a35742cda3c",
+      "name": "Code in JavaScript1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        112,
+        352
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/{{ $json.parserId }}/add-channels?async=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($json.channelsToAdd) }}\n}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "5588b24d-cb2d-418e-8ed4-b3edb7c7e027",
+      "name": "Add channels1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        576,
+        256
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/stop/={{ $json.parser_id || $json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "id": "64f02368-a76f-4581-95f1-c3a13c31615b",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -32,
+        -16
+      ],
+      "typeVersion": 4.4,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/list",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "4affc866-726d-4427-8614-9ece1334f89f",
+      "name": "List parsers",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -256,
+        -16
+      ],
+      "executeOnce": true,
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/status/3dbd2ebb9cbd4e3b8207609af35a0806",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "dad46df5-89e7-463a-8979-5728dfb9dc51",
+      "name": "List parsers2",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -464,
+        -16
+      ],
+      "executeOnce": true,
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/506cbb8d033c47598e83cf9253f90eae",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "922ccabc-a284-41b9-b2a3-95f524a49c8a",
+      "name": "List parsers3",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -464,
+        -144
+      ],
+      "executeOnce": true,
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/7379303f2e4e4a6d9634516082fb0a67",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "843f7ac8-80a8-4df8-850b-f3171df15997",
+      "name": "List parsers4",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -272,
+        -160
+      ],
+      "executeOnce": true,
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"session_name\": \"/app/sessions/Lidochka_main\",\n  \"webhook_url\": \"https://n8n-lidogen.web.oboyma.ai/webhook/telegram-messages\",\n  \"channel_list\": [\n    \"@pravoalpha\",\n    \"@grpolidotest\",\n    \"@balichat\"\n  ]\n}",
+        "options": {}
+      },
+      "id": "73d1abe3-f168-4477-b75a-332b2516dd4c",
+      "name": "List parsers5",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -48,
+        -160
+      ],
+      "executeOnce": true,
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"session_name\": \"/app/sessions/Lidochka_main\",\n  \"webhook_url\": \"https://n8n-lidogen.web.oboyma.ai/webhook/telegram-messages\",\n  \"channel_list\": [\n    \"@pravoalpha\",\n    \"@grpolidotest\"\n  ]\n}",
+        "options": {}
+      },
+      "id": "4379a09f-280d-43d0-ad04-1e7c7cf422c1",
+      "name": "HTTP Request1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -80,
+        192
+      ],
+      "typeVersion": 4.4,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH\n-- Условие «канал реально включён в активном проекте»\nactive_project_links AS (\n  SELECT\n    psc.source_channel_id AS channel_id,\n    psc.monitoring_project_id AS project_id,\n    mp.name AS project_name\n  FROM project_source_channels psc\n  INNER JOIN monitoring_projects mp\n    ON mp.id = psc.monitoring_project_id\n  WHERE psc.is_enabled = true\n    AND mp.status = 'active'::project_status\n    AND mp.deleted_at IS NULL\n),\nenabled_in_projects AS (\n  SELECT\n    sc.id,\n    sc.name,\n    sc.external_url,\n    COUNT(DISTINCT apl.project_id) AS active_projects_count,\n    STRING_AGG(DISTINCT apl.project_name, ', ' ORDER BY apl.project_name) AS project_names\n  FROM source_channels sc\n  INNER JOIN active_project_links apl\n    ON apl.channel_id = sc.id\n  WHERE sc.platform_id = 2   -- Telegram; уберите WHERE для всех платформ\n  GROUP BY sc.id, sc.name, sc.external_url\n),\napplied AS (\n  UPDATE source_channels sc\n  SET\n    is_active = EXISTS (\n      SELECT 1\n      FROM active_project_links apl\n      WHERE apl.channel_id = sc.id\n    ),\n    linked_projects_count = (\n      SELECT COUNT(DISTINCT apl.project_id)::int\n      FROM active_project_links apl\n      WHERE apl.channel_id = sc.id\n    ),\n    updated_at = now()\n  WHERE sc.platform_id = 2   -- Telegram; уберите для всех платформ\n  RETURNING\n    sc.id,\n    sc.name,\n    sc.external_url,\n    sc.is_active,\n    sc.linked_projects_count\n)\n\nSELECT\n  'SUMMARY'::text AS row_type,\n  CASE WHEN a.is_active THEN 'active' ELSE 'inactive' END AS label,\n  COUNT(*)::text AS value,\n  NULL::bigint AS channel_id,\n  NULL::text AS channel_name,\n  NULL::text AS external_url,\n  NULL::text AS projects\nFROM applied a\nGROUP BY a.is_active\n\nUNION ALL\n\nSELECT\n  'ENABLED_IN_ACTIVE_PROJECT'::text,\n  'active_projects=' || e.active_projects_count::text,\n  e.active_projects_count::text,\n  e.id,\n  COALESCE(e.name, e.external_url),\n  e.external_url,\n  e.project_names\nFROM enabled_in_projects e\n\nUNION ALL\n\nSELECT\n  'DEACTIVATED'::text,\n  CASE\n    WHEN a.id IN (SELECT id FROM enabled_in_projects) THEN 'unexpected'\n    ELSE 'no active+enabled project link'\n  END,\n  NULL::text,\n  a.id,\n  COALESCE(a.name, a.external_url),\n  a.external_url,\n  NULL::text\nFROM applied a\nWHERE a.is_active = false\n\nORDER BY row_type, label, channel_id;",
+        "options": {}
+      },
+      "id": "5496e7bc-cddf-4523-bac1-1006ca90892d",
+      "name": "Deactiavate_dead_channels",
+      "type": "n8n-nodes-base.postgres",
+      "position": [
+        -608,
+        592
+      ],
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "source_channels",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "platform_id",
+              "value": "2"
+            },
+            {
+              "column": "is_active",
+              "value": "True"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "24cf84c4-5330-4895-9bcd-48299ae0543f",
+      "name": "Get new channels",
+      "type": "n8n-nodes-base.postgres",
+      "position": [
+        -352,
+        592
+      ],
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/list",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "87163156-0d8c-4bc6-9aea-5e89d575e3f6",
+      "name": "List parsers6",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -64,
+        688
+      ],
+      "executeOnce": true,
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "source_channels",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "platform_id",
+              "value": "2"
+            },
+            {
+              "column": "is_active",
+              "value": "True"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cdeb6ee0-8991-4348-8258-43f007ecd7c8",
+      "name": "Get new channels2",
+      "type": "n8n-nodes-base.postgres",
+      "position": [
+        -496,
+        832
+      ],
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "BEGIN;\n\nUPDATE task_queue\nSET\n  status       = 'cancelled',\n  locked_by    = NULL,\n  locked_at    = NULL,\n  locked_until = NULL,\n  finished_at  = now(),\n  updated_at   = now(),\n  last_error   = COALESCE(last_error, 'cancelled_by_operator')\nWHERE task_type_code = 'parser_add_channel'\n  AND status IN ('queued', 'scheduled', 'retry', 'stuck', 'in_progress');\n\n-- снять резерв аккаунтов, если задача add ещё держала current_task_id\nUPDATE accounts a\nSET current_task_id = NULL, updated_at = now()\nWHERE current_task_id IN (\n  SELECT id FROM task_queue\n  WHERE task_type_code = 'parser_add_channel'\n    AND status = 'cancelled'\n    AND finished_at >= now() - interval '1 minute'\n);\n\nCOMMIT;",
+        "options": {}
+      },
+      "id": "8e04a84f-24d1-46bb-9db1-648a03a8ee00",
+      "name": "Deactiavate_dead_channels1",
+      "type": "n8n-nodes-base.postgres",
+      "position": [
+        -752,
+        800
+      ],
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "task_queue",
+          "mode": "list",
+          "cachedResultName": "task_queue"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "status"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "39d08743-93c0-46d4-a645-5d3f67ef36b3",
+      "name": "Get new channels3",
+      "type": "n8n-nodes-base.postgres",
+      "position": [
+        -176,
+        944
+      ],
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "id": "log-skipped-fatal-node",
+      "name": "Log skipped_fatal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst skipped = item.skipped_fatal || {};\nconst keys = Object.keys(skipped);\nif (keys.length) {\n  console.log('skipped_fatal channels:', JSON.stringify(skipped));\n}\nreturn [{ json: { ...item, skipped_fatal_count: keys.length } }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "If has new": {
+      "main": [
+        [
+          {
+            "node": "Add channels1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If has removed": {
+      "main": [
+        [
+          {
+            "node": "Remove channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 1m1": {
+      "main": [
+        [
+          {
+            "node": "Get new channels1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get new channels1": {
+      "main": [
+        [
+          {
+            "node": "List parsers1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List parsers1": {
+      "main": [
+        [
+          {
+            "node": "Pick parser1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick parser1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If has new",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If has removed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": {
+    "node:Every 1m1": {
+      "recurrenceRules": []
+    }
+  },
+  "pinData": {},
+  "meta": null
+}

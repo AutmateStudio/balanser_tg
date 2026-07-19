@@ -111,24 +111,26 @@ class ResolveChannelToChatIdTests(unittest.TestCase):
             new_callable=AsyncMock,
             return_value=target,
         ):
-            chat_id, err = _run(resolve_channel_to_chat_id(client, "-1001234567890"))
+            chat_id, err, _code = _run(resolve_channel_to_chat_id(client, "-1001234567890"))
 
         self.assertEqual(chat_id, -100999)
         self.assertIsNone(err)
 
     def test_empty_returns_error(self) -> None:
         client = MagicMock()
-        chat_id, err = _run(resolve_channel_to_chat_id(client, "  "))
+        chat_id, err, code = _run(resolve_channel_to_chat_id(client, "  "))
         self.assertIsNone(chat_id)
         self.assertIsNotNone(err)
+        self.assertEqual(code, "invalid_payload")
 
     def test_disconnected_client_returns_error(self) -> None:
         client = MagicMock()
         client.is_connected.return_value = False
-        chat_id, err = _run(resolve_channel_to_chat_id(client, "@durov"))
+        chat_id, err, code = _run(resolve_channel_to_chat_id(client, "@durov"))
         self.assertIsNone(chat_id)
         assert err is not None
         self.assertIn("не подключ", err)
+        self.assertEqual(code, "transient_error")
 
 
 def _make_job(running: bool = True, parser_id: str = "pid") -> _ClumpJob:
@@ -199,12 +201,12 @@ class ParserChannelsEndpointsTests(unittest.TestCase):
         job = _make_job()
         _jobs["pid"] = job
 
-        async def _fake_resolve(client, raw: str):
+        async def _fake_resolve(client, raw: str, *, join: bool = True):
             if raw == "-100777":
-                return -100222, None
+                return -100222, None, None
             if raw == "-1001":
-                return -1001, None
-            return None, "ошибка"
+                return -1001, None, None
+            return None, "ошибка", "clump_error"
 
         with patch(
             "discovery_api.session_registry.get_or_create_client",
@@ -274,12 +276,12 @@ class ParserChannelsEndpointsTests(unittest.TestCase):
         job.clump.assignments["-100777"] = pc.session_name
         _jobs["pid"] = job
 
-        async def _fake_resolve(client, raw: str):
+        async def _fake_resolve(client, raw: str, *, join: bool = True):
             if raw == "-100777":
-                return -100777, None
+                return -100777, None, None
             if raw == "-100999":
-                return -100999, None
-            return None, "ошибка"
+                return -100999, None, None
+            return None, "ошибка", "clump_error"
 
         with patch(
             "discovery_api.session_registry.get_or_create_client",
@@ -290,7 +292,7 @@ class ParserChannelsEndpointsTests(unittest.TestCase):
             new=_fake_resolve,
         ):
             resp = self.client.post(
-                "/discovery-api/parser/pid/remove-channels",
+                "/discovery-api/parser/pid/remove-channels?async=0",
                 json={"channel_list": ["-100777", "-100999"]},
             )
 

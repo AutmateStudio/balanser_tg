@@ -77,6 +77,7 @@ async def get_account_channels_pg(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     account_id = await _resolve_account_id(session_name)
+    total = await _channels.count_assigned_by_account(account_id)
     rows = await _channels.list_assigned_detail_for_account(account_id, limit=limit)
     items = [
         AccountChannelItemResponse(
@@ -93,7 +94,7 @@ async def get_account_channels_pg(
     return AccountChannelsPgResponse(
         session_name=session_name,
         account_id=account_id,
-        channel_count=len(items),
+        channel_count=total,
         channels=items,
     )
 

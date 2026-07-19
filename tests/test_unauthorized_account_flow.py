@@ -17,7 +17,7 @@ import telethon.errors as te
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "standalone_discovery")))
 
 from app_balance.queue.error_codes import ErrorCode
-from app_balance.queue.errors import PermanentError, map_clump_error_message, map_telethon_exception
+from app_balance.queue.errors import PermanentError, RetryableError, map_clump_error_message, map_telethon_exception
 from discovery_api.session_health import (
     SessionHealth,
     SessionStatus,
@@ -60,8 +60,8 @@ def test_map_layers_agree_on_account_unauthorized_code() -> None:
     from_telethon = map_telethon_exception(exc)
     from_clump = map_clump_error_message(_UNAUTH_MSG)
 
-    assert isinstance(from_telethon, PermanentError)
-    assert isinstance(from_clump, PermanentError)
+    assert isinstance(from_telethon, RetryableError)
+    assert isinstance(from_clump, RetryableError)
     assert from_telethon.code == ErrorCode.ACCOUNT_UNAUTHORIZED
     assert from_clump.code == ErrorCode.ACCOUNT_UNAUTHORIZED
 
@@ -234,14 +234,14 @@ async def test_dispatch_runtime_error_maps_and_notifies(monkeypatch: pytest.Monk
 
     result = await dispatcher.dispatch(_claimed(16458, account_id=99))
 
-    assert result == DispatchResult.FAILED
+    assert result == DispatchResult.RETRIED
     assert notified == [("sess_99", _UNAUTH_MSG)]
 
 
 @pytest.mark.asyncio
 async def test_dispatch_unauthorized_fallback_pg_when_notify_unavailable() -> None:
     from app_balance.queue.dispatch import DispatchResult
-    from app_balance.queue.errors import PermanentError
+    from app_balance.queue.errors import RetryableError
     from app_balance.queue.mock_adapter import MockTaskAdapter
     from tests.test_dispatch import FakeAccounts, _claimed, _dispatcher, _fake_queue, _task_type, FakeTaskTypes
 
@@ -249,7 +249,11 @@ async def test_dispatch_unauthorized_fallback_pg_when_notify_unavailable() -> No
 
     class UnauthorizedAdapter(MockTaskAdapter):
         async def execute(self, task, *, account):  # type: ignore[override]
-            raise PermanentError(ErrorCode.ACCOUNT_UNAUTHORIZED, _UNAUTH_MSG)
+            raise RetryableError(
+                ErrorCode.ACCOUNT_UNAUTHORIZED,
+                _UNAUTH_MSG,
+                retry_after_seconds=1800,
+            )
 
     dispatcher = _dispatcher(
         _fake_queue(),
@@ -264,7 +268,7 @@ async def test_dispatch_unauthorized_fallback_pg_when_notify_unavailable() -> No
     ):
         result = await dispatcher.dispatch(_claimed(16458, account_id=99))
 
-    assert result == DispatchResult.FAILED
+    assert result == DispatchResult.RETRIED
     assert accounts.account_errors == [("sess_99", _UNAUTH_MSG)]
 
 

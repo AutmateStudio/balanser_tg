@@ -646,9 +646,10 @@ async def test_e2_unauthorized_notifies_session(monkeypatch) -> None:
 
     class UnauthorizedAdapter(MockTaskAdapter):
         async def execute(self, task, *, account):  # type: ignore[override]
-            raise PermanentError(
+            raise RetryableError(
                 ErrorCode.ACCOUNT_UNAUTHORIZED,
                 "Сессия '/app/sessions/test4' не авторизована",
+                retry_after_seconds=1800,
             )
 
     dispatcher = _dispatcher(
@@ -657,7 +658,7 @@ async def test_e2_unauthorized_notifies_session(monkeypatch) -> None:
 
     result = await dispatcher.dispatch(_claimed(42, account_id=99))
 
-    assert result == DispatchResult.FAILED
+    assert result == DispatchResult.RETRIED
     assert notified == [
         ("sess_99", "Сессия '/app/sessions/test4' не авторизована"),
     ]
