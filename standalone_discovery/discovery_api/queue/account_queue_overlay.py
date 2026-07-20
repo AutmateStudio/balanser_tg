@@ -139,3 +139,47 @@ async def overlay_account_rows(
         pg = states_by_norm.get(name) or states_by_norm.get(normalize_session_name(name))
         result.append(overlay_queue_state(row, pg, now=now_utc))
     return result
+
+
+async def enrich_channel_counts_from_pg(rows: list[dict[str, Any]]) -> None:
+    """Добирает channel_count из PG одним batch (вместо N+1 на /accounts/all).
+
+    Меняет rows in-place. Пропускает строки, у которых уже есть channel_count>0
+    и in_clump=True (clump — источник истины для слушаемых каналов).
+    Ошибки PG глотаются: дашборд не должен падать из‑за overlay.
+    """
+    if not get_use_pg_queue() or not rows:
+        return
+    from discovery_api.account_registry import normalize_session_name
+
+    need: list[dict[str, Any]] = []
+    for row in rows:
+        if int(row.get("channel_count") or 0) > 0 and row.get("in_clump"):
+            continue
+        need.append(row)
+    if not need:
+        return
+
+    try:
+        from app_balance.queue import db
+        from app_balance.queue.accounts import AccountsRepo
+        from app_balance.queue.source_channels import SourceChannelsRepo
+
+        await db.init_pool()
+        names = [str(r.get("session_name") or "") for r in need]
+        id_by_name = await AccountsRepo().get_ids_by_session_names(names)
+        if not id_by_name:
+            return
+        counts = await SourceChannelsRepo().count_channels_by_accounts(
+            list(id_by_name.values())
+        )
+        for row in need:
+            norm = normalize_session_name(str(row.get("session_name") or ""))
+            account_id = id_by_name.get(norm)
+            if account_id is None:
+                continue
+            pg_count = int(counts.get(account_id, 0))
+            if pg_count > int(row.get("channel_count") or 0):
+                row["channel_count"] = pg_count
+    except Exception:
+        log.debug("enrich_channel_counts_from_pg: skipped", exc_info=True)

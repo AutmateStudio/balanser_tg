@@ -80,6 +80,7 @@ from discovery_api.queue.account_channels import (
     get_account_channels_summary,
 )
 from discovery_api.queue.account_queue_overlay import (
+    enrich_channel_counts_from_pg,
     fetch_pg_queue_states,
     overlay_account_rows,
     overlay_queue_state,
@@ -841,28 +842,7 @@ async def parser_accounts_all() -> AccountAllListResponse:
     now = datetime.now(timezone.utc)
     pg_states = await fetch_pg_queue_states()
     rows = await overlay_account_rows(rows, pg_states=pg_states, now=now)
-    if get_use_pg_queue():
-        try:
-            from app_balance.queue import db
-            from app_balance.queue.accounts import AccountsRepo
-            from app_balance.queue.source_channels import SourceChannelsRepo
-
-            await db.init_pool()
-            accounts_repo = AccountsRepo()
-            channels_repo = SourceChannelsRepo()
-            for row in rows:
-                if int(row.get("channel_count") or 0) > 0 and row.get("in_clump"):
-                    continue
-                account_id = await accounts_repo.get_id_by_session_name(
-                    row["session_name"]
-                )
-                if account_id is None:
-                    continue
-                pg_count = await channels_repo.count_assigned_by_account(account_id)
-                if pg_count > int(row.get("channel_count") or 0):
-                    row["channel_count"] = pg_count
-        except Exception:
-            log.debug("accounts/all: PG channel_count merge skipped", exc_info=True)
+    await enrich_channel_counts_from_pg(rows)
     accounts = [AccountFullSummary(**row) for row in rows]
     generated_at = now.isoformat().replace("+00:00", "Z")
     return AccountAllListResponse(
