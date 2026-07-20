@@ -128,7 +128,6 @@ for mig in \
   A11_g6_error_detector.sql \
   A12_g7_monitoring_views.sql \
   A13_fix_effective_rph_zero_exhausted.sql \
-  A14_parser_add_channel_rph_20_per_hour.sql \
   A15_parser_add_channel_threshold_20.sql \
   A16_min_available_resource_percent_uniform.sql \
   A17_telegram_discover_rph_120_per_hour.sql \
@@ -147,7 +146,6 @@ for mig in \
   A11_g6_error_detector.sql \
   A12_g7_monitoring_views.sql \
   A13_fix_effective_rph_zero_exhausted.sql \
-  A14_parser_add_channel_rph_20_per_hour.sql \
   A15_parser_add_channel_threshold_20.sql \
   A16_min_available_resource_percent_uniform.sql \
   A17_telegram_discover_rph_120_per_hour.sql \

@@ -1,5 +1,10 @@
 -- A14: RPH — parser_add_channel 20 кан/ч; прочие op ×5 от базового seed
 --
+-- НЕ входит в scripts/migrate_queue.sh (не применяется на деплое автоматически).
+-- Ручной накат только по явному запросу:
+--   python scripts/apply_a14_rph_migration.py
+--   или: psql "$QUEUE_DATABASE_URL" -f DB/A14_parser_add_channel_rph_20_per_hour.sql
+--
 -- parser_add_channel (reserve_percent 10% в resource_op_types; порог dispatch — A15, 20%):
 --   get_entity/JoinChannel: 2 units/канал → rph_limit=223 (effective=200)
 --   GetFullChannel: 1 unit/канал → rph_limit=112 (effective=100)
