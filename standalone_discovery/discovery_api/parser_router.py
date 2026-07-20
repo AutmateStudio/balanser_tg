@@ -500,10 +500,20 @@ def _persist_clump_state(parser_id: str, clump: SessionClump) -> None:
 
 
 async def _sync_accounts_pg(context: str) -> None:
-    """Best-effort sync SQLite+disk+clump → PG после изменения состава clump."""
-    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+    """Best-effort sync SQLite+disk+clump → PG после изменения состава clump.
 
-    await sync_accounts_to_pg_best_effort(context=context)
+    Путь к parser_jobs.json передаём тем же резолвером, что и запись
+    (`parser_store._store_path()`), иначе в контейнере с уплощённым layout
+    (`/app/discovery_api/...` вместо `.../standalone_discovery/...`) синк
+    прочитает несуществующий файл → in_clump=False → аккаунты станут disabled.
+    """
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+    from discovery_api.parser_store import _store_path
+
+    await sync_accounts_to_pg_best_effort(
+        context=context,
+        parser_store_path=_store_path(),
+    )
 
 
 def _require_clump_job(parser_id: str) -> _ClumpJob:

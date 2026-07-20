@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app_balance.queue import db
@@ -354,11 +354,21 @@ def pg_sync_enabled() -> bool:
     return bool(os.getenv("QUEUE_DATABASE_URL", "").strip())
 
 
-async def sync_accounts_to_pg_best_effort(*, context: str = "") -> SyncResult | None:
+async def sync_accounts_to_pg_best_effort(
+    *,
+    context: str = "",
+    parser_store_path: str | None = None,
+) -> SyncResult | None:
     """A10 после QR: upsert accounts в PG; ошибки PG не пробрасывает.
 
     Вызывается из discovery_api после успешного QR, чтобы новый аккаунт
     сразу появился в queue/metrics и был доступен dispatch.
+
+    ``parser_store_path`` позволяет вызывающей стороне (discovery_api)
+    передать фактический путь к parser_jobs.json, вычисленный тем же
+    резолвером, что и запись (``parser_store._store_path()``). Это защищает
+    от рассинхрона путей writer/reader в контейнере, где layout отличается
+    от репозиторного (см. fix/accounts-sync-parser-store-path).
     """
     if not pg_sync_enabled():
         log.debug(
@@ -366,8 +376,11 @@ async def sync_accounts_to_pg_best_effort(*, context: str = "") -> SyncResult | 
             context or "trigger",
         )
         return None
+    config = sync_config_from_env()
+    if parser_store_path:
+        config = replace(config, parser_store_path=parser_store_path)
     try:
-        result = await sync_accounts_to_pg(sync_config_from_env())
+        result = await sync_accounts_to_pg(config)
         log.info(
             "sync accounts (%s): total=%s inserted=%s updated=%s unchanged=%s",
             context or "trigger",

@@ -146,3 +146,52 @@ async def test_sync_best_effort_swallows_pg_errors(monkeypatch) -> None:
 
     monkeypatch.setattr(accounts_sync, "sync_accounts_to_pg", _fail)
     assert await sync_accounts_to_pg_best_effort(context="qr:Test2") is None
+
+
+async def test_sync_best_effort_forwards_parser_store_path_override(monkeypatch) -> None:
+    """Регресс fix/accounts-sync-parser-store-path: путь writer'а доходит до reader'а.
+
+    Если override передан — синк должен читать membership именно из него,
+    а не из захардкоженного репозиторного пути (который в контейнере не существует).
+    """
+    from app_balance.queue import accounts_sync
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/test")
+
+    captured: dict[str, str] = {}
+
+    async def _capture_sync(config, *, dry_run=False):
+        captured["parser_store_path"] = config.parser_store_path
+        from app_balance.queue.accounts_sync import SyncResult
+
+        return SyncResult(inserted=0, updated=0, unchanged=0, total=0)
+
+    monkeypatch.setattr(accounts_sync, "sync_accounts_to_pg", _capture_sync)
+
+    real_path = "/app/discovery_api/data/parser_jobs.json"
+    await sync_accounts_to_pg_best_effort(
+        context="enroll:Reriv8095", parser_store_path=real_path
+    )
+    assert captured["parser_store_path"] == real_path
+
+
+async def test_sync_best_effort_uses_env_path_when_no_override(monkeypatch) -> None:
+    from app_balance.queue import accounts_sync
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/test")
+    monkeypatch.setenv("PARSER_STORE_PATH", "/env/driven/parser_jobs.json")
+
+    captured: dict[str, str] = {}
+
+    async def _capture_sync(config, *, dry_run=False):
+        captured["parser_store_path"] = config.parser_store_path
+        from app_balance.queue.accounts_sync import SyncResult
+
+        return SyncResult(inserted=0, updated=0, unchanged=0, total=0)
+
+    monkeypatch.setattr(accounts_sync, "sync_accounts_to_pg", _capture_sync)
+
+    await sync_accounts_to_pg_best_effort(context="enroll:Reriv8095")
+    assert captured["parser_store_path"] == "/env/driven/parser_jobs.json"
