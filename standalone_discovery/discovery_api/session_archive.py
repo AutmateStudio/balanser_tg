@@ -565,11 +565,106 @@ async def bundle_to_telethon_session(bundle: BundleInfo, target_path: str) -> st
     return os.path.abspath(dest)
 
 
-async def probe_session_authorized(session_sqlite_path: str) -> None:
+_IDENTITY_FIELDS = (
+    "device_model",
+    "system_version",
+    "app_version",
+    "lang_code",
+    "system_lang_code",
+)
+
+
+def identity_sidecar_path(session_sqlite_path: str) -> str:
+    """Путь к `<name>.identity.json` рядом с `.session`-файлом."""
+    base = (
+        session_sqlite_path[: -len(".session")]
+        if session_sqlite_path.endswith(".session")
+        else session_sqlite_path
+    )
+    return base + ".identity.json"
+
+
+def build_identity_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """`api_id`/`api_hash` + device fingerprint исходного клиента retriv-бандла.
+
+    Retriv хранит в sidecar JSON `app_id`/`app_hash`/`device`/`sdk`/`app_version`/
+    `lang_code` того клиента, которым сессия была авторизована. Подключение под
+    другим device fingerprint увеличивает риск, что Telegram сочтёт клиент новым
+    устройством (доп. проверки/выход из сессии). Без этих полей — пусто, и
+    вызывающий код должен использовать глобальный `API_ID`/`API_HASH`.
+    """
+    if not metadata:
+        return {}
+    identity: dict[str, Any] = {}
+    app_id = metadata.get("app_id")
+    app_hash = metadata.get("app_hash")
+    if app_id and app_hash:
+        try:
+            identity["api_id"] = int(app_id)
+            identity["api_hash"] = str(app_hash)
+        except (TypeError, ValueError):
+            identity.pop("api_id", None)
+            identity.pop("api_hash", None)
+    device = metadata.get("device")
+    if device:
+        identity["device_model"] = str(device)
+    sdk = metadata.get("sdk")
+    if sdk:
+        identity["system_version"] = str(sdk)
+    app_version = metadata.get("app_version")
+    if app_version:
+        identity["app_version"] = str(app_version)
+    lang_code = metadata.get("lang_code")
+    if lang_code:
+        identity["lang_code"] = str(lang_code)
+    system_lang_code = metadata.get("system_lang_code")
+    if system_lang_code:
+        identity["system_lang_code"] = str(system_lang_code)
+    return identity
+
+
+def save_session_identity(session_sqlite_path: str, identity: dict[str, Any]) -> None:
+    """Персистит identity рядом с `.session`, чтобы `session_registry` подключался
+    под тем же `api_id`/`api_hash`/device fingerprint при будущих переподключениях."""
+    if not identity:
+        return
+    path = identity_sidecar_path(session_sqlite_path)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(identity, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def load_session_identity(session_sqlite_path: str) -> Optional[dict[str, Any]]:
+    path = identity_sidecar_path(session_sqlite_path)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def discard_session_identity(session_sqlite_path: str) -> None:
+    try:
+        os.remove(identity_sidecar_path(session_sqlite_path))
+    except FileNotFoundError:
+        pass
+
+
+async def probe_session_authorized(
+    session_sqlite_path: str,
+    *,
+    identity: Optional[dict[str, Any]] = None,
+) -> None:
     """Кратко подключается к Telegram и проверяет авторизацию сессии.
 
     При unauthorized/banned/flood поднимает ArchiveSessionError(conversion_failed)
-    с деталями; вызывающий слой мапит на HTTP 409.
+    с деталями; вызывающий слой мапит на HTTP 409. `identity` (опц.) — api_id/hash
+    + device fingerprint исходного клиента (см. `build_identity_from_metadata`);
+    без него используется глобальный `API_ID`/`API_HASH` балансировщика.
     """
     from telethon import TelegramClient
     from telethon.errors import FloodWaitError
@@ -577,12 +672,17 @@ async def probe_session_authorized(session_sqlite_path: str) -> None:
     from discovery_api.config import get_api_hash, get_api_id
     from discovery_api.session_health import classify_telethon_error
 
+    identity = identity or {}
+    api_id = int(identity.get("api_id") or get_api_id())
+    api_hash = str(identity.get("api_hash") or get_api_hash())
+    client_kwargs = {k: identity[k] for k in _IDENTITY_FIELDS if identity.get(k)}
+
     base = (
         session_sqlite_path[: -len(".session")]
         if session_sqlite_path.endswith(".session")
         else session_sqlite_path
     )
-    client = TelegramClient(base, get_api_id(), get_api_hash())
+    client = TelegramClient(base, api_id, api_hash, **client_kwargs)
     try:
         await client.connect()
         if not await client.is_user_authorized():
