@@ -20,6 +20,7 @@ from discovery_api.session_archive import (
     BundleInfo,
     bundle_to_telethon_session,
     detect_bundle,
+    extract_session_archive,
     safe_extract_zip,
 )
 
@@ -137,6 +138,55 @@ class SafeExtractZipTests(unittest.TestCase):
             with self.assertRaises(ArchiveSessionError) as ctx:
                 safe_extract_zip(data, "", td, max_extracted_bytes=100)
             self.assertEqual(ctx.exception.code, "archive_too_large")
+
+
+class NestedZipExtractTests(unittest.TestCase):
+    def test_outer_wrapper_with_aes_inner_telethon(self) -> None:
+        """Retriv layout: обычный ZIP → AES ZIP → *_telethon.session."""
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as td:
+            session_path = os.path.join(td, "247542045_telethon.session")
+            _make_telethon_sqlite(session_path)
+            with open(session_path, "rb") as f:
+                session_bytes = f.read()
+            sidecar = b'{"phone": "+79990001122"}'
+            inner = _aes_zip_bytes(
+                {
+                    "247542045_telethon.session": session_bytes,
+                    "247542045.json": sidecar,
+                },
+                "jam",
+            )
+            outer_buf = io.BytesIO()
+            with zipfile.ZipFile(outer_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("ретрив7802/ретрив7802.zip", inner)
+            outer = outer_buf.getvalue()
+
+            out = os.path.join(td, "out")
+            os.makedirs(out)
+            extract_session_archive(outer, "jam", out)
+            info = detect_bundle(out)
+            self.assertEqual(info.kind, "telethon")
+            self.assertEqual(info.suggested_session_name, "247542045")
+            self.assertEqual(info.phone, "+79990001122")
+            # Вложенный .zip после unwrap не должен остаться
+            leftover = []
+            for root, _dirs, files in os.walk(out):
+                leftover.extend(n for n in files if n.lower().endswith(".zip"))
+            self.assertEqual(leftover, [])
+
+    def test_nested_wrong_password_raises_bad_password(self) -> None:
+        import zipfile
+
+        inner = _aes_zip_bytes({"hello.txt": b"world"}, "jam")
+        outer_buf = io.BytesIO()
+        with zipfile.ZipFile(outer_buf, "w") as zf:
+            zf.writestr("inner.zip", inner)
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(ArchiveSessionError) as ctx:
+                extract_session_archive(outer_buf.getvalue(), "wrong", td)
+            self.assertEqual(ctx.exception.code, "bad_password")
 
 
 class DetectBundleTests(unittest.TestCase):

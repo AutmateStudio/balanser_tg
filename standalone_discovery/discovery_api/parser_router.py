@@ -1190,8 +1190,8 @@ async def parser_enroll_session_from_archive(
         ArchiveSessionError,
         bundle_to_telethon_session,
         detect_bundle,
+        extract_session_archive,
         probe_session_authorized,
-        safe_extract_zip,
         validate_session_name,
     )
 
@@ -1215,7 +1215,7 @@ async def parser_enroll_session_from_archive(
     final_path: Optional[str] = None
     try:
         try:
-            safe_extract_zip(raw, password, extract_dir)
+            extract_session_archive(raw, password, extract_dir)
             bundle = detect_bundle(extract_dir)
 
             if session_name and session_name.strip():
