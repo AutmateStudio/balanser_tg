@@ -1,8 +1,11 @@
 -- A9: seed справочников PG Queue Balancer (полное ТЗ + карта Telethon ops из discovery)
 -- Порядок: после BD_schema.sql
 -- effective_rph = floor(rph_limit × (1 − reserve_percent/100)), reserve_percent = 10
--- Политика RPH (A14): parser_add_channel = 20 кан/ч на аккаунт (get_entity/Join=223,
--- GetFull=112); все прочие op — ×5 от исходного базового seed.
+--
+-- RPH get_entity/JoinChannel: базовые значения (7 / 30), БЕЗ политики A14 (223).
+-- A14_parser_add_channel_rph_20_per_hour.sql НЕ входит в migrate_queue.sh —
+-- только ручной накат: python scripts/apply_a14_rph_migration.py
+--
 -- Политика RPH (A17): telegram_discover = до 120 async-поисков/ч на аккаунт при пороге 20%
 -- (contacts.Search/SearchGlobal=1670, GetFullChannel=2500, GetRecommendations=840,
 -- get_input_entity=340; GetParticipants/iter_messages — без изменений).
@@ -21,13 +24,13 @@ INSERT INTO resource_op_types (code, name, rph_limit, is_enabled) VALUES
   ('connect_disconnect', 'Connect / disconnect сессии', 150, true),
   ('get_me', 'Текущий пользователь (валидация сессии)', 150, true),
   ('is_user_authorized', 'Проверка авторизации', 150, true),
-  ('get_entity', 'Resolve username / ссылки / peer', 223, true),
+  ('get_entity', 'Resolve username / ссылки / peer', 7, true),
   ('get_input_entity', 'get_input_entity() для InputPeer', 340, true),
   ('contacts.Search', 'Поиск контактов / каналов', 1670, true),
   ('messages.SearchGlobal', 'Глобальный поиск сообщений', 1670, true),
   ('channels.GetChannelRecommendations', 'Рекомендации каналов', 840, true),
   ('channels.GetFullChannel', 'Полные данные канала', 2500, true),
-  ('channels.JoinChannel', 'Подписка / join канала или discussion', 223, true),
+  ('channels.JoinChannel', 'Подписка / join канала или discussion', 30, true),
   ('channels.LeaveChannel', 'Выход из канала или discussion', 150, true),
   ('channels.GetParticipant', 'Проверка участника (InputPeerSelf)', 30000, true),
   ('channels.GetParticipants', 'Список участников (megagroup / lidgen)', 2500, true),
@@ -38,7 +41,9 @@ INSERT INTO resource_op_types (code, name, rph_limit, is_enabled) VALUES
   ('bot.send_photo', 'Bot API: send_photo', 2500, true)
 ON CONFLICT (code) DO UPDATE SET
   name = EXCLUDED.name,
-  rph_limit = EXCLUDED.rph_limit,
+  -- rph_limit НЕ перезаписываем: иначе каждый деплой затирал бы ручные/прод
+  -- значения и фактически «накатывал A14» через seed (223). Новые коды
+  -- получают rph_limit только из INSERT выше.
   is_enabled = EXCLUDED.is_enabled,
   updated_at = now();
 
