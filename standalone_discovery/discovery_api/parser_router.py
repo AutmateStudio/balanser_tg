@@ -1188,10 +1188,14 @@ async def parser_enroll_session_from_archive(
 
     from discovery_api.session_archive import (
         ArchiveSessionError,
+        build_identity_from_metadata,
         bundle_to_telethon_session,
         detect_bundle,
+        discard_session_identity,
         extract_session_archive,
+        identity_sidecar_path,
         probe_session_authorized,
+        save_session_identity,
         validate_session_name,
     )
 
@@ -1211,6 +1215,7 @@ async def parser_enroll_session_from_archive(
     extract_dir = tempfile.mkdtemp(prefix="session_archive_")
     convert_dir = tempfile.mkdtemp(prefix="session_convert_")
     backup_path: Optional[str] = None
+    identity_backup_path: Optional[str] = None
     wrote_new_session = False
     final_path: Optional[str] = None
     try:
@@ -1239,7 +1244,8 @@ async def parser_enroll_session_from_archive(
 
             temp_session = os.path.join(convert_dir, f"{norm}.session")
             await bundle_to_telethon_session(bundle, temp_session)
-            await probe_session_authorized(temp_session)
+            identity = build_identity_from_metadata(bundle.metadata)
+            await probe_session_authorized(temp_session, identity=identity)
 
             os.makedirs(sessions_dir(), exist_ok=True)
             final_path = session_file_path(norm)
@@ -1249,14 +1255,30 @@ async def parser_enroll_session_from_archive(
                     os.remove(backup_path)
                 except FileNotFoundError:
                     pass
+                old_identity = identity_sidecar_path(final_path)
+                if os.path.isfile(old_identity):
+                    identity_backup_path = backup_path + ".identity.json"
+                    try:
+                        os.replace(old_identity, identity_backup_path)
+                    except OSError:
+                        identity_backup_path = None
                 os.rename(final_path, backup_path)
             shutil.move(temp_session, final_path)
             wrote_new_session = True
+            if identity:
+                save_session_identity(final_path, identity)
+            else:
+                discard_session_identity(final_path)
 
             result = await _finish_enroll(parser_id, job, norm, source="archive")
             if backup_path and os.path.isfile(backup_path):
                 try:
                     os.remove(backup_path)
+                except OSError:
+                    pass
+            if identity_backup_path and os.path.isfile(identity_backup_path):
+                try:
+                    os.remove(identity_backup_path)
                 except OSError:
                     pass
             return result
@@ -1272,6 +1294,7 @@ async def parser_enroll_session_from_archive(
             ) from e
     except Exception:
         if wrote_new_session and final_path:
+            discard_session_identity(final_path)
             if backup_path and os.path.isfile(backup_path):
                 try:
                     if os.path.isfile(final_path):
@@ -1282,6 +1305,11 @@ async def parser_enroll_session_from_archive(
                     os.rename(backup_path, final_path)
                 except OSError:
                     pass
+                if identity_backup_path and os.path.isfile(identity_backup_path):
+                    try:
+                        os.replace(identity_backup_path, identity_sidecar_path(final_path))
+                    except OSError:
+                        pass
             elif os.path.isfile(final_path):
                 try:
                     os.remove(final_path)

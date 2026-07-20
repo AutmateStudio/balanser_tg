@@ -617,6 +617,17 @@ curl -sS -X POST "$BASE/discovery-api/parser/PARSER_ID/enroll-session" \
 попадает только после успешной проверки авторизации. При `overwrite=true` старый файл
 сначала переименовывается в `.bak` и восстанавливается при ошибке.
 
+**Identity (api_id/hash + device fingerprint) архива.** Retriv-бандл хранит в sidecar
+JSON `app_id`/`app_hash`/`device`/`sdk`/`app_version`/`lang_code` того клиента, которым
+сессия была авторизована (обычно официальный Telegram Desktop, не наш `API_ID`/`API_HASH`).
+При наличии этих полей проверка авторизации и все последующие подключения этой сессии
+(включая `session_registry`/clump) идут под ними, а не под глобальным `API_ID`/`API_HASH` —
+это сохраняется рядом с `.session` в `<name>.identity.json`. Без этих полей в архиве —
+прежнее поведение (глобальный конфиг). **Важно:** это снижает риск, что Telegram сочтёт
+подключение новым устройством, но не гарантирует авторизацию — если аккаунт уже разлогинен
+на стороне Telegram (частый случай для сессий из таких маркетплейсов), `probe_session_authorized`
+всё равно вернёт `auth_failed` независимо от identity/device fingerprint.
+
 ```bash
 curl -sS -X POST "$BASE/discovery-api/parser/PARSER_ID/enroll-session-from-archive" \
   -H "X-API-Key: $KEY" \

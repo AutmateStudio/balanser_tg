@@ -285,6 +285,35 @@ def _telethon_session_base(session_name: str) -> str:
     return session_file_path(session_name)[: -len(".session")]
 
 
+_IDENTITY_CLIENT_FIELDS = (
+    "device_model",
+    "system_version",
+    "app_version",
+    "lang_code",
+    "system_lang_code",
+)
+
+
+def _resolve_session_identity(session_base: str) -> tuple[int, str, dict[str, Any]]:
+    """`api_id`/`api_hash` + device fingerprint для `TelegramClient(...)`.
+
+    Archive-импортированные сессии (`enroll-session-from-archive`) несут рядом
+    `<name>.identity.json` с исходными `app_id`/`app_hash`/device retriv-бандла —
+    подключение под ними безопаснее глобального `API_ID`/`API_HASH`, т.к. сессия
+    авторизована именно под чужим app_id/device, а не нашим. Без sidecar-файла
+    (QR-логин и любые сессии без identity) — прежнее поведение: глобальный конфиг.
+    """
+    from discovery_api.session_archive import load_session_identity
+
+    identity = load_session_identity(session_base + ".session") or {}
+    api_id = identity.get("api_id")
+    api_hash = identity.get("api_hash")
+    if not api_id or not api_hash:
+        return int(get_api_id()), get_api_hash(), {}
+    kwargs = {k: identity[k] for k in _IDENTITY_CLIENT_FIELDS if identity.get(k)}
+    return int(api_id), str(api_hash), kwargs
+
+
 def _lock_for(session_name: str) -> asyncio.Lock:
     return _locks.setdefault(_canonical_key(session_name), asyncio.Lock())
 
@@ -380,9 +409,9 @@ async def get_or_create_client(session_name: str) -> TelegramClient:
             await notify_session_reauthorized(session_name)
             return client
 
-        client = TelegramClient(
-            _telethon_session_base(session_name), int(get_api_id()), get_api_hash()
-        )
+        base = _telethon_session_base(session_name)
+        api_id, api_hash, identity_kwargs = _resolve_session_identity(base)
+        client = TelegramClient(base, api_id, api_hash, **identity_kwargs)
         await client.connect()
         if not await is_authorized_uncached(client):
             await client.disconnect()

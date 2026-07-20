@@ -321,5 +321,159 @@ class BundleToTelethonTests(unittest.TestCase):
             fake_tdesk.ToTelethon.assert_awaited_once()
 
 
+class SessionIdentityTests(unittest.TestCase):
+    def test_build_identity_from_metadata_maps_retriv_fields(self) -> None:
+        from discovery_api.session_archive import build_identity_from_metadata
+
+        metadata = {
+            "app_id": 2040,
+            "app_hash": "b18441a1ff607e10a989891a5462e627",
+            "device": "VHGLRT-PRO",
+            "sdk": "Windows 10",
+            "app_version": "7.0.1 x64",
+            "lang_code": "en",
+            "system_lang_code": "en",
+            "phone": None,
+        }
+        identity = build_identity_from_metadata(metadata)
+        self.assertEqual(identity["api_id"], 2040)
+        self.assertEqual(identity["api_hash"], "b18441a1ff607e10a989891a5462e627")
+        self.assertEqual(identity["device_model"], "VHGLRT-PRO")
+        self.assertEqual(identity["system_version"], "Windows 10")
+        self.assertEqual(identity["app_version"], "7.0.1 x64")
+        self.assertEqual(identity["lang_code"], "en")
+        self.assertEqual(identity["system_lang_code"], "en")
+
+    def test_build_identity_empty_metadata_returns_empty(self) -> None:
+        from discovery_api.session_archive import build_identity_from_metadata
+
+        self.assertEqual(build_identity_from_metadata({}), {})
+
+    def test_build_identity_missing_app_id_skips_api_fields(self) -> None:
+        from discovery_api.session_archive import build_identity_from_metadata
+
+        identity = build_identity_from_metadata({"device": "X-PRO"})
+        self.assertNotIn("api_id", identity)
+        self.assertNotIn("api_hash", identity)
+        self.assertEqual(identity["device_model"], "X-PRO")
+
+    def test_save_load_discard_identity_roundtrip(self) -> None:
+        from discovery_api.session_archive import (
+            discard_session_identity,
+            load_session_identity,
+            save_session_identity,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            session_path = os.path.join(td, "acc1.session")
+            identity = {"api_id": 2040, "api_hash": "hash", "device_model": "X-PRO"}
+            save_session_identity(session_path, identity)
+            loaded = load_session_identity(session_path)
+            self.assertEqual(loaded, identity)
+
+            discard_session_identity(session_path)
+            self.assertIsNone(load_session_identity(session_path))
+
+    def test_save_empty_identity_is_noop(self) -> None:
+        from discovery_api.session_archive import load_session_identity, save_session_identity
+
+        with tempfile.TemporaryDirectory() as td:
+            session_path = os.path.join(td, "acc1.session")
+            save_session_identity(session_path, {})
+            self.assertIsNone(load_session_identity(session_path))
+
+    def test_load_missing_identity_returns_none(self) -> None:
+        from discovery_api.session_archive import load_session_identity
+
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(load_session_identity(os.path.join(td, "nope.session")))
+
+
+class ProbeSessionAuthorizedIdentityTests(unittest.TestCase):
+    def test_probe_uses_identity_api_id_and_device_kwargs(self) -> None:
+        from discovery_api import session_archive as mod
+
+        captured: dict[str, object] = {}
+
+        class _FakeClient:
+            def __init__(self, base, api_id, api_hash, **kwargs):
+                captured["base"] = base
+                captured["api_id"] = api_id
+                captured["api_hash"] = api_hash
+                captured["kwargs"] = kwargs
+
+            async def connect(self):
+                return None
+
+            async def is_user_authorized(self):
+                return True
+
+            async def disconnect(self):
+                return None
+
+            class session:
+                @staticmethod
+                def close():
+                    return None
+
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch("telethon.TelegramClient", _FakeClient),
+            patch.dict(os.environ, {"API_ID": "1", "API_HASH": "global-hash"}),
+        ):
+            session_path = os.path.join(td, "acc1.session")
+            identity = {
+                "api_id": 2040,
+                "api_hash": "archive-hash",
+                "device_model": "VHGLRT-PRO",
+                "system_version": "Windows 10",
+            }
+            asyncio.run(mod.probe_session_authorized(session_path, identity=identity))
+
+        self.assertEqual(captured["api_id"], 2040)
+        self.assertEqual(captured["api_hash"], "archive-hash")
+        self.assertEqual(
+            captured["kwargs"],
+            {"device_model": "VHGLRT-PRO", "system_version": "Windows 10"},
+        )
+
+    def test_probe_without_identity_falls_back_to_global_config(self) -> None:
+        from discovery_api import session_archive as mod
+
+        captured: dict[str, object] = {}
+
+        class _FakeClient:
+            def __init__(self, base, api_id, api_hash, **kwargs):
+                captured["api_id"] = api_id
+                captured["api_hash"] = api_hash
+                captured["kwargs"] = kwargs
+
+            async def connect(self):
+                return None
+
+            async def is_user_authorized(self):
+                return True
+
+            async def disconnect(self):
+                return None
+
+            class session:
+                @staticmethod
+                def close():
+                    return None
+
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch("telethon.TelegramClient", _FakeClient),
+            patch.dict(os.environ, {"API_ID": "1", "API_HASH": "global-hash"}),
+        ):
+            session_path = os.path.join(td, "acc1.session")
+            asyncio.run(mod.probe_session_authorized(session_path))
+
+        self.assertEqual(captured["api_id"], 1)
+        self.assertEqual(captured["api_hash"], "global-hash")
+        self.assertEqual(captured["kwargs"], {})
+
+
 if __name__ == "__main__":
     unittest.main()

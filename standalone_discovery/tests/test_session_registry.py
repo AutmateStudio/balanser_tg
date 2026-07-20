@@ -89,6 +89,88 @@ class SessionRegistryConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(sr.find_registered_client("/app/sessions/Test3.session"), c1)
 
 
+class SessionRegistryIdentityTests(unittest.IsolatedAsyncioTestCase):
+    """Archive-импортированные сессии подключаются под своим api_id/hash/device."""
+
+    async def asyncSetUp(self) -> None:
+        import tempfile
+
+        from discovery_api import session_registry as sr
+
+        sr.reset_for_tests()
+        FakeTelegramClient.init_count = 0
+        FakeTelegramClient.connect_count = 0
+        self._tmpdir = tempfile.mkdtemp()
+        self._prev_sessions_dir = os.environ.get("SESSIONS_DIR")
+        os.environ["SESSIONS_DIR"] = self._tmpdir
+
+    async def asyncTearDown(self) -> None:
+        from discovery_api import session_registry as sr
+
+        await sr.release_all()
+        sr.reset_for_tests()
+        if self._prev_sessions_dir is None:
+            os.environ.pop("SESSIONS_DIR", None)
+        else:
+            os.environ["SESSIONS_DIR"] = self._prev_sessions_dir
+
+    async def test_uses_identity_sidecar_when_present(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_archive import save_session_identity
+
+        session_path = os.path.join(self._tmpdir, "acc1.session")
+        save_session_identity(
+            session_path,
+            {
+                "api_id": 2040,
+                "api_hash": "archive-hash",
+                "device_model": "VHGLRT-PRO",
+                "system_version": "Windows 10",
+            },
+        )
+        captured: dict[str, object] = {}
+
+        class _CapturingClient(FakeTelegramClient):
+            def __init__(self, base, api_id, api_hash, **kwargs):
+                captured["api_id"] = api_id
+                captured["api_hash"] = api_hash
+                captured["kwargs"] = kwargs
+                super().__init__()
+
+        with patch("discovery_api.session_registry.TelegramClient", _CapturingClient), patch(
+            "discovery_api.session_registry.get_api_id", return_value=1
+        ), patch("discovery_api.session_registry.get_api_hash", return_value="global-hash"):
+            await sr.get_or_create_client("acc1")
+
+        self.assertEqual(captured["api_id"], 2040)
+        self.assertEqual(captured["api_hash"], "archive-hash")
+        self.assertEqual(
+            captured["kwargs"],
+            {"device_model": "VHGLRT-PRO", "system_version": "Windows 10"},
+        )
+
+    async def test_falls_back_to_global_config_without_sidecar(self) -> None:
+        from discovery_api import session_registry as sr
+
+        captured: dict[str, object] = {}
+
+        class _CapturingClient(FakeTelegramClient):
+            def __init__(self, base, api_id, api_hash, **kwargs):
+                captured["api_id"] = api_id
+                captured["api_hash"] = api_hash
+                captured["kwargs"] = kwargs
+                super().__init__()
+
+        with patch("discovery_api.session_registry.TelegramClient", _CapturingClient), patch(
+            "discovery_api.session_registry.get_api_id", return_value=1
+        ), patch("discovery_api.session_registry.get_api_hash", return_value="global-hash"):
+            await sr.get_or_create_client("acc2")
+
+        self.assertEqual(captured["api_id"], 1)
+        self.assertEqual(captured["api_hash"], "global-hash")
+        self.assertEqual(captured["kwargs"], {})
+
+
 class SessionRegistryStringCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         from discovery_api import session_registry as sr
