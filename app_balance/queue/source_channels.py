@@ -29,17 +29,44 @@ WHERE id = $1
 RETURNING id
 """
 
-_FIND_BY_REF_EXACT_SQL = """
+_FIND_BY_EXT_CHANNEL_ID_SQL = """
 SELECT id
 FROM source_channels
-WHERE lower(trim(both '@' from coalesce(external_url, ''))) = lower($1)
-   OR lower(trim(both '@' from coalesce(name, ''))) = lower($1)
-   OR lower(coalesce(external_channel_id, '')) = lower($1)
+WHERE lower(external_channel_id) = lower($1)
 ORDER BY id DESC
 LIMIT 1
 """
 
-_FIND_BY_REF_SQL = """
+_FIND_BY_NAME_NORM_SQL = """
+SELECT id
+FROM source_channels
+WHERE lower(trim(both '@' from coalesce(name, ''))) = lower($1)
+ORDER BY id DESC
+LIMIT 1
+"""
+
+_FIND_BY_URL_EXACT_SQL = """
+SELECT id
+FROM source_channels
+WHERE lower(external_url) = ANY($1::text[])
+ORDER BY id DESC
+LIMIT 1
+"""
+
+_FIND_BY_URL_PREFIX_SQL = """
+SELECT id
+FROM source_channels
+WHERE lower(external_url) LIKE lower($1) || '/%'
+   OR lower(external_url) LIKE lower($1) || '?%'
+   OR lower(external_url) LIKE lower($2) || '/%'
+   OR lower(external_url) LIKE lower($2) || '?%'
+ORDER BY id DESC
+LIMIT 1
+"""
+
+# Медленный fallback: seq-scan. Ограничиваем statement_timeout, чтобы не
+# держать пул коннектов при большой source_channels (см. A20).
+_FIND_BY_REF_ILIKE_SQL = """
 SELECT id
 FROM source_channels
 WHERE external_url ILIKE '%' || $1 || '%'
@@ -48,6 +75,42 @@ ORDER BY id DESC
 LIMIT 1
 """
 
+
+def _normalize_channel_ref_needle(ref: str) -> str:
+    """Нормализует ref к username/id без @ и без t.me-префикса."""
+    raw = (ref or "").strip()
+    if not raw:
+        return ""
+    lowered = raw.lower()
+    for prefix in (
+        "https://t.me/",
+        "http://t.me/",
+        "https://telegram.me/",
+        "http://telegram.me/",
+        "t.me/",
+        "telegram.me/",
+    ):
+        if lowered.startswith(prefix):
+            raw = raw[len(prefix) :]
+            break
+    raw = raw.split("?", 1)[0].split("#", 1)[0].strip("/")
+    return raw.lstrip("@").strip()
+
+
+def _telegram_url_candidates(needle: str) -> list[str]:
+    """Канонические URL-формы для index-friendly exact match (lower)."""
+    n = (needle or "").strip().lstrip("@")
+    if not n:
+        return []
+    bases = (
+        f"https://t.me/{n}",
+        f"http://t.me/{n}",
+        f"https://telegram.me/{n}",
+        f"http://telegram.me/{n}",
+        f"t.me/{n}",
+        f"telegram.me/{n}",
+    )
+    return [b.lower() for b in bases]
 _LIST_PENDING_COLLECT_SQL = """
 SELECT id, assigned_account_id
 FROM source_channels
@@ -231,14 +294,49 @@ class SourceChannelsRepo:
             return row is not None
 
     async def find_id_by_ref(self, ref: str) -> int | None:
-        needle = (ref or "").strip().lstrip("@")
+        """Находит source_channels.id по @username / t.me-URL / external_channel_id.
+
+        Порядок (дешёвое → дорогое), чтобы использовать индексы A20 и не
+        держать пул на seq-scan ILIKE при каждом enqueue:
+          1) external_channel_id (expression index)
+          2) name без @ (expression index)
+          3) точный URL (index lower(external_url))
+          4) URL-prefix https://t.me/{needle}/… (btree prefix LIKE)
+          5) ILIKE '%x%' — только fallback, с коротким statement_timeout
+        """
+        needle = _normalize_channel_ref_needle(ref)
         if not needle:
             return None
         async with acquire() as conn:
-            val = await conn.fetchval(_FIND_BY_REF_EXACT_SQL, needle)
+            val = await conn.fetchval(_FIND_BY_EXT_CHANNEL_ID_SQL, needle)
             if val is not None:
                 return int(val)
-            val = await conn.fetchval(_FIND_BY_REF_SQL, needle)
+
+            val = await conn.fetchval(_FIND_BY_NAME_NORM_SQL, needle)
+            if val is not None:
+                return int(val)
+
+            urls = _telegram_url_candidates(needle)
+            if urls:
+                val = await conn.fetchval(_FIND_BY_URL_EXACT_SQL, urls)
+                if val is not None:
+                    return int(val)
+                val = await conn.fetchval(
+                    _FIND_BY_URL_PREFIX_SQL,
+                    f"https://t.me/{needle}",
+                    f"http://t.me/{needle}",
+                )
+                if val is not None:
+                    return int(val)
+
+            # Fallback: не блокируем пул на десятки секунд (prod: 20+ active
+            # seq-scan'ов на find_id_by_ref роняли /accounts/all).
+            try:
+                async with conn.transaction():
+                    await conn.execute("SET LOCAL statement_timeout = '1500'")
+                    val = await conn.fetchval(_FIND_BY_REF_ILIKE_SQL, needle)
+            except Exception:  # noqa: BLE001 — timeout/отмена → как «не найден»
+                return None
             return int(val) if val is not None else None
 
     async def list_pending_collect(self, limit: int) -> list[PendingChannel]:

@@ -133,7 +133,8 @@ for mig in \
   A16_min_available_resource_percent_uniform.sql \
   A17_telegram_discover_rph_120_per_hour.sql \
   A18_enable_collect_extra_data.sql \
-  A19_ops_metrics_flow.sql
+  A19_ops_metrics_flow.sql \
+  A20_source_channels_ref_lookup_indexes.sql
 do
   MIG_FILE="$DB_DIR/$mig"
   [[ -f "$MIG_FILE" ]] || die "Файл миграции не найден: $MIG_FILE"
@@ -151,7 +152,8 @@ for mig in \
   A16_min_available_resource_percent_uniform.sql \
   A17_telegram_discover_rph_120_per_hour.sql \
   A18_enable_collect_extra_data.sql \
-  A19_ops_metrics_flow.sql
+  A19_ops_metrics_flow.sql \
+  A20_source_channels_ref_lookup_indexes.sql
 do
   apply_once "$DB_DIR/$mig"
 done

@@ -317,6 +317,29 @@ class AccountsRepo:
             )
             return int(val) if val is not None else None
 
+    async def get_ids_by_session_names(
+        self, session_names: list[str]
+    ) -> dict[str, int]:
+        """Batch: нормализованный session_name → accounts.id (один SELECT)."""
+        from app_balance.queue.accounts_sync import normalize_session_name
+
+        names: list[str] = []
+        seen: set[str] = set()
+        for raw in session_names:
+            name = normalize_session_name(raw)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        if not names:
+            return {}
+        async with acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, session_name FROM accounts WHERE session_name = ANY($1::text[])",
+                names,
+            )
+        return {str(row["session_name"]): int(row["id"]) for row in rows}
+
     async def list_queue_states(self) -> dict[str, AccountQueueState]:
         """session_name → PG snapshot (один SELECT на весь парк)."""
         async with acquire() as conn:
