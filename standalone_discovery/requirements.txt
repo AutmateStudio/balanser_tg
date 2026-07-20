@@ -6,3 +6,7 @@ aiohttp>=3.9
 pyTelegramBotAPI>=4.0.0
 # TestClient (starlette.testclient) с Starlette ≥0.47 / FastAPI recent
 httpx2>=2.0.0
+# enroll-session-from-archive: AES zip, multipart upload, tdata→Telethon
+pyzipper>=0.3.6
+python-multipart>=0.0.9
+opentele2>=1.2.1

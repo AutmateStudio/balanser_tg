@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from discovery_api.account_registry import (
@@ -17,6 +17,8 @@ from discovery_api.account_registry import (
     list_all_accounts_merged,
     normalize_session_name,
     session_file_exists,
+    session_file_path,
+    sessions_dir,
 )
 from discovery_api.account_store import set_admin_blocked, update_account_fields, upsert_account
 from discovery_api.action_queue import (
@@ -44,6 +46,7 @@ from discovery_api.config import (
     get_session_max_reconnects,
     get_session_reconnect_backoff_base,
     get_session_reconnect_backoff_max,
+    get_session_archive_max_mb,
     get_session_resolve_min_interval,
     get_use_pg_queue,
 )
@@ -1116,18 +1119,15 @@ async def parser_account_delete(
     return {"ok": True, "session_name": norm, "deleted": True}
 
 
-@parser_router.post("/{parser_id}/enroll-session", response_model=AccountFullSummary)
-async def parser_enroll_session(
-    parser_id: str, body: SessionBody
+async def _finish_enroll(
+    parser_id: str,
+    job: "_ClumpJob",
+    norm: str,
+    *,
+    source: str = "manual",
 ) -> AccountFullSummary:
-    job = _require_running_clump(parser_id)
-    norm = normalize_session_name(body.session_name)
-    if not session_file_exists(norm):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Файл сессии не найден: {norm}.session",
-        )
-    upsert_account(norm, display_name=norm, source="manual")
+    """Общий хвост enroll: account_store → clump → channel_count → PG sync."""
+    upsert_account(norm, display_name=norm, source=source)
     await job.clump.add_session(norm)
     await job.clump.start()
     _persist_clump_state(parser_id, job.clump)
@@ -1142,6 +1142,155 @@ async def parser_enroll_session(
     if row is None:
         raise HTTPException(status_code=500, detail="Не удалось зарегистрировать аккаунт")
     return AccountFullSummary(**{**row, **membership.to_dict()})
+
+
+def _map_archive_error(exc: "ArchiveSessionError") -> HTTPException:
+    code = exc.code
+    if code == "bad_password":
+        return HTTPException(status_code=400, detail=exc.message)
+    if code in ("no_session_found", "unsafe_path", "archive_too_large", "ambiguous_session_name"):
+        return HTTPException(status_code=400, detail=exc.message)
+    if code == "auth_failed":
+        return HTTPException(status_code=409, detail=exc.message)
+    if code == "conversion_failed":
+        return HTTPException(status_code=400, detail=exc.message)
+    return HTTPException(status_code=500, detail=exc.message)
+
+
+@parser_router.post("/{parser_id}/enroll-session", response_model=AccountFullSummary)
+async def parser_enroll_session(
+    parser_id: str, body: SessionBody
+) -> AccountFullSummary:
+    job = _require_running_clump(parser_id)
+    norm = normalize_session_name(body.session_name)
+    if not session_file_exists(norm):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Файл сессии не найден: {norm}.session",
+        )
+    return await _finish_enroll(parser_id, job, norm, source="manual")
+
+
+@parser_router.post(
+    "/{parser_id}/enroll-session-from-archive",
+    response_model=AccountFullSummary,
+)
+async def parser_enroll_session_from_archive(
+    parser_id: str,
+    file: UploadFile = File(...),
+    password: str = Form(...),
+    session_name: Optional[str] = Form(None),
+    overwrite: bool = Form(False),
+) -> AccountFullSummary:
+    """Принимает password-protected ZIP (retriv-бандл) и зачисляет сессию в clump."""
+    import shutil
+    import tempfile
+
+    from discovery_api.session_archive import (
+        ArchiveSessionError,
+        bundle_to_telethon_session,
+        detect_bundle,
+        probe_session_authorized,
+        safe_extract_zip,
+        validate_session_name,
+    )
+
+    job = _require_running_clump(parser_id)
+
+    max_mb = get_session_archive_max_mb()
+    max_bytes = max_mb * 1024 * 1024
+    raw = await file.read()
+    if len(raw) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Файл слишком большой: максимум {max_mb} MiB",
+        )
+    if not raw:
+        raise HTTPException(status_code=400, detail="Пустой файл архива")
+
+    extract_dir = tempfile.mkdtemp(prefix="session_archive_")
+    convert_dir = tempfile.mkdtemp(prefix="session_convert_")
+    backup_path: Optional[str] = None
+    wrote_new_session = False
+    final_path: Optional[str] = None
+    try:
+        try:
+            safe_extract_zip(raw, password, extract_dir)
+            bundle = detect_bundle(extract_dir)
+
+            if session_name and session_name.strip():
+                norm = validate_session_name(normalize_session_name(session_name.strip()))
+            elif bundle.suggested_session_name:
+                norm = validate_session_name(bundle.suggested_session_name)
+            else:
+                raise ArchiveSessionError(
+                    "ambiguous_session_name",
+                    "Не удалось определить session_name; укажите явно",
+                )
+
+            if session_file_exists(norm) and not overwrite:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Сессия уже существует: {norm}.session "
+                        "(передайте overwrite=true)"
+                    ),
+                )
+
+            temp_session = os.path.join(convert_dir, f"{norm}.session")
+            await bundle_to_telethon_session(bundle, temp_session)
+            await probe_session_authorized(temp_session)
+
+            os.makedirs(sessions_dir(), exist_ok=True)
+            final_path = session_file_path(norm)
+            if os.path.isfile(final_path):
+                backup_path = final_path + ".bak"
+                try:
+                    os.remove(backup_path)
+                except FileNotFoundError:
+                    pass
+                os.rename(final_path, backup_path)
+            shutil.move(temp_session, final_path)
+            wrote_new_session = True
+
+            result = await _finish_enroll(parser_id, job, norm, source="archive")
+            if backup_path and os.path.isfile(backup_path):
+                try:
+                    os.remove(backup_path)
+                except OSError:
+                    pass
+            return result
+        except ArchiveSessionError as e:
+            raise _map_archive_error(e) from e
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.exception("enroll-session-from-archive failed: %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail="Не удалось зарегистрировать аккаунт",
+            ) from e
+    except Exception:
+        if wrote_new_session and final_path:
+            if backup_path and os.path.isfile(backup_path):
+                try:
+                    if os.path.isfile(final_path):
+                        os.remove(final_path)
+                except OSError:
+                    pass
+                try:
+                    os.rename(backup_path, final_path)
+                except OSError:
+                    pass
+            elif os.path.isfile(final_path):
+                try:
+                    os.remove(final_path)
+                except OSError:
+                    pass
+        raise
+    finally:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        shutil.rmtree(convert_dir, ignore_errors=True)
 
 
 @parser_router.get("/actions", response_model=ActionListResponse)
