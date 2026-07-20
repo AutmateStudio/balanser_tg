@@ -194,6 +194,96 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.skipped_fatal, {})
         self.assertFalse(mock_enqueue.await_args_list[0].kwargs["skip_known_fatal"])
 
+    async def test_enqueue_skips_channel_on_active_clump_owner(self) -> None:
+        """Канал уже слушается active+enabled аккаунтом clump → задача не ставится."""
+        from app_balance.queue.accounts import Account, AccountsRepo
+        from app_balance.queue.source_channels import SourceChannelsRepo
+        from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
+        from discovery_api.session_registry import SessionClump
+        from discovery_api.queue.producer import enqueue_parser_add_channels
+
+        clump = SessionClump(["/s1", "/s2"], "c", webhook_url="http://h")
+        clump.assignments["@busy"] = "/s2"
+
+        active = Account(
+            id=5,
+            session_name="s2",
+            status="active",
+            is_enabled=True,
+            current_task_id=None,
+            cooldown_until=None,
+            last_used_at=None,
+        )
+
+        with patch(
+            "discovery_api.session_registry.get_clump", return_value=clump
+        ), patch.object(
+            AccountsRepo, "get_id_by_session_name", new_callable=AsyncMock, return_value=5
+        ), patch.object(
+            AccountsRepo, "get_by_id", new_callable=AsyncMock, return_value=active
+        ), patch.object(
+            TaskQueueRepo, "enqueue", new_callable=AsyncMock
+        ) as mock_enqueue, patch.object(
+            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=1
+        ):
+            mock_enqueue.return_value = EnqueueResult(created=True, task_id=7)
+
+            result = await enqueue_parser_add_channels(
+                parser_id="p1",
+                channel_list=["@busy", "@fresh"],
+                action_id="act-clump",
+            )
+
+        self.assertEqual(result.task_ids, [7])
+        self.assertEqual(result.skipped_in_clump, {"@busy": "/s2"})
+        mock_enqueue.assert_awaited_once()
+        enqueued: object = mock_enqueue.await_args_list[0].args[0]
+        self.assertEqual(enqueued.payload["channel_ref"], "@fresh")
+
+    async def test_enqueue_keeps_channel_when_owner_not_active(self) -> None:
+        """Владелец в clump, но аккаунт disabled → задачу всё равно ставим."""
+        from app_balance.queue.accounts import Account, AccountsRepo
+        from app_balance.queue.source_channels import SourceChannelsRepo
+        from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
+        from discovery_api.session_registry import SessionClump
+        from discovery_api.queue.producer import enqueue_parser_add_channels
+
+        clump = SessionClump(["/s1", "/s2"], "c", webhook_url="http://h")
+        clump.assignments["@busy"] = "/s2"
+
+        disabled = Account(
+            id=5,
+            session_name="s2",
+            status="disabled",
+            is_enabled=False,
+            current_task_id=None,
+            cooldown_until=None,
+            last_used_at=None,
+        )
+
+        with patch(
+            "discovery_api.session_registry.get_clump", return_value=clump
+        ), patch.object(
+            AccountsRepo, "get_id_by_session_name", new_callable=AsyncMock, return_value=5
+        ), patch.object(
+            AccountsRepo, "get_by_id", new_callable=AsyncMock, return_value=disabled
+        ), patch.object(
+            TaskQueueRepo, "enqueue", new_callable=AsyncMock
+        ) as mock_enqueue, patch.object(
+            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=1
+        ):
+            mock_enqueue.return_value = EnqueueResult(created=True, task_id=8)
+
+            result = await enqueue_parser_add_channels(
+                parser_id="p1",
+                channel_list=["@busy"],
+                action_id="act-disabled",
+            )
+
+        self.assertEqual(result.task_ids, [8])
+        self.assertEqual(result.skipped_in_clump, {})
+        mock_enqueue.assert_awaited_once()
+
     async def test_enqueue_skips_empty_channels(self) -> None:
         from app_balance.queue.source_channels import SourceChannelsRepo
         from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
