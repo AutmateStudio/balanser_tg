@@ -1136,15 +1136,17 @@ async def _finish_enroll(
 
 def _map_archive_error(exc: "ArchiveSessionError") -> HTTPException:
     code = exc.code
+    # HTTP detail должен быть строкой — иначе клиент видит [object Object].
+    detail = exc.message if isinstance(exc.message, str) else str(exc.message)
     if code == "bad_password":
-        return HTTPException(status_code=400, detail=exc.message)
+        return HTTPException(status_code=400, detail=detail)
     if code in ("no_session_found", "unsafe_path", "archive_too_large", "ambiguous_session_name"):
-        return HTTPException(status_code=400, detail=exc.message)
+        return HTTPException(status_code=400, detail=detail)
     if code == "auth_failed":
-        return HTTPException(status_code=409, detail=exc.message)
+        return HTTPException(status_code=409, detail=detail)
     if code == "conversion_failed":
-        return HTTPException(status_code=400, detail=exc.message)
-    return HTTPException(status_code=500, detail=exc.message)
+        return HTTPException(status_code=400, detail=detail)
+    return HTTPException(status_code=500, detail=detail)
 
 
 @parser_router.post("/{parser_id}/enroll-session", response_model=AccountFullSummary)

@@ -42,10 +42,23 @@ _TDATA_MAP_PREFIX = "D877F783D5D3EF8C"
 class ArchiveSessionError(Exception):
     """Ошибка обработки архива сессии с машиночитаемым кодом."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: object) -> None:
         self.code = code
-        self.message = message
-        super().__init__(message)
+        if isinstance(message, str):
+            self.message = message
+        elif isinstance(message, dict):
+            # Иногда по ошибке передают mapping kind→text; берём читаемую строку.
+            for key in ("message", "msg", "detail", "error", "reason"):
+                val = message.get(key)
+                if isinstance(val, str) and val.strip():
+                    self.message = val
+                    break
+            else:
+                parts = [v for v in message.values() if isinstance(v, str) and v.strip()]
+                self.message = "; ".join(parts) if parts else str(message)
+        else:
+            self.message = str(message)
+        super().__init__(self.message)
 
 
 @dataclass

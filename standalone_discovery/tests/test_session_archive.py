@@ -517,5 +517,22 @@ class ProbeSessionAuthorizedIdentityTests(unittest.TestCase):
         self.assertIn("device fingerprint", ctx.exception.message)
 
 
+class TestArchiveSessionErrorMessage(unittest.TestCase):
+    def test_dict_message_uses_message_key(self) -> None:
+        err = ArchiveSessionError(
+            "auth_failed",
+            {"message": "Telegram отозвал сессию", "code": 401},
+        )
+        self.assertEqual(err.message, "Telegram отозвал сессию")
+        self.assertEqual(str(err), "Telegram отозвал сессию")
+
+    def test_dict_without_message_joins_string_values(self) -> None:
+        err = ArchiveSessionError(
+            "auth_failed",
+            {"unauthorized": "Не авторизована", "extra": 1},
+        )
+        self.assertEqual(err.message, "Не авторизована")
+
+
 if __name__ == "__main__":
     unittest.main()
