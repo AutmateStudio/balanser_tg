@@ -405,8 +405,8 @@ class ProbeSessionAuthorizedIdentityTests(unittest.TestCase):
             async def connect(self):
                 return None
 
-            async def is_user_authorized(self):
-                return True
+            async def __call__(self, request):
+                return None
 
             async def disconnect(self):
                 return None
@@ -451,8 +451,8 @@ class ProbeSessionAuthorizedIdentityTests(unittest.TestCase):
             async def connect(self):
                 return None
 
-            async def is_user_authorized(self):
-                return True
+            async def __call__(self, request):
+                return None
 
             async def disconnect(self):
                 return None
@@ -473,6 +473,48 @@ class ProbeSessionAuthorizedIdentityTests(unittest.TestCase):
         self.assertEqual(captured["api_id"], 1)
         self.assertEqual(captured["api_hash"], "global-hash")
         self.assertEqual(captured["kwargs"], {})
+
+    def test_probe_surfaces_real_rpc_error_instead_of_generic_message(self) -> None:
+        """`is_user_authorized()` глотает RPCError — probe должен доставать причину сам.
+
+        Регрессия: до фикса раскрывался только "Сессия не авторизована в Telegram"
+        без кода Telegram (AUTH_KEY_UNREGISTERED/USER_DEACTIVATED_BAN/...), из-за
+        чего было невозможно отличить «отозванный ключ» от «просто не залогинен».
+        """
+        from telethon.errors import AuthKeyUnregisteredError
+
+        from discovery_api import session_archive as mod
+
+        class _FakeClient:
+            def __init__(self, base, api_id, api_hash, **kwargs):
+                pass
+
+            async def connect(self):
+                return None
+
+            async def __call__(self, request):
+                raise AuthKeyUnregisteredError(request=request)
+
+            async def disconnect(self):
+                return None
+
+            class session:
+                @staticmethod
+                def close():
+                    return None
+
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch("telethon.TelegramClient", _FakeClient),
+            patch.dict(os.environ, {"API_ID": "1", "API_HASH": "hash"}),
+        ):
+            session_path = os.path.join(td, "acc1.session")
+            with self.assertRaises(ArchiveSessionError) as ctx:
+                asyncio.run(mod.probe_session_authorized(session_path))
+
+        self.assertEqual(ctx.exception.code, "auth_failed")
+        self.assertIn("AuthKeyUnregisteredError", ctx.exception.message)
+        self.assertIn("device fingerprint", ctx.exception.message)
 
 
 if __name__ == "__main__":

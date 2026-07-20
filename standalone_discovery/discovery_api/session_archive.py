@@ -666,8 +666,8 @@ async def probe_session_authorized(
     + device fingerprint исходного клиента (см. `build_identity_from_metadata`);
     без него используется глобальный `API_ID`/`API_HASH` балансировщика.
     """
-    from telethon import TelegramClient
-    from telethon.errors import FloodWaitError
+    from telethon import TelegramClient, functions
+    from telethon.errors import FloodWaitError, RPCError
 
     from discovery_api.config import get_api_hash, get_api_id
     from discovery_api.session_health import classify_telethon_error
@@ -685,11 +685,25 @@ async def probe_session_authorized(
     client = TelegramClient(base, api_id, api_hash, **client_kwargs)
     try:
         await client.connect()
-        if not await client.is_user_authorized():
-            raise ArchiveSessionError(
-                "auth_failed",
-                "Сессия не авторизована в Telegram",
-            )
+        # `is_user_authorized()` глотает реальную RPCError Telegram и возвращает
+        # просто False — теряется код ошибки (AUTH_KEY_UNREGISTERED,
+        # USER_DEACTIVATED_BAN и т.п.), критичный для диагностики «почему».
+        # Вызываем authenticated RPC напрямую, чтобы поймать и показать причину.
+        try:
+            await client(functions.updates.GetStateRequest())
+        except RPCError as e:
+            kind, seconds = classify_telethon_error(e)
+            reason = f"{type(e).__name__}: {getattr(e, 'message', str(e)) or str(e)}"
+            detail = {
+                "unauthorized": f"Сессия не авторизована в Telegram ({reason})",
+                "banned": (
+                    f"Telegram отозвал сессию/заблокировал аккаунт ({reason}) — "
+                    "не связано с device fingerprint или api_id, повторная попытка "
+                    "с другими параметрами клиента не поможет"
+                ),
+                "flood": f"FloodWait: {seconds}с",
+            }.get(kind, f"Telegram отклонил сессию ({reason})")
+            raise ArchiveSessionError("auth_failed", detail) from e
     except ArchiveSessionError:
         raise
     except FloodWaitError as e:
