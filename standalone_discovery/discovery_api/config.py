@@ -292,3 +292,8 @@ def get_lidgen_min_score_total() -> int:
         return max(0, min(100, int(float(ratio_raw) * 100)))
     return 40
 
+
+def get_session_archive_max_mb() -> int:
+    """Лимит размера ZIP при enroll-session-from-archive (MiB). Default: 25."""
+    return max(1, min(200, _get_int_env("SESSION_ARCHIVE_MAX_MB", 25)))
+

@@ -591,6 +591,40 @@ curl -sS -X POST "$BASE/discovery-api/parser/PARSER_ID/enroll-session" \
   -d '{"session_name":"acc3"}'
 ```
 
+### POST /discovery-api/parser/{parser_id}/enroll-session-from-archive
+
+Принимает password-protected ZIP (retriv-style: Telethon `.session`, Pyrogram `.session`
+и/или Telegram Desktop `tdata`), конвертирует в Telethon-сессию и зачисляет в clump
+тем же путём, что и `enroll-session`.
+
+**Тело** (`multipart/form-data`):
+- `file` (обяз.) — ZIP-архив;
+- `password` (обяз.) — пароль ZIP;
+- `session_name` (опц.) — имя файла сессии (`^[A-Za-z0-9_\-]{1,64}$`); если не задано —
+  берётся префикс из архива (например `247542045`);
+- `overwrite` (опц., default `false`) — заменить уже существующий `.session`.
+
+**Ответ:** `AccountFullSummary` (как у `enroll-session`). Источник аккаунта: `archive`.
+
+**Ошибки:**
+- `404` / `409` — clump не найден / остановлен (как у `enroll-session`);
+- `413` — файл больше `SESSION_ARCHIVE_MAX_MB` (default 25 MiB);
+- `400` — неверный пароль, нет сессии в архиве, zip-slip/zip-bomb, неоднозначное имя;
+- `409` — сессия уже есть без `overwrite`, либо Telegram сообщил unauthorized/banned/flood.
+
+Распаковка всегда во временный каталог вне `SESSIONS_DIR`; во `SESSIONS_DIR` файл
+попадает только после успешной проверки авторизации. При `overwrite=true` старый файл
+сначала переименовывается в `.bak` и восстанавливается при ошибке.
+
+```bash
+curl -sS -X POST "$BASE/discovery-api/parser/PARSER_ID/enroll-session-from-archive" \
+  -H "X-API-Key: $KEY" \
+  -F "file=@retriv.zip" \
+  -F "password=jam" \
+  -F "session_name=247542045" \
+  -F "overwrite=false"
+```
+
 ### POST /discovery-api/parser/{parser_id}/add-session
 
 Добавляет сессию в clump. **Тело** (`SessionBody`): `session_name`.
@@ -818,6 +852,7 @@ curl -sS "$BASE/discovery-api/parser/queue/accounts/Test2/summary" -H "X-API-Key
 | PATCH | `/discovery-api/parser/accounts/{session_name}/reactivate` | Снять PG error после re-auth |
 | DELETE | `/discovery-api/parser/accounts/{session_name}` | Удалить аккаунт |
 | POST | `/discovery-api/parser/{parser_id}/enroll-session` | Зачислить сессию |
+| POST | `/discovery-api/parser/{parser_id}/enroll-session-from-archive` | Зачислить сессию из ZIP (retriv) |
 | POST | `/discovery-api/parser/{parser_id}/add-session` | Добавить сессию |
 | POST | `/discovery-api/parser/{parser_id}/remove-session` | Удалить сессию |
 | GET | `/discovery-api/parser/actions` | Список задач |
