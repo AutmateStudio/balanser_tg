@@ -50,18 +50,66 @@ docker compose -f "${SD}/docker-compose.yml" logs discovery-api --tail 100 2>/de
   grep -E "D12|in-process worker pool|worker.*старт|add_channel OK|parser_add_channel completed|resolve OK|join_pending" || \
   warn "нет строк worker pool — смотрите: docker compose logs discovery-api --tail 50"
 
-echo "--- parser_jobs.json ---"
-python3 <<'PY' || warn "parser_jobs.json"
-import json, os
-p = os.path.expanduser("~/Lidogen_telegram_balancer/standalone_discovery/data/parser_jobs.json")
-if not os.path.isfile(p):
-    print("не найден:", p)
+echo "--- parser_jobs.json: writer/reader consistency (в контейнере) ---"
+# Регресс fix/accounts-sync-parser-store-path: discovery_api (writer) и
+# accounts_sync (reader PG-синка) ДОЛЖНЫ резолвить один и тот же parser_jobs.json.
+# Если пути расходятся — enroll пишет членство в один файл, а синк читает другой →
+# in_clump=False → аккаунты становятся disabled.
+CONS_OUT="$(docker compose -f "${SD}/docker-compose.yml" exec -T discovery-api python - <<'PY' 2>&1
+import json, os, sys
+
+rc = 0
+try:
+    from discovery_api.parser_store import _store_path as writer_fn
+    writer = os.path.abspath(writer_fn())
+except Exception as e:  # noqa: BLE001
+    print("FAIL: не удалось получить writer path (discovery_api.parser_store):", e)
+    sys.exit(2)
+
+try:
+    from app_balance.queue.accounts_sync import default_parser_store_path
+    reader = os.path.abspath(default_parser_store_path())
+except Exception as e:  # noqa: BLE001
+    print("FAIL: не удалось получить reader path (accounts_sync):", e)
+    sys.exit(2)
+
+env_override = (os.getenv("PARSER_STORE_PATH") or "").strip()
+print("writer (discovery_api)  :", writer)
+print("reader (accounts_sync)  :", reader)
+print("PARSER_STORE_PATH env   :", env_override or "(не задан)")
+print("writer file exists      :", os.path.isfile(writer))
+
+if writer != reader:
+    print("FAIL: writer и reader parser_jobs.json РАСХОДЯТСЯ — синк прочитает не тот файл,")
+    print(f"      аккаунты после enroll станут disabled. Задайте в .env PARSER_STORE_PATH={writer}")
+    rc = 1
 else:
-    for job in json.load(open(p, encoding="utf-8")):
-        pid = job.get("parser_id") or job.get("id")
-        for s in job.get("sessions") or []:
-            print(f"parser={pid} session={s.get('session_name')} channels={len(s.get('channels') or [])}")
+    print("OK: writer == reader")
+
+if not os.path.isfile(writer):
+    print("WARN: файл членства clump отсутствует — новые enroll'ы дадут disabled")
+else:
+    try:
+        data = json.load(open(writer, encoding="utf-8"))
+        jobs = [j for j in data if isinstance(j, dict)]
+        sess = 0
+        for j in jobs:
+            names = j.get("session_name_list")
+            if not names and j.get("session_name"):
+                names = [j["session_name"]]
+            sess += len(names or [])
+        print(f"OK: clump-записей={len(jobs)}, сессий в файле={sess}")
+    except Exception as e:  # noqa: BLE001
+        print("WARN: не удалось прочитать файл членства:", e)
+
+sys.exit(rc)
 PY
+)"
+CONS_RC=$?
+echo "$CONS_OUT"
+if [ "$CONS_RC" -ne 0 ]; then
+  fail "parser_jobs.json writer/reader consistency (см. вывод выше)"
+fi
 
 if command -v psql >/dev/null 2>&1; then
   PGURL="$(grep ^QUEUE_DATABASE_URL= "$ENV" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r' || true)"

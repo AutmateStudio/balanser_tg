@@ -176,6 +176,31 @@ async def test_sync_best_effort_forwards_parser_store_path_override(monkeypatch)
     assert captured["parser_store_path"] == real_path
 
 
+def test_default_parser_store_path_prefers_env(monkeypatch) -> None:
+    from app_balance.queue.accounts_sync import default_parser_store_path
+
+    monkeypatch.setenv("PARSER_STORE_PATH", "/explicit/parser_jobs.json")
+    assert default_parser_store_path() == "/explicit/parser_jobs.json"
+
+
+def test_default_parser_store_path_uses_writer_resolver(monkeypatch) -> None:
+    """Без env путь берётся из того же резолвера, что и писатель discovery_api."""
+    import sys
+    import types
+
+    from app_balance.queue.accounts_sync import default_parser_store_path
+
+    monkeypatch.delenv("PARSER_STORE_PATH", raising=False)
+
+    fake_ps = types.ModuleType("discovery_api.parser_store")
+    fake_ps._store_path = lambda: "/app/discovery_api/data/parser_jobs.json"  # type: ignore[attr-defined]
+    fake_pkg = sys.modules.get("discovery_api") or types.ModuleType("discovery_api")
+    monkeypatch.setitem(sys.modules, "discovery_api", fake_pkg)
+    monkeypatch.setitem(sys.modules, "discovery_api.parser_store", fake_ps)
+
+    assert default_parser_store_path() == "/app/discovery_api/data/parser_jobs.json"
+
+
 async def test_sync_best_effort_uses_env_path_when_no_override(monkeypatch) -> None:
     from app_balance.queue import accounts_sync
     from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort

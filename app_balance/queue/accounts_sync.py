@@ -84,6 +84,17 @@ def default_parser_store_path() -> str:
     raw = os.getenv("PARSER_STORE_PATH", "").strip()
     if raw:
         return raw
+    # Единый резолвер с writer'ом: discovery_api.parser_store пишет membership
+    # именно этим путём. В контейнере layout уплощён (`/app/discovery_api/...`
+    # вместо репозиторного `.../standalone_discovery/discovery_api/...`), поэтому
+    # захардкоженный ниже путь там не существует и синк читал пустоту →
+    # in_clump=False → аккаунты disabled. Берём тот же путь, что и писатель.
+    try:
+        from discovery_api.parser_store import _store_path as _writer_store_path
+
+        return _writer_store_path()
+    except Exception:  # noqa: BLE001 — discovery_api может быть недоступен (worker-only образ)
+        pass
     repo_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..")
     )
