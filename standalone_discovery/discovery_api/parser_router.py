@@ -1170,11 +1170,11 @@ async def parser_enroll_session(
 async def parser_enroll_session_from_archive(
     parser_id: str,
     file: UploadFile = File(...),
-    password: str = Form(...),
+    password: str = Form(""),
     session_name: Optional[str] = Form(None),
     overwrite: bool = Form(False),
 ) -> AccountFullSummary:
-    """Принимает password-protected ZIP (retriv-бандл) и зачисляет сессию в clump."""
+    """Принимает ZIP (retriv-бандл; пароль опционален) и зачисляет сессию в clump."""
     import shutil
     import tempfile
 

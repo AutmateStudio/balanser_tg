@@ -51,6 +51,22 @@ def _aes_zip_with_telethon(password: str, session_id: str = "247542045") -> byte
     return buf.getvalue()
 
 
+def _plain_zip_with_telethon(session_id: str = "13437596161") -> bytes:
+    """ZIP без шифрования (как 778405_27r)."""
+    import zipfile
+
+    with tempfile.TemporaryDirectory() as td:
+        sess = os.path.join(td, f"{session_id}_telethon.session")
+        _make_telethon_sqlite(sess)
+        with open(sess, "rb") as f:
+            sess_bytes = f.read()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{session_id}_telethon.session", sess_bytes)
+        zf.writestr(f"{session_id}.json", b'{"phone":null}')
+    return buf.getvalue()
+
+
 class EnrollFromArchiveEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.mkdtemp()
@@ -140,6 +156,44 @@ class EnrollFromArchiveEndpointTests(unittest.TestCase):
             os.path.isfile(os.path.join(self._tmpdir, "247542045.session"))
         )
         self._assert_no_leftover_extract_dirs()
+
+    def test_empty_password_plain_zip_ok(self) -> None:
+        """Пустой password (и вовсе без поля) не даёт FastAPI 'Field required'."""
+        from discovery_api.session_dialogs import AccountMembershipSnapshot
+
+        clump = self._running_clump()
+        zip_bytes = _plain_zip_with_telethon()
+        with (
+            patch.object(clump, "start", new_callable=AsyncMock),
+            patch(
+                "discovery_api.session_dialogs.scan_account_channel_membership",
+                new_callable=AsyncMock,
+                return_value=AccountMembershipSnapshot(1, 0, 0),
+            ),
+            patch("discovery_api.parser_router._persist_clump_state"),
+            patch(
+                "discovery_api.parser_router._sync_accounts_pg",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "discovery_api.session_archive.probe_session_authorized",
+                new_callable=AsyncMock,
+            ),
+        ):
+            resp_empty = self.client.post(
+                "/discovery-api/parser/pid/enroll-session-from-archive",
+                files={"file": ("plain.zip", zip_bytes, "application/zip")},
+                data={"password": ""},
+            )
+            resp_omit = self.client.post(
+                "/discovery-api/parser/pid/enroll-session-from-archive",
+                files={"file": ("plain2.zip", zip_bytes, "application/zip")},
+                data={"session_name": "13437596161b", "overwrite": "true"},
+            )
+        self.assertEqual(resp_empty.status_code, 200, resp_empty.text)
+        self.assertNotIn("Field required", resp_empty.text)
+        self.assertEqual(resp_omit.status_code, 200, resp_omit.text)
+        self.assertNotIn("Field required", resp_omit.text)
 
     def test_wrong_password(self) -> None:
         self._running_clump()
