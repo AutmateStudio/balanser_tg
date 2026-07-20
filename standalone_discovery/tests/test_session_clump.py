@@ -177,7 +177,10 @@ class SessionClumpTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["error"])
         mock_add.assert_not_awaited()
 
-    async def test_add_channel_on_session_rejects_other_session_owner(self) -> None:
+    async def test_add_channel_on_session_other_owner_is_idempotent_success(self) -> None:
+        # Канал уже слушается другой сессией того же clump → идемпотентный успех
+        # (цель достигнута), НЕ ошибка. Иначе воркер уводит задачу в бесконечный
+        # RETRYABLE. Перенос между сессиями — отдельная операция move_channel.
         from discovery_api.session_registry import SessionClump
 
         clump = SessionClump(["/s1", "/s2"], "d1-own", webhook_url="http://h")
@@ -192,8 +195,36 @@ class SessionClumpTests(unittest.IsolatedAsyncioTestCase):
         ) as mock_add:
             result = await clump.add_channel_on_session("/s1", "@busy")
 
-        self.assertIn("другой сессии", result["error"] or "")
-        self.assertEqual(result["session_name"], "/s1")
+        self.assertIsNone(result["error"])
+        self.assertTrue(result.get("already_present"))
+        self.assertTrue(result.get("owner_conflict"))
+        self.assertEqual(result["session_name"], "/s2")
+        self.assertEqual(result["chat_id"], -2002)
+        mock_add.assert_not_awaited()
+
+    async def test_add_channel_on_session_owner_alias_no_false_conflict(self) -> None:
+        # Владелец записан под alias с префиксом пути ('/app/sessions/Client1'),
+        # а задача пришла на basename ('Client1') — это ОДИН аккаунт. Не должно
+        # быть ложного owner_conflict; канал уже на этой же сессии → already_present.
+        from discovery_api.session_registry import SessionClump
+
+        clump = SessionClump(
+            ["/app/sessions/Client1", "/s2"], "d1-alias", webhook_url="http://h"
+        )
+        pc1 = clump.parser_client_list[0]
+        pc1.channels = ["@dup"]
+        pc1.ref_to_chat_id = {"@dup": -3003}
+        clump.assignments["@dup"] = "/app/sessions/Client1"
+
+        with patch(
+            "discovery_api.session_registry.Parser_client.add_channel",
+            new_callable=AsyncMock,
+        ) as mock_add:
+            result = await clump.add_channel_on_session("Client1", "@dup")
+
+        self.assertIsNone(result["error"])
+        self.assertTrue(result.get("already_present"))
+        self.assertIsNot(result.get("owner_conflict"), True)
         mock_add.assert_not_awaited()
 
     async def test_add_channel_on_session_unknown_session(self) -> None:

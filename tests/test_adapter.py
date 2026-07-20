@@ -157,6 +157,32 @@ async def test_already_present_is_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_owner_conflict_is_idempotent_success_no_dual_write() -> None:
+    """Канал уже на другой сессии того же clump → success, без RETRYABLE и без dual-write."""
+    clump = FakeClump()
+    clump.add_channel_on_session.return_value = {
+        "channel": "@dup",
+        "session_name": "andreytest",
+        "chat_id": 1,
+        "error": None,
+        "already_present": True,
+        "owner_conflict": True,
+    }
+    task = _claimed(payload={"parser_id": "p1", "channel_ref": "@dup"})
+    sync_after_add = AsyncMock()
+
+    await execute_task(
+        task,
+        account=_account(),
+        clump_getter=lambda _pid: clump,
+        sync_after_add=sync_after_add,
+    )
+
+    sync_after_add.assert_not_awaited()
+    clump.start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_clump_error_raises() -> None:
     clump = FakeClump()
     clump.add_channel_on_session.return_value = {

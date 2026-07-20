@@ -1373,7 +1373,12 @@ class SessionClump:
     def _find_owner(self, raw: str) -> Optional[Parser_client]:
         session_name = self.assignments.get(raw)
         if session_name:
-            return self._session_index.get(session_name)
+            # assignments может хранить alias ('/app/sessions/Client1'), а
+            # _session_index — другой ('Client1'); резолвим по canonical key,
+            # иначе владелец «теряется» и канал ошибочно считается свободным.
+            pc = self._resolve_pc(session_name)
+            if pc is not None:
+                return pc
         for pc in self.parser_client_list:
             if raw in pc.channels:
                 return pc
@@ -1469,7 +1474,7 @@ class SessionClump:
                 "error": "Пустое значение канала",
             }
 
-        pc = self._session_index.get(session_name)
+        pc = self._resolve_pc(session_name)
         if pc is None:
             return {
                 "channel": ref,
@@ -1482,14 +1487,19 @@ class SessionClump:
 
         owner = self._find_owner(ref)
         if owner is not None:
-            if owner.session_name != session_name:
+            if _canonical_key(owner.session_name) != _canonical_key(session_name):
+                # Канал уже слушается в этом же clump другой сессией — цель
+                # (канал под мониторингом) уже достигнута. Возвращаем
+                # идемпотентный успех, а НЕ ошибку: иначе воркер уводит задачу
+                # в бесконечный RETRYABLE ("Канал уже на другой сессии").
+                # Перенос между сессиями — отдельная операция move_channel.
                 return {
                     "channel": ref,
-                    "session_name": session_name,
-                    "chat_id": None,
-                    "error": (
-                        f"Канал уже на другой сессии: {owner.session_name}"
-                    ),
+                    "session_name": owner.session_name,
+                    "chat_id": owner.ref_to_chat_id.get(ref),
+                    "error": None,
+                    "already_present": True,
+                    "owner_conflict": True,
                 }
             if ref in owner.channels:
                 return {

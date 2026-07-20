@@ -228,6 +228,21 @@ async def _execute_parser_add_channel(
     if error:
         _raise_clump_result_error(result)
 
+    if result.get("owner_conflict"):
+        # Канал уже слушается другой сессией того же clump — задача идемпотентно
+        # выполнена (цель достигнута). НЕ делаем dual-write на выбранный
+        # (не-владелец) аккаунт, иначе PG разойдётся с clump. Задача помечается
+        # done и покидает очередь — никаких RETRYABLE.
+        log.info(
+            "execute_task: parser_add_channel idempotent (already in clump on "
+            "another session) task_id=%s ref=%s owner=%s",
+            task.id,
+            channel_ref,
+            result.get("session_name"),
+        )
+        await _start_clump_after_execute(parser_id=parser_id, clump=clump)
+        return
+
     log.info(
         "execute_task: parser_add_channel OK task_id=%s ref=%s session=%s chat_id=%s",
         task.id,

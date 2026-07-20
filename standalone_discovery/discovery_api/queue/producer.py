@@ -27,6 +27,10 @@ class EnqueueAddChannelsResult:
     # B12: канал -> код фатальной ошибки прошлой попытки; новая задача НЕ
     # создана (dedup_key ранее terminal failed с постоянной причиной).
     skipped_fatal: dict[str, str] = field(default_factory=dict)
+    # Канал уже слушается active+enabled аккаунтом того же clump — задача не
+    # создаётся (цель уже достигнута), иначе воркер уводит её в бесконечный
+    # RETRYABLE «Канал уже на другой сессии».
+    skipped_in_clump: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +92,43 @@ def _resolve_owner_session_name(clump: Any, channel_ref: str) -> str | None:
     return None
 
 
+async def _active_owner_in_clump(
+    clump: Any,
+    accounts_repo: AccountsRepo,
+    channel_ref: str,
+) -> str | None:
+    """session_name владельца канала, если это active+enabled аккаунт того же clump.
+
+    Возвращает None, если канала нет в clump, либо владелец не активен (тогда
+    задачу нужно поставить как обычно — воркер её переисполнит/перенесёт).
+    Используется для enqueue-time dedup: не плодим parser_add_channel на канал,
+    который уже слушается живым аккаунтом clump (иначе бесконечный RETRYABLE
+    «Канал уже на другой сессии»).
+    """
+    if clump is None:
+        return None
+    owner_session = _resolve_owner_session_name(clump, channel_ref)
+    if not owner_session:
+        return None
+    try:
+        account_id = await accounts_repo.get_id_by_session_name(owner_session)
+        if account_id is None:
+            return None
+        account = await accounts_repo.get_by_id(account_id)
+    except Exception:  # noqa: BLE001 — PG недоступен → не блокируем enqueue
+        log.warning(
+            "enqueue dedup: не удалось проверить статус владельца session=%s",
+            owner_session,
+            exc_info=True,
+        )
+        return None
+    if account is None:
+        return None
+    if account.status == "active" and account.is_enabled:
+        return owner_session
+    return None
+
+
 async def enqueue_parser_add_channels(
     *,
     parser_id: str,
@@ -107,10 +148,15 @@ async def enqueue_parser_add_channels(
     присылать один и тот же список каналов каждый тик, фильтрация — здесь.
     `skip_known_fatal=False` — принудительный повтор (ручной override оператора).
     """
+    from discovery_api.session_registry import get_clump
+
     repo = TaskQueueRepo()
     channels_repo = SourceChannelsRepo()
+    accounts_repo = AccountsRepo()
+    clump = get_clump(parser_id)
     task_ids: list[int] = []
     skipped_fatal: dict[str, str] = {}
+    skipped_in_clump: dict[str, str] = {}
     wh = (webhook_url or "").strip() or None
 
     for raw in channel_list:
@@ -124,6 +170,20 @@ async def enqueue_parser_add_channels(
                 parser_id,
                 raw,
             )
+            continue
+
+        owner_session = await _active_owner_in_clump(
+            clump, accounts_repo, channel_ref
+        )
+        if owner_session:
+            log.info(
+                "enqueue_parser_add_channels: канал ref=%r parser_id=%s не поставлен — "
+                "уже слушается active-аккаунтом clump session=%s (dedup на enqueue)",
+                channel_ref,
+                parser_id,
+                owner_session,
+            )
+            skipped_in_clump[channel_ref] = owner_session
             continue
 
         payload: dict[str, str] = {
@@ -163,7 +223,10 @@ async def enqueue_parser_add_channels(
             task_ids.append(task_id)
 
     return EnqueueAddChannelsResult(
-        task_ids=task_ids, action_id=action_id, skipped_fatal=skipped_fatal
+        task_ids=task_ids,
+        action_id=action_id,
+        skipped_fatal=skipped_fatal,
+        skipped_in_clump=skipped_in_clump,
     )
 
 
