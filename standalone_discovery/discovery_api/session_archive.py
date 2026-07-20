@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 # Лимиты zip-bomb (до распаковки; размеры видны в central directory).
 MAX_ARCHIVE_ENTRIES = 5000
 MAX_EXTRACTED_BYTES_DEFAULT = 100 * 1024 * 1024  # 100 MiB uncompressed
+# Retriv часто кладёт AES-ZIP внутрь обычного ZIP-обёртки (1 уровень).
+MAX_NESTED_ZIP_DEPTH = 3
 
 _SESSION_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
@@ -179,6 +181,90 @@ def safe_extract_zip(
                     ) from e
                 raise
     # Пустой архив после распаковки без ошибок — ок; detect_bundle разберётся.
+
+
+def _dir_total_bytes(root: str) -> int:
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, name))
+            except OSError:
+                continue
+    return total
+
+
+def _iter_nested_zip_files(root: str) -> list[str]:
+    found: list[str] = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            if name.lower().endswith(".zip"):
+                found.append(os.path.join(dirpath, name))
+    return found
+
+
+def extract_session_archive(
+    data: bytes,
+    password: str,
+    dest_dir: str,
+    *,
+    max_extracted_bytes: int = MAX_EXTRACTED_BYTES_DEFAULT,
+    max_nested_depth: int = MAX_NESTED_ZIP_DEPTH,
+) -> None:
+    """Распаковывает ZIP и разворачивает вложенные ZIP (layout retriv).
+
+    Типичный случай: внешний незашифрованный ZIP содержит один AES-ZIP
+    с `*_telethon.session` / tdata. Пароль применяется на каждом уровне
+    (для незашифрованных членов игнорируется).
+    """
+    safe_extract_zip(
+        data,
+        password,
+        dest_dir,
+        max_extracted_bytes=max_extracted_bytes,
+    )
+    for _depth in range(max(0, int(max_nested_depth))):
+        nested_zips = _iter_nested_zip_files(dest_dir)
+        if not nested_zips:
+            break
+        for zip_path in nested_zips:
+            remaining = max_extracted_bytes - _dir_total_bytes(dest_dir)
+            # Сам .zip ещё лежит на диске — его размер не должен съедать бюджет
+            # распаковки вложенного содержимого целиком, но если remaining уже 0 —
+            # дальше некуда.
+            try:
+                zip_size = os.path.getsize(zip_path)
+            except OSError:
+                zip_size = 0
+            remaining_for_nested = remaining + zip_size
+            if remaining_for_nested <= 0:
+                raise ArchiveSessionError(
+                    "archive_too_large",
+                    "Архив слишком большой после распаковки вложенных ZIP",
+                )
+            pending = zip_path + ".extracting"
+            try:
+                os.replace(zip_path, pending)
+            except OSError as e:
+                raise ArchiveSessionError(
+                    "conversion_failed",
+                    f"Не удалось подготовить вложенный ZIP: {e}",
+                ) from e
+            try:
+                with open(pending, "rb") as f:
+                    nested_data = f.read()
+                parent = os.path.dirname(pending) or dest_dir
+                safe_extract_zip(
+                    nested_data,
+                    password,
+                    parent,
+                    max_extracted_bytes=remaining_for_nested,
+                )
+            finally:
+                try:
+                    os.remove(pending)
+                except FileNotFoundError:
+                    pass
 
 
 def _sqlite_table_columns(path: str, table: str) -> Optional[set[str]]:

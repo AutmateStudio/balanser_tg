@@ -595,7 +595,8 @@ curl -sS -X POST "$BASE/discovery-api/parser/PARSER_ID/enroll-session" \
 
 Принимает password-protected ZIP (retriv-style: Telethon `.session`, Pyrogram `.session`
 и/или Telegram Desktop `tdata`), конвертирует в Telethon-сессию и зачисляет в clump
-тем же путём, что и `enroll-session`.
+тем же путём, что и `enroll-session`. Поддерживается типичная обёртка retriv:
+внешний обычный ZIP → внутри AES-ZIP с сессией (пароль применяется к вложенному архиву).
 
 **Тело** (`multipart/form-data`):
 - `file` (обяз.) — ZIP-архив;
