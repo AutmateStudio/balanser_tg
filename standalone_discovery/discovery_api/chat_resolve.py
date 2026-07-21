@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Literal, Union
@@ -31,6 +33,33 @@ JOIN_FAIL_CHANNELS_TOO_MUCH = "channels_too_much"
 JOIN_FAIL_CHANNEL_PRIVATE = "channel_private"
 JOIN_FAIL_NOT_PARTICIPANT = "join_pending"
 JOIN_FAIL_NO_DISCUSSION = "channel_has_no_discussion"
+
+# Пауза после успешного JoinChannelRequest до GetParticipant / следующих TL-вызовов
+# (гонка членства в Telegram). Env: JOIN_PARTICIPANT_STAGGER_SECONDS (default 1).
+_DEFAULT_JOIN_PARTICIPANT_STAGGER_SECONDS = 1.0
+
+
+def _join_participant_stagger_seconds() -> float:
+    raw = os.getenv("JOIN_PARTICIPANT_STAGGER_SECONDS", "").strip()
+    if not raw:
+        return _DEFAULT_JOIN_PARTICIPANT_STAGGER_SECONDS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return _DEFAULT_JOIN_PARTICIPANT_STAGGER_SECONDS
+
+
+async def _stagger_after_join(*, raw_ref: str, role: str) -> None:
+    delay = _join_participant_stagger_seconds()
+    if delay <= 0:
+        return
+    log.debug(
+        "resolve ref=%s: stagger %.3fs after JoinChannel before membership check role=%s",
+        raw_ref,
+        delay,
+        role,
+    )
+    await asyncio.sleep(delay)
 
 
 class ChannelHasNoDiscussionError(ValueError):
@@ -151,6 +180,8 @@ async def _join_channel_entity(
     try:
         await client(functions.channels.JoinChannelRequest(channel=entity))
         log.info("resolve ref=%s: JoinChannel OK role=%s chat=%s", raw_ref, role, title)
+        # Даём Telegram зафиксировать членство до GetParticipant / GetFullChannel.
+        await _stagger_after_join(raw_ref=raw_ref, role=role)
         return True, None
     except UserAlreadyParticipantError:
         log.info(
