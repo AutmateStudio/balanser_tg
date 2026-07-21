@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = PACKAGE_DIR.parents[1]
 OUT_ROOT = PACKAGE_DIR / "out"
 CREATED_BY_PREFIX = "throughput_test:"
 PAUSE_ERROR_PREFIX = "throughput-test-paused:"
@@ -28,9 +34,21 @@ PHASES = (
     "done",
 )
 
-
 # На vps-104 ходим в discovery через loopback: публичный URL даёт hairpin/503.
 DEFAULT_BASE_URL = "http://127.0.0.1:8100"
+
+_PLACEHOLDER_IDS = frozenset(
+    {
+        "running-parser-id",
+        "parser-id",
+        "changeme",
+        "uuid-из-ответа",
+        "реальный-uuid-из-list",
+        "<running-parser-id>",
+        "<uuid-из-ответа>",
+        "<реальный-uuid-из-list>",
+    }
+)
 
 
 @dataclass
@@ -71,6 +89,32 @@ class Config:
         return int(self.add_count * (1.0 + self.candidate_pool_extra))
 
 
+def _load_dotenv_files() -> None:
+    """Подтянуть ключи из .env, если переменные ещё не заданы в окружении."""
+    candidates = [
+        REPO_ROOT / "standalone_discovery" / ".env",
+        REPO_ROOT / ".env",
+    ]
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            raw = line.strip()
+            if not raw or raw.startswith("#") or "=" not in raw:
+                continue
+            key, _, val = raw.partition("=")
+            key = key.strip()
+            if not key or key in os.environ:
+                continue
+            val = val.strip().strip('"').strip("'").strip("\r")
+            if val:
+                os.environ[key] = val
+
+
 def _env(name: str, default: str | None = None) -> str:
     val = os.environ.get(name, default)
     if val is None or val == "":
@@ -78,18 +122,108 @@ def _env(name: str, default: str | None = None) -> str:
     return val
 
 
+def is_placeholder_parser_id(value: str | None) -> bool:
+    if value is None:
+        return True
+    s = str(value).strip()
+    if not s:
+        return True
+    if "<" in s or ">" in s:
+        return True
+    if s.lower() in {x.lower() for x in _PLACEHOLDER_IDS}:
+        return True
+    # шаблон вида uuid-из-...
+    if re.search(r"(uuid|parser.?id|changeme|подставьте|реальн)", s, re.I):
+        return True
+    return False
+
+
+def pick_parser_id_from_list(items: list[dict[str, Any]]) -> str:
+    """Выбрать running clump; если один — его; иначе первый running."""
+    parsed: list[tuple[str, bool]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        pid = item.get("parser_id") or item.get("id")
+        if not pid:
+            continue
+        running = bool(item.get("running"))
+        parsed.append((str(pid), running))
+    if not parsed:
+        raise SystemExit(
+            "Автоподхват parser_id: /discovery-api/parser/list пуст. "
+            "Сначала запустите clump (POST /discovery-api/parser/start)."
+        )
+    running_ids = [pid for pid, running in parsed if running]
+    if len(running_ids) == 1:
+        return running_ids[0]
+    if len(running_ids) > 1:
+        # стабильный выбор: первый running
+        return running_ids[0]
+    if len(parsed) == 1:
+        return parsed[0][0]
+    raise SystemExit(
+        "Автоподхват parser_id: нет running clump. "
+        f"Найдено: {[p for p, _ in parsed]}. "
+        "Укажите --parser-id явно или запустите парсер."
+    )
+
+
+def discover_parser_id(*, base_url: str, api_key: str, timeout: float = 30.0) -> str:
+    url = f"{base_url.rstrip('/')}/discovery-api/parser/list"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "X-API-Key": api_key,
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:500]
+        raise SystemExit(
+            f"Автоподхват parser_id: HTTP {exc.code} от {url}: {body}"
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(
+            f"Автоподхват parser_id: не удалось GET {url}: {exc}. "
+            "Проверьте --base-url http://127.0.0.1:8100 и что discovery-api запущен."
+        ) from exc
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"Автоподхват parser_id: невалидный JSON от {url}"
+        ) from exc
+    if not isinstance(data, list):
+        raise SystemExit(
+            f"Автоподхват parser_id: ожидали list, получили {type(data).__name__}"
+        )
+    return pick_parser_id_from_list(data)
+
+
 def load_config(argv: list[str] | None = None) -> Config:
+    _load_dotenv_files()
+
     p = argparse.ArgumentParser(
         description=(
             "Тест пропускной способности PG-очереди: "
-            "отключение синка -> пауза лимитов -> 4000 add (8ч) -> 4000 remove (2ч) -> restore"
+            "отключение синка -> пауза лимитов -> 4000 add (8ч) -> 4000 remove (2ч) -> restore. "
+            "Запуск: python3 -m loadtest.throughput_test"
         )
     )
     p.add_argument(
         "--parser-id",
         default=os.environ.get("THROUGHPUT_PARSER_ID")
         or os.environ.get("LOADTEST_PARSER_ID"),
-        help="Running clump/parser_id на prod",
+        help=(
+            "Running clump/parser_id. Если не задан — автоподхват "
+            "первого running из GET {base}/discovery-api/parser/list"
+        ),
     )
     p.add_argument(
         "--base-url",
@@ -174,23 +308,15 @@ def load_config(argv: list[str] | None = None) -> Config:
         or os.environ.get("LOADTEST_PGURL")
         or os.environ.get("PGURL"),
     )
-    if not args.parser_id:
-        raise SystemExit(
-            "Нужен --parser-id или THROUGHPUT_PARSER_ID / LOADTEST_PARSER_ID"
-        )
-    parser_id = str(args.parser_id).strip()
-    if (
-        not parser_id
-        or "<" in parser_id
-        or ">" in parser_id
-        or parser_id.lower() in {"running-parser-id", "parser-id", "changeme"}
-    ):
-        raise SystemExit(
-            f"Некорректный parser_id={parser_id!r}. "
-            "Подставьте реальный id из: "
-            "curl -sS -H \"X-API-Key: $API_KEY\" "
-            "http://127.0.0.1:8100/discovery-api/parser/list"
-        )
+    base_url = str(args.base_url).rstrip("/")
+
+    raw_parser = args.parser_id
+    if is_placeholder_parser_id(raw_parser):
+        parser_id = discover_parser_id(base_url=base_url, api_key=api_key)
+        print(f"Автоподхват parser_id={parser_id} из {base_url}/discovery-api/parser/list")
+    else:
+        parser_id = str(raw_parser).strip()
+
     if args.restore_only and not args.resume:
         raise SystemExit("--restore-only требует --resume RUN_ID")
 
@@ -198,14 +324,22 @@ def load_config(argv: list[str] | None = None) -> Config:
         os.environ.get("N8N_API_KEY")
         or _maybe_read_n8n_key_file()
     )
-    if not args.skip_n8n and not n8n_api_key:
-        raise SystemExit(
-            "Нужен N8N_API_KEY (или --skip-n8n, если sync отключаете вручную)"
-        )
+    skip_n8n = bool(args.skip_n8n)
+    if not skip_n8n and not n8n_api_key:
+        if args.restore_only:
+            print(
+                "N8N_API_KEY не задан — restore-only с --skip-n8n "
+                "(очередь восстановится, n8n не трогаем)"
+            )
+            skip_n8n = True
+        else:
+            raise SystemExit(
+                "Нужен N8N_API_KEY (или --skip-n8n, если sync отключаете вручную)"
+            )
 
     run_id = args.resume or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     cfg = Config(
-        base_url=args.base_url.rstrip("/"),
+        base_url=base_url,
         api_key=api_key,
         pg_url=pg_url,
         parser_id=parser_id,
@@ -217,7 +351,7 @@ def load_config(argv: list[str] | None = None) -> Config:
         remove_window_sec=args.remove_window,
         chunk_size=args.chunk_size,
         sampler_interval_sec=args.sampler_interval,
-        skip_n8n=bool(args.skip_n8n),
+        skip_n8n=skip_n8n,
         skip_producers=bool(args.skip_producers),
         dry_run=bool(args.dry_run),
         restore_only=bool(args.restore_only),
@@ -231,6 +365,8 @@ def load_config(argv: list[str] | None = None) -> Config:
 
 def _maybe_read_n8n_key_file() -> str | None:
     path = Path(os.environ.get("N8N_API_KEY_FILE", "n8n/n8n_api.txt"))
+    if not path.is_file():
+        path = REPO_ROOT / "n8n" / "n8n_api.txt"
     if path.is_file():
         content = path.read_text(encoding="utf-8").strip()
         if content:

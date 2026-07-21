@@ -210,6 +210,28 @@ class TestStateAndSync(unittest.TestCase):
         self.assertIsNone(parse_run_after(None))
         self.assertIsNone(parse_run_after(""))
 
+    def test_placeholder_and_auto_pick(self) -> None:
+        from loadtest.throughput_test.config import (
+            is_placeholder_parser_id,
+            pick_parser_id_from_list,
+        )
+
+        self.assertTrue(is_placeholder_parser_id(None))
+        self.assertTrue(is_placeholder_parser_id("<uuid-из-ответа>"))
+        self.assertTrue(is_placeholder_parser_id("running-parser-id"))
+        self.assertFalse(is_placeholder_parser_id("abc-123-real"))
+
+        picked = pick_parser_id_from_list(
+            [
+                {"parser_id": "idle-1", "running": False},
+                {"parser_id": "run-2", "running": True},
+            ]
+        )
+        self.assertEqual(picked, "run-2")
+
+        only = pick_parser_id_from_list([{"parser_id": "solo", "running": False}])
+        self.assertEqual(only, "solo")
+
     def test_name_matches_sync_workflows(self) -> None:
         self.assertTrue(_name_matches("tg-parser-sync новый prod API"))
         self.assertTrue(_name_matches("VK-parser-sync"))
