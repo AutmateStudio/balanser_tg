@@ -81,6 +81,25 @@ class PhaseOrchestrator:
         return phase in self.state.completed_phases
 
     async def run_all(self) -> None:
+        if self.cfg.restore_only:
+            log.info("=== restore-only mode ===")
+            self.state.mark_phase("restore")
+            self._save()
+            await self.phase_restore()
+            self.state.complete_phase("restore")
+            # report мог уже быть — перепишем после успешного restore
+            if "report" in self.state.completed_phases:
+                self.state.completed_phases = [
+                    p for p in self.state.completed_phases if p not in ("report", "done")
+                ]
+            self.state.mark_phase("report")
+            await self.phase_report()
+            self.state.complete_phase("report")
+            self.state.mark_phase("done")
+            self.state.complete_phase("done")
+            self._save()
+            return
+
         steps = [
             ("preflight", self.phase_preflight),
             ("sync_off", self.phase_sync_off),
@@ -147,10 +166,17 @@ class PhaseOrchestrator:
             if isinstance(p, dict)
         ]
         if self.cfg.parser_id not in ids:
-            log.warning(
-                "parser_id=%s не в /parser/list (sample=%s) — продолжаем",
-                self.cfg.parser_id,
-                ids[:10],
+            raise RuntimeError(
+                f"parser_id={self.cfg.parser_id!r} не найден в {self.cfg.base_url}"
+                f"/discovery-api/parser/list (sample={ids[:10]}). "
+                "Укажите реальный running clump id и --base-url http://127.0.0.1:8100 "
+                "при запуске на vps-104."
+            )
+        if not health_ok:
+            raise RuntimeError(
+                f"GET {self.cfg.base_url}/health не вернул 200. "
+                "На vps-104 используйте --base-url http://127.0.0.1:8100 "
+                "(публичный домен с самого сервера даёт hairpin/503)."
             )
 
         overview = await self.db.accounts_overview()

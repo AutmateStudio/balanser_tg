@@ -19,6 +19,21 @@ log = logging.getLogger("throughput.queue_swap")
 ACTIVE_FOR_DEDUP = ("queued", "scheduled", "retry", "in_progress")
 
 
+def parse_run_after(value: str | datetime | None) -> datetime | None:
+    """asyncpg требует datetime, не ISO-строку из JSON-бэкапа."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    raw = str(value).strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    dt = datetime.fromisoformat(raw)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 @dataclass
 class BackupTask:
     id: int
@@ -252,7 +267,7 @@ async def restore_queue(
             """,
             t.id,
             t.status,
-            t.run_after,
+            parse_run_after(t.run_after),
             marker,
             f"{PAUSE_ERROR_PREFIX}%",
         )

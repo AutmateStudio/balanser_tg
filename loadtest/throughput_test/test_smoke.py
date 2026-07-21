@@ -200,6 +200,16 @@ class TestStateAndSync(unittest.TestCase):
             self.assertIn("preflight", loaded.completed_phases)
             self.assertEqual(loaded.n8n_deactivated[0]["id"], "w1")
 
+    def test_parse_run_after_iso_string(self) -> None:
+        from loadtest.throughput_test.queue_swap import parse_run_after
+        from datetime import datetime, timezone
+
+        dt = parse_run_after("2026-07-21T20:49:03.982788+00:00")
+        self.assertIsInstance(dt, datetime)
+        self.assertEqual(dt.tzinfo, timezone.utc)
+        self.assertIsNone(parse_run_after(None))
+        self.assertIsNone(parse_run_after(""))
+
     def test_name_matches_sync_workflows(self) -> None:
         self.assertTrue(_name_matches("tg-parser-sync новый prod API"))
         self.assertTrue(_name_matches("VK-parser-sync"))

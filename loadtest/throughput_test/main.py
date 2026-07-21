@@ -50,17 +50,25 @@ async def async_main(argv: list[str] | None = None) -> int:
         store.save(state)
 
     log.info(
-        "Start throughput test run_id=%s parser_id=%s add=%s "
-        "wait=%ss add_window=%ss remove_window=%ss dry_run=%s out=%s",
+        "Start throughput test run_id=%s parser_id=%s base_url=%s add=%s "
+        "wait=%ss add_window=%ss remove_window=%ss dry_run=%s restore_only=%s out=%s",
         cfg.run_id,
         cfg.parser_id,
+        cfg.base_url,
         cfg.add_count,
         cfg.wait_recovery_sec,
         cfg.add_window_sec,
         cfg.remove_window_sec,
         cfg.dry_run,
+        cfg.restore_only,
         cfg.run_dir,
     )
+    if "oboyma.ai" in cfg.base_url or "web.oboyma" in cfg.base_url:
+        log.warning(
+            "base_url=%s похож на публичный домен. На vps-104 используйте "
+            "http://127.0.0.1:8100 — иначе nginx hairpin даёт 404/503.",
+            cfg.base_url,
+        )
 
     stop_flag = cfg.run_dir / "STOP"
     if stop_flag.exists() and not cfg.resume_run_id:
