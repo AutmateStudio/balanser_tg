@@ -62,11 +62,18 @@ class StuckTaskWatchdog:
         self._auto_retry = auto_retry or WatchdogAutoRetryConfig()
 
     async def tick_once(self) -> list[StuckTaskResult]:
-        """Один проход: перевод зависших задач + лог по исходу каждой."""
+        """Один проход: orphan-locks + перевод зависших задач + лог по исходу."""
         timer = TickTimer()
         error: str | None = None
         results: list[StuckTaskResult] = []
+        orphans = 0
         try:
+            orphans = await self._queue.release_orphan_account_locks()
+            if orphans:
+                logger.warning(
+                    "watchdog: снято %d orphan account locks (current_task_id)",
+                    orphans,
+                )
             results = await self._queue.mark_stuck_timed_out(
                 limit=self._batch_limit,
                 auto_retry=self._auto_retry,
@@ -114,6 +121,7 @@ class StuckTaskWatchdog:
                     "marked": marked,
                     "retried": retried,
                     "failed": failed,
+                    "orphans_released": orphans,
                     "total": len(results),
                 },
                 error=error,

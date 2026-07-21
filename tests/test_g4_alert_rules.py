@@ -82,6 +82,9 @@ def _snapshot(
     enqueued_5: int = 0,
     pickable: int = 0,
     attempts_5: int = 0,
+    accounts_pickable: int = 1,
+    accounts_busy: int = 0,
+    orphan_locks: int = 0,
 ) -> MetricsSnapshot:
     fleet_capacity = active * max_channels_per_session
     if usage_percent is None:
@@ -108,6 +111,9 @@ def _snapshot(
             active=active,
             in_cooldown=0,
             without_resource=0,
+            pickable=accounts_pickable,
+            busy=accounts_busy,
+            orphan_locks=orphan_locks,
             worst_by_account=worst_by_account,
         ),
         alerts_preview=AlertsPreview(
@@ -197,9 +203,50 @@ def test_no_active_accounts_error() -> None:
     config = _default_config()
     growth = QueueGrowthTracker(window_seconds=900)
     alerts = evaluate_alerts(
-        _snapshot(active=0), _empty_ctx(), config, growth
+        _snapshot(active=0, accounts_pickable=0), _empty_ctx(), config, growth
     )
     assert "no_active_accounts" in _codes(alerts)
+
+
+def test_accounts_all_busy_alert() -> None:
+    config = _default_config()
+    growth = QueueGrowthTracker(window_seconds=900)
+    alerts = evaluate_alerts(
+        _snapshot(
+            active=5,
+            accounts_pickable=0,
+            accounts_busy=5,
+            pickable=10,
+        ),
+        _empty_ctx(),
+        config,
+        growth,
+    )
+    assert "accounts_all_busy" in _codes(alerts)
+
+
+def test_accounts_all_busy_not_when_pickable_accounts() -> None:
+    config = _default_config()
+    growth = QueueGrowthTracker(window_seconds=900)
+    alerts = evaluate_alerts(
+        _snapshot(active=5, accounts_pickable=2, pickable=10),
+        _empty_ctx(),
+        config,
+        growth,
+    )
+    assert "accounts_all_busy" not in _codes(alerts)
+
+
+def test_orphan_account_locks_alert() -> None:
+    config = _default_config()
+    growth = QueueGrowthTracker(window_seconds=900)
+    alerts = evaluate_alerts(
+        _snapshot(orphan_locks=3),
+        _empty_ctx(),
+        config,
+        growth,
+    )
+    assert "orphan_account_locks" in _codes(alerts)
 
 
 def test_task_type_error_spike() -> None:

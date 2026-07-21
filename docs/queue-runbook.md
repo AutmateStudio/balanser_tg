@@ -366,8 +366,29 @@ Discovery-api с `USE_PG_QUEUE=true` отдаёт G3 metrics и может по�
 | Очередь растёт | `curl …/queue/metrics` → `queue.total`, `oldest_queued_age_seconds`; G4 `queue_growth` / `high_postpone`; проверить `accounts.without_resource` |
 | Нет выполнений при наличии работы | `pickable_now>0` / `enqueued_5m>0` и `done=0`/`attempts=0` → G4 `queue_no_progress`; worker жив? |
 | Задачи stuck | `stuck_count>0` → логи worker; G5 только если осознанно включён |
+| **Lock-starvation** (`no_available_account` при active>0, все busy) | См. [§ Lock-starvation / zombie locks](#lock-starvation--zombie-locks); `accounts.pickable=0`, `orphan_locks`; ops SQL |
 | RPH снижен автоматически | `SELECT * FROM resource_limit_adjustments ORDER BY created_at DESC LIMIT 10`; rollback — [§G6](#g6--детектор-повторяющихся-ошибок) |
 | Спам Telegram | увеличить `ALERT_COOLDOWN_SECONDS` или `THRESHOLD_ALERT_ENABLED=false` |
+
+### Lock-starvation / zombie locks
+
+Симптомы: `accounts.active > 0`, UI «доступен для dispatch» / 100% RPH, но
+`no_available_account` / `account_reserve_failed` и `pickable=0`.
+
+Причины:
+1. Orphan `accounts.current_task_id` на задачу не `in_progress`.
+2. Зависшие `in_progress` (watchdog не снял / `WORKER_WATCHDOG_ENABLED=false`).
+3. Fixed `account_id` после `account_reserve_failed` (до фикса unassign в dispatch).
+
+Чеклист:
+1. `GET …/queue/metrics` → `accounts.pickable`, `accounts.busy`, `accounts.orphan_locks`.
+2. `GET …/queue/watchdogs` — heartbeat `stuck_task_watchdog`; env `WORKER_WATCHDOG_ENABLED=true`.
+3. Dry-run: `psql "$QUEUE_DATABASE_URL" -f scripts/ops_unlock_zombie_accounts.sql`
+4. Apply: `psql "$QUEUE_DATABASE_URL" -v apply=1 -f scripts/ops_unlock_zombie_accounts.sql`
+5. Проверка: `pickable > 0`, `orphan_locks = 0`, нет петли `account_reserve_failed` на одном id.
+
+Алерты G4: `accounts_all_busy`, `orphan_account_locks`.
+
 
 ---
 

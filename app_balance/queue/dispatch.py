@@ -549,6 +549,8 @@ class TaskDispatcher:
 
         if dual is None:
 
+            await self._maybe_unassign_on_reserve_fail(task, task_type)
+
             await self._postpone_task(
                 task,
                 task_type=task_type,
@@ -576,6 +578,8 @@ class TaskDispatcher:
         ok = await self._accounts.reserve(account_id, task.id)
 
         if not ok:
+
+            await self._maybe_unassign_on_reserve_fail(task, task_type)
 
             await self._postpone_task(
                 task,
@@ -707,6 +711,35 @@ class TaskDispatcher:
             )
 
         return check.reason_code or ErrorCode.INSUFFICIENT_RESOURCE
+
+    async def _maybe_unassign_on_reserve_fail(
+        self,
+        task: ClaimedTask,
+        task_type: TaskType,
+    ) -> None:
+        """Сбрасывает account_id до postpone при reserve-fail для auto-pick типов.
+
+        Иначе задача навечно крутит account_reserve_failed на том же id.
+        Вызывать пока задача ещё in_progress (до postpone).
+        """
+        if task_type.code not in _AUTO_PICK_TASK_TYPES:
+            return
+        if task_type.uses_two_accounts:
+            return
+        try:
+            await self._queue.unassign_account(task.id)
+            logger.info(
+                "dispatch: unassign account_id после reserve_failed "
+                "task_id=%s (возврат в auto-pick)",
+                task.id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "dispatch: не удалось unassign_account после reserve_failed "
+                "task_id=%s",
+                task.id,
+                exc_info=True,
+            )
 
     async def _maybe_unassign_account_on_retry(
         self,

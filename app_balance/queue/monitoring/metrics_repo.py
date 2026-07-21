@@ -113,6 +113,9 @@ class AccountsMetrics:
     active: int
     in_cooldown: int
     without_resource: int
+    pickable: int = 0
+    busy: int = 0
+    orphan_locks: int = 0
     per_op: tuple[PerOpUsageRow, ...] = field(default_factory=tuple)
     worst_by_account: tuple[AccountResourceRow, ...] = field(default_factory=tuple)
 
@@ -193,6 +196,9 @@ class MetricsSnapshot:
                 "active": self.accounts.active,
                 "in_cooldown": self.accounts.in_cooldown,
                 "without_resource": self.accounts.without_resource,
+                "pickable": self.accounts.pickable,
+                "busy": self.accounts.busy,
+                "orphan_locks": self.accounts.orphan_locks,
                 "per_op": [
                     {
                         "account_id": row.account_id,
@@ -330,6 +336,9 @@ def _build_snapshot(
         active=_int_val(overview["active_accounts_count"]),
         in_cooldown=_int_val(overview["accounts_in_cooldown"]),
         without_resource=_int_val(overview["accounts_without_resource"]),
+        pickable=_col(overview, "pickable_accounts_count"),
+        busy=_col(overview, "busy_accounts_count"),
+        orphan_locks=_col(overview, "orphan_account_locks"),
         per_op=tuple(
             PerOpUsageRow(
                 account_id=_int_val(row["account_id"]),

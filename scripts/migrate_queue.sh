@@ -133,6 +133,7 @@ for mig in \
   A17_telegram_discover_rph_120_per_hour.sql \
   A18_enable_collect_extra_data.sql \
   A19_ops_metrics_flow.sql \
+  A21_orphan_locks_metrics.sql \
   A20_source_channels_ref_lookup_indexes.sql
 do
   MIG_FILE="$DB_DIR/$mig"
@@ -151,6 +152,7 @@ for mig in \
   A17_telegram_discover_rph_120_per_hour.sql \
   A18_enable_collect_extra_data.sql \
   A19_ops_metrics_flow.sql \
+  A21_orphan_locks_metrics.sql \
   A20_source_channels_ref_lookup_indexes.sql
 do
   apply_once "$DB_DIR/$mig"
