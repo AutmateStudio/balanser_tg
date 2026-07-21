@@ -242,7 +242,10 @@ WHERE t.task_type_code = 'parser_add_channel'
   AND t.status IN ('queued','scheduled','retry','stuck','in_progress')
   AND NOT EXISTS (SELECT 1 FROM _candidate_tasks c WHERE c.task_id = t.id);
 
-\if :apply = 1
+-- psql: \if :var — true если переменная непустая (как в ops_unlock).
+-- Сравнение ":apply = 1" НЕ поддерживается → error "Boolean expected".
+\if :{?apply}
+\if :apply
 \echo ========== APPLY: soft-cancel задач ==========
 CREATE TEMP TABLE _cancelled ON COMMIT DROP AS
 WITH upd AS (
@@ -277,7 +280,8 @@ WHERE a.current_task_id IN (SELECT id FROM _cancelled);
 
 SELECT count(*) AS cancelled_tasks FROM _cancelled;
 
-\if :sync_channels = 1
+\if :{?sync_channels}
+\if :sync_channels
 \echo ========== APPLY: sync source_channels.is_active ==========
 WITH applied AS (
   UPDATE source_channels sc
@@ -299,6 +303,7 @@ SELECT
   count(*) FILTER (WHERE NOT is_active) AS now_inactive
 FROM applied;
 \endif
+\endif
 
 COMMIT;
 \echo ========== APPLY done (COMMIT) ==========
@@ -308,4 +313,8 @@ ROLLBACK;
 \echo Подсказка: -v include_active=1  cancel parser_add уже привязанных к active-проектам
 \echo            -v sync_channels=1   ещё синхронизировать is_active каналов
 \echo            -v all_types=1       все типы задач, не только parser_add_channel
+\endif
+\else
+ROLLBACK;
+\echo ========== DRY-RUN (ROLLBACK). Для apply: -v apply=1 ==========
 \endif
