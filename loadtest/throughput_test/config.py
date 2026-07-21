@@ -29,6 +29,10 @@ PHASES = (
 )
 
 
+# На vps-104 ходим в discovery через loopback: публичный URL даёт hairpin/503.
+DEFAULT_BASE_URL = "http://127.0.0.1:8100"
+
+
 @dataclass
 class Config:
     base_url: str
@@ -51,6 +55,7 @@ class Config:
     skip_n8n: bool = False
     skip_producers: bool = False
     dry_run: bool = False
+    restore_only: bool = False
     resume_run_id: str | None = None
     run_id: str = field(
         default_factory=lambda: datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -90,10 +95,11 @@ def load_config(argv: list[str] | None = None) -> Config:
         "--base-url",
         default=os.environ.get(
             "THROUGHPUT_BASE_URL",
-            os.environ.get(
-                "LOADTEST_BASE_URL",
-                "https://lidogen-balancer-tg-prod.web.oboyma.ai",
-            ),
+            os.environ.get("LOADTEST_BASE_URL", DEFAULT_BASE_URL),
+        ),
+        help=(
+            "Базовый URL discovery-api. На vps-104 по умолчанию "
+            f"{DEFAULT_BASE_URL} (без hairpin на публичный домен)"
         ),
     )
     p.add_argument(
@@ -147,6 +153,14 @@ def load_config(argv: list[str] | None = None) -> Config:
         help="Продолжить с сохранённого state.json (run_id)",
     )
     p.add_argument(
+        "--restore-only",
+        action="store_true",
+        help=(
+            "Только restore очереди/n8n из state.json предыдущего run "
+            "(нужен --resume RUN_ID). Для аварийного восстановления после сбоя."
+        ),
+    )
+    p.add_argument(
         "--out-dir",
         default=str(OUT_ROOT),
         help="Каталог отчётов",
@@ -164,6 +178,21 @@ def load_config(argv: list[str] | None = None) -> Config:
         raise SystemExit(
             "Нужен --parser-id или THROUGHPUT_PARSER_ID / LOADTEST_PARSER_ID"
         )
+    parser_id = str(args.parser_id).strip()
+    if (
+        not parser_id
+        or "<" in parser_id
+        or ">" in parser_id
+        or parser_id.lower() in {"running-parser-id", "parser-id", "changeme"}
+    ):
+        raise SystemExit(
+            f"Некорректный parser_id={parser_id!r}. "
+            "Подставьте реальный id из: "
+            "curl -sS -H \"X-API-Key: $API_KEY\" "
+            "http://127.0.0.1:8100/discovery-api/parser/list"
+        )
+    if args.restore_only and not args.resume:
+        raise SystemExit("--restore-only требует --resume RUN_ID")
 
     n8n_api_key = (
         os.environ.get("N8N_API_KEY")
@@ -179,7 +208,7 @@ def load_config(argv: list[str] | None = None) -> Config:
         base_url=args.base_url.rstrip("/"),
         api_key=api_key,
         pg_url=pg_url,
-        parser_id=args.parser_id,
+        parser_id=parser_id,
         n8n_base_url=str(args.n8n_base_url).rstrip("/"),
         n8n_api_key=n8n_api_key,
         add_count=args.add_count,
@@ -191,6 +220,7 @@ def load_config(argv: list[str] | None = None) -> Config:
         skip_n8n=bool(args.skip_n8n),
         skip_producers=bool(args.skip_producers),
         dry_run=bool(args.dry_run),
+        restore_only=bool(args.restore_only),
         resume_run_id=args.resume,
         run_id=run_id,
         out_dir=Path(args.out_dir),

@@ -2,13 +2,15 @@
 
 Harness отключает внешний синк (n8n), обратимо «подменяет» очередь PG,
 ждёт восстановления RPH-лимитов, ставит 4000 `parser_add_channel`,
-замеряет разборку 8 часов, ставит remove по тем же каналам, замеряет 2 часа,
+замеряет разборку add, ставит remove по тем же каналам, замеряет remove,
 восстанавливает исходную очередь (оставшиеся remove **оставляет** в очереди)
 и пишет `report.md` / `report.json`.
 
 ## Длительность
 
-~1ч (recovery) + 8ч (add) + 2ч (remove) ≈ **11+ часов**. Запускать в `tmux`/`screen`.
+По умолчанию ~1ч (recovery) + 8ч (add) + 2ч (remove) ≈ **11+ часов**.
+Для укладки в ~8ч: `--wait-recovery 3600 --add-window 21600 --remove-window 3600`.
+Запускать в `tmux`/`screen`.
 
 ## Предусловия (vps-104)
 
@@ -20,14 +22,14 @@ export API_KEY="$(grep ^API_KEY= standalone_discovery/.env | cut -d= -f2- | tr -
 export N8N_BASE_URL="https://mokuegopasan.beget.app"
 export N8N_API_KEY="<n8n public api key>"
 
-# 1) разблокировать zombie-locks при необходимости
+# zombie-locks
 psql "$PGURL" -v apply=1 -f scripts/ops_unlock_zombie_accounts.sql
 psql "$PGURL" -c "SELECT pickable_accounts_count, busy_accounts_count, orphan_account_locks FROM v_accounts_overview;"
 
-# 2) running parser_id
+# parser_id — только через localhost (публичный URL с сервера = hairpin 404/503)
 curl -sS -H "X-API-Key: $API_KEY" \
-  https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/list | jq '.[].parser_id'
-export THROUGHPUT_PARSER_ID='<running-parser-id>'
+  http://127.0.0.1:8100/discovery-api/parser/list | jq '.[].parser_id'
+export THROUGHPUT_PARSER_ID='<реальный-uuid-из-list>'
 ```
 
 ## Установка
@@ -36,89 +38,90 @@ export THROUGHPUT_PARSER_ID='<running-parser-id>'
 cd ~/Lidogen_telegram_balancer
 python3 -m venv .venv-loadtest && source .venv-loadtest/bin/activate
 pip install -r loadtest/throughput_test/requirements.txt
-# также нужны зависимости prod_e2e (httpx/asyncpg — те же)
 ```
 
-## Полный прогон
+## Rehearsal (~10 мин)
 
 ```bash
-tmux new -s throughput
-cd ~/Lidogen_telegram_balancer
+tmux new -s throughput-rehearsal
 source .venv-loadtest/bin/activate
 
 python -m loadtest.throughput_test \
   --parser-id "$THROUGHPUT_PARSER_ID" \
-  --add-count 4000 \
-  --wait-recovery 3600 \
-  --add-window 28800 \
-  --remove-window 7200
+  --base-url http://127.0.0.1:8100 \
+  --add-count 50 \
+  --wait-recovery 60 \
+  --add-window 300 \
+  --remove-window 120
 ```
 
-Артефакты: `loadtest/throughput_test/out/<run_id>/`
+## Полный прогон (~8ч wall-clock)
+
+```bash
+tmux new -s throughput
+source .venv-loadtest/bin/activate
+
+python -m loadtest.throughput_test \
+  --parser-id "$THROUGHPUT_PARSER_ID" \
+  --base-url http://127.0.0.1:8100 \
+  --add-count 4000 \
+  --wait-recovery 3600 \
+  --add-window 21600 \
+  --remove-window 3600
+```
+
+> **Важно:** на vps-104 всегда `--base-url http://127.0.0.1:8100` (это default).
+> Публичный `https://lidogen-balancer-tg-prod...` с самого сервера даёт nginx hairpin → 404/503.
+> Не подставляйте плейсхолдер `<running-parser-id>` — только реальный uuid из `/parser/list`.
+
+Отчёт: `loadtest/throughput_test/out/<run_id>/report.md`
+
+## Артефакты
+
+`loadtest/throughput_test/out/<run_id>/`:
 
 | Файл | Содержание |
 |------|------------|
 | `state.json` | Фаза, task_ids, n8n IDs — для resume |
 | `queue_backup.json` | Снимок paused задач |
 | `added_channels.json` | Каналы / add task_ids |
-| `timeline_add.csv` / `timeline_remove.csv` | Срезы статусов |
-| `timeline_recovery.csv` | Сэмплы RPH во время паузы |
-| `report_add.md` | Промежуточный отчёт после окна add |
+| `timeline_*.csv` | Срезы статусов |
 | `report.md` / `report.json` | Итоговый отчёт |
-| `errors.jsonl` | Сбои HTTP/SQL (тест не падает на единичных ошибках) |
+| `errors.jsonl` | Сбои HTTP/SQL |
 | `run.log` | Лог |
 
-## Укороченный rehearsal
+## Stop / resume / аварийный restore
 
 ```bash
-python -m loadtest.throughput_test \
-  --parser-id "$THROUGHPUT_PARSER_ID" \
-  --add-count 50 \
-  --wait-recovery 60 \
-  --add-window 300 \
-  --remove-window 120 \
-  --skip-n8n   # если n8n отключили вручную
-```
-
-## Resume / kill-switch
-
-```bash
-# мягкая остановка → restore очереди + n8n + отчёт
 touch loadtest/throughput_test/out/<run_id>/STOP
-# или Ctrl+C
 
-# продолжить после обрыва (ssh drop и т.п.)
-python -m loadtest.throughput_test --resume <run_id> --parser-id "$THROUGHPUT_PARSER_ID"
+python -m loadtest.throughput_test \
+  --resume <run_id> \
+  --parser-id "$THROUGHPUT_PARSER_ID" \
+  --base-url http://127.0.0.1:8100
+
+# только восстановить очередь/n8n после сбоя restore
+python -m loadtest.throughput_test \
+  --restore-only \
+  --resume <run_id> \
+  --parser-id "$THROUGHPUT_PARSER_ID" \
+  --base-url http://127.0.0.1:8100
 ```
 
-При любом прерывании после фазы `queue_swap` выполняется восстановление:
-- задачи из `queue_backup.json` возвращаются в исходные статусы (кроме конфликтов dedup);
-- оставшиеся `parser_remove_channel` **не отменяются**;
-- n8n workflow из `state.json` реактивируются;
-- остановленные `producer-*` контейнеры стартуют снова.
+`--skip-n8n` — если sync уже выключили/включили вручную в UI.
 
 ## Фазы
 
-1. **preflight** — health, pickable accounts, пул кандидатов ≥ add_count×1.1
-2. **sync_off** — deactivate n8n (tg/vk-parser-sync, добавление по ссылке) + stop producers
-3. **queue_swap** — backup `queued/scheduled/retry` → `cancelled` с меткой `throughput-test-paused:<run_id>`
-4. **wait_recovery** — пауза (default 1ч) для скользящего RPH-окна
-5. **enqueue_add** — 4000 `parser_add_channel` чанками по 25
-6. **monitor_add** — 8ч, timeline + `report_add.md` (досрочный выход, если все терминальны)
-7. **enqueue_remove** — remove по всем каналам из фазы 5
-8. **monitor_remove** — 2ч (остаток remove остаётся в очереди)
-9. **restore** — вернуть backup + activate n8n + start producers
-10. **report** — итоговый `report.md` / `report.json`
+1. preflight — health, pickable, пул кандидатов
+2. sync_off — deactivate n8n + stop producers
+3. queue_swap — backup → cancel с меткой
+4. wait_recovery — пауза RPH
+5. enqueue_add / monitor_add
+6. enqueue_remove / monitor_remove (остаток remove остаётся)
+7. restore + report
 
-## Смоук-тесты (локально, без prod)
+## Смоук-тесты
 
 ```bash
 python -m unittest loadtest.throughput_test.test_smoke -v
 ```
-
-## Важно
-
-- In-process worker discovery-api **не** останавливается — «подмена» только статусами задач.
-- Реалистичная скорость add ~десятки–сотни каналов/час на весь пул аккаунтов; 4000 за 8ч могут **не** разобраться полностью — отчёт это покажет.
-- `--dry-run` — backup/план без cancel/enqueue/n8n-мутаций.
-- `--skip-n8n` — если sync уже выключен вручную в UI.
