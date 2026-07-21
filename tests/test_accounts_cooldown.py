@@ -121,13 +121,52 @@ async def test_set_banned_excludes_from_pick(cooldown_account) -> None:
             account_id,
         )
         row = await conn.fetchrow(
-            "SELECT status, last_error, cooldown_until FROM accounts WHERE id = $1",
+            "SELECT status, last_error, cooldown_until, current_task_id "
+            "FROM accounts WHERE id = $1",
             account_id,
         )
     assert pickable is False
     assert row["status"] == "banned"
     assert row["last_error"] == "UserDeactivatedBanError"
     assert row["cooldown_until"] is None
+    assert row["current_task_id"] is None
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_set_banned_clears_current_task_id(cooldown_account) -> None:
+    """Ban снимает zombie current_task_id, даже если задача ещё 'висит'."""
+    session_name, account_id = cooldown_account
+    repo = AccountsRepo()
+
+    async with db.acquire() as conn:
+        # Минимальная задача для FK current_task_id
+        task_id = await conn.fetchval(
+            """
+            INSERT INTO task_queue (
+                task_type_id, task_type_code, status, priority, max_attempts, payload
+            )
+            SELECT id, code, 'stuck', -2000000000, 3, '{}'::jsonb
+            FROM task_types WHERE code = 'parser_add_channel'
+            LIMIT 1
+            RETURNING id
+            """
+        )
+        await conn.execute(
+            "UPDATE accounts SET current_task_id = $2 WHERE id = $1",
+            account_id,
+            task_id,
+        )
+
+    assert await repo.set_banned(session_name, reason="ban-clear-lock") is True
+
+    async with db.acquire() as conn:
+        cur = await conn.fetchval(
+            "SELECT current_task_id FROM accounts WHERE id = $1", account_id
+        )
+        await conn.execute("DELETE FROM task_queue WHERE id = $1", task_id)
+    assert cur is None
 
 
 @requires_pg

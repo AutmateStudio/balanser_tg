@@ -132,6 +132,7 @@ _SET_BANNED_SQL = """
 UPDATE accounts
 SET status = 'banned',
     cooldown_until = NULL,
+    current_task_id = NULL,
     last_error = $2,
     last_error_at = now(),
     updated_at = now()
@@ -366,7 +367,7 @@ class AccountsRepo:
         return [str(r["session_name"]) for r in rows]
 
     async def set_banned(self, session_name: str, *, reason: str | None = None) -> bool:
-        """Telegram ban: status → banned, сбрасывает cooldown."""
+        """Telegram ban: status → banned, сбрасывает cooldown и current_task_id."""
         name = _normalize_session_name_for_pg(session_name)
         if not name:
             return False

@@ -32,6 +32,11 @@ class FakeQueueForWatchdog:
     def __init__(self, stuck: list[StuckTaskResult] | None = None) -> None:
         self._stuck = list(stuck or [])
         self.calls = 0
+        self.orphan_calls = 0
+
+    async def release_orphan_account_locks(self) -> int:
+        self.orphan_calls += 1
+        return 0
 
     async def mark_stuck_timed_out(
         self, *, limit: int = 100, auto_retry=None
@@ -260,6 +265,108 @@ async def test_watchdog_tick_once_integration(clean_queue, caplog) -> None:
             "SELECT status FROM task_queue WHERE id = $1", task_id
         )
     assert status == "stuck"
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_release_orphan_account_locks(clean_queue) -> None:
+    """Orphan current_task_id на done/stuck → sweeper снимает."""
+    repo = TaskQueueRepo()
+    accounts = AccountsRepo()
+    task_id = await _enqueue()
+    account_id = await _insert_test_account()
+
+    claimed = await repo.claim_next(locked_by="orphan-wd", task_type_codes=_CODES)
+    assert claimed is not None and claimed.id == task_id
+    assert await accounts.reserve(account_id, task_id)
+
+    # Завершаем задачу без accounts.release → orphan lock
+    assert await repo.complete(task_id) == "done"
+    async with db.acquire() as conn:
+        cur = await conn.fetchval(
+            "SELECT current_task_id FROM accounts WHERE id = $1", account_id
+        )
+    assert cur == task_id
+
+    released = await repo.release_orphan_account_locks()
+    assert released >= 1
+
+    async with db.acquire() as conn:
+        cur = await conn.fetchval(
+            "SELECT current_task_id FROM accounts WHERE id = $1", account_id
+        )
+    assert cur is None
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_mark_stuck_uses_started_at_when_locked_at_null(clean_queue) -> None:
+    """locked_at IS NULL + старый started_at → всё равно mark_stuck."""
+    repo = TaskQueueRepo()
+    accounts = AccountsRepo()
+    task_id = await _enqueue()
+    account_id = await _insert_test_account()
+
+    claimed = await repo.claim_next(locked_by="null-lock", task_type_codes=_CODES)
+    assert claimed is not None
+    assert await accounts.reserve(account_id, task_id)
+
+    async with db.acquire() as conn:
+        await conn.execute(
+            "UPDATE task_types SET task_timeout_seconds = 5 "
+            "WHERE code = 'parser_add_channel'"
+        )
+        await conn.execute(
+            """
+            UPDATE task_queue
+            SET locked_at = NULL,
+                started_at = now() - interval '10 seconds',
+                account_id = $2
+            WHERE id = $1
+            """,
+            task_id,
+            account_id,
+        )
+
+    stuck = await repo.mark_stuck_timed_out()
+    our = [s for s in stuck if s.id == task_id]
+    assert len(our) == 1
+
+    async with db.acquire() as conn:
+        status = await conn.fetchval(
+            "SELECT status FROM task_queue WHERE id = $1", task_id
+        )
+        cur = await conn.fetchval(
+            "SELECT current_task_id FROM accounts WHERE id = $1", account_id
+        )
+    assert status == "stuck"
+    assert cur is None
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_watchdog_tick_clears_orphans(clean_queue) -> None:
+    repo = TaskQueueRepo()
+    accounts = AccountsRepo()
+    task_id = await _enqueue()
+    account_id = await _insert_test_account()
+    claimed = await repo.claim_next(locked_by="tick-orphan", task_type_codes=_CODES)
+    assert claimed is not None
+    assert await accounts.reserve(account_id, task_id)
+    assert await repo.complete(task_id) == "done"
+
+    stop = asyncio.Event()
+    watchdog = StuckTaskWatchdog(repo, interval_seconds=30.0, stop=stop)
+    await watchdog.tick_once()
+
+    async with db.acquire() as conn:
+        cur = await conn.fetchval(
+            "SELECT current_task_id FROM accounts WHERE id = $1", account_id
+        )
+    assert cur is None
 
 
 @requires_pg

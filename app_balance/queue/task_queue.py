@@ -389,15 +389,30 @@ WHERE id = $1
 # Параметры: $1 limit, $2 auto_retry_enabled, $3 watchdog max_attempts (cap),
 # $4 retry delay (s), $5 last_error код. Во всех ветках — release аккаунтов + снятие lock.
 # can_retry = enabled И watchdog_retry_count < cap И attempt_count < max_attempts.
+_RELEASE_ORPHAN_ACCOUNT_LOCKS_SQL = """
+UPDATE accounts a
+SET current_task_id = NULL,
+    updated_at = now()
+WHERE a.current_task_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM task_queue t
+    WHERE t.id = a.current_task_id
+      AND t.status = 'in_progress'
+  )
+RETURNING a.id
+"""
+
 _MARK_STUCK_TIMED_OUT_SQL = """
 WITH timed_out AS (
     SELECT t.id
     FROM task_queue t
     JOIN task_types tt ON tt.id = t.task_type_id
     WHERE t.status = 'in_progress'
-      AND t.locked_at IS NOT NULL
-      AND t.locked_at + (tt.task_timeout_seconds * interval '1 second') < now()
-    ORDER BY t.locked_at ASC
+      AND COALESCE(t.locked_at, t.started_at) IS NOT NULL
+      AND COALESCE(t.locked_at, t.started_at)
+          + (tt.task_timeout_seconds * interval '1 second') < now()
+    ORDER BY COALESCE(t.locked_at, t.started_at) ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 ),
@@ -773,6 +788,21 @@ class TaskQueueRepo:
                 )
                 return False
             return True
+
+    async def release_orphan_account_locks(self) -> int:
+        """Снимает accounts.current_task_id, если задача уже не in_progress.
+
+        Закрывает zombie-locks после crash между complete/postpone/fail и release.
+        """
+        async with acquire() as conn:
+            rows = await conn.fetch(_RELEASE_ORPHAN_ACCOUNT_LOCKS_SQL)
+        released = len(rows)
+        if released:
+            logger.warning(
+                "release_orphan_account_locks: снято %d orphan current_task_id",
+                released,
+            )
+        return released
 
     async def mark_stuck_timed_out(
         self,

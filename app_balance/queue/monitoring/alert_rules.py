@@ -84,6 +84,41 @@ def evaluate_alerts(
             )
         )
 
+    # Lock-starvation: есть active и pickable задачи, но никто не свободен для pick.
+    if (
+        snapshot.accounts.active > 0
+        and snapshot.accounts.pickable == 0
+        and snapshot.queue.flow.pickable_now > 0
+    ):
+        alerts.append(
+            Alert(
+                code="accounts_all_busy",
+                severity="ERROR",
+                message=(
+                    f"Все аккаунты заняты (active={snapshot.accounts.active}, "
+                    f"busy={snapshot.accounts.busy}, pickable=0) при "
+                    f"pickable_now={snapshot.queue.flow.pickable_now} — "
+                    "lock-starvation / zombie current_task_id"
+                ),
+                scope_key="global",
+                metrics_snapshot=metrics,
+            )
+        )
+
+    if snapshot.accounts.orphan_locks > 0:
+        alerts.append(
+            Alert(
+                code="orphan_account_locks",
+                severity="ERROR",
+                message=(
+                    f"Orphan locks: {snapshot.accounts.orphan_locks} аккаунт(ов) "
+                    "с current_task_id на задачу не in_progress"
+                ),
+                scope_key="global",
+                metrics_snapshot=metrics,
+            )
+        )
+
     for row in ctx.task_type_error_rates:
         alerts.append(
             Alert(

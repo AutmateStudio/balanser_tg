@@ -529,7 +529,7 @@ SELECT
 FROM "v_account_op_usage_last_hour"
 GROUP BY "account_id", "session_name", "account_status";
 
--- --- §26.3: сводка по парку аккаунтов (active/cooldown/без ресурса) ---
+-- --- §26.3: сводка по парку аккаунтов (active/cooldown/без ресурса/locks) ---
 CREATE VIEW "v_accounts_overview" AS
 SELECT
   count(*) FILTER (WHERE "status" = 'active' AND "is_enabled" = true) AS "active_accounts_count",
@@ -540,7 +540,22 @@ SELECT
   (
     SELECT count(*) FROM "v_account_resource_summary"
     WHERE "any_op_exhausted" = true
-  ) AS "accounts_without_resource"
+  ) AS "accounts_without_resource",
+  count(*) FILTER (
+    WHERE "is_enabled" = true
+      AND "status" IN ('active', 'cooldown')
+      AND "current_task_id" IS NULL
+      AND ("cooldown_until" IS NULL OR "cooldown_until" <= now())
+  ) AS "pickable_accounts_count",
+  count(*) FILTER (WHERE "current_task_id" IS NOT NULL) AS "busy_accounts_count",
+  count(*) FILTER (
+    WHERE "current_task_id" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "task_queue" "t"
+        WHERE "t"."id" = "accounts"."current_task_id"
+          AND "t"."status" = 'in_progress'
+      )
+  ) AS "orphan_account_locks"
 FROM "accounts";
 
 -- --- §26.3 / G7★: загрузка каналов по парку (лимит per-session — в env MAX_CHANNELS_PER_SESSION) ---
