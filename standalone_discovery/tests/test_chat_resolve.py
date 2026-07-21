@@ -17,6 +17,7 @@ from telethon.tl import types
 from discovery_api.chat_resolve import (
     ChannelHasNoDiscussionError,
     ChatAccessError,
+    _join_channel_entity,
     classify_chat_entity,
     normalize_chat_ref,
     resolve_listen_target,
@@ -194,6 +195,61 @@ class ResolveListenTargetTests(unittest.TestCase):
         ):
             with self.assertRaises(FloodWaitError):
                 _run(resolve_listen_target(client, "https://t.me/news"))
+
+
+class JoinParticipantStaggerTests(unittest.TestCase):
+    def test_stagger_after_successful_join(self) -> None:
+        channel = _make_channel(megagroup=True, channel_id=555, title="G")
+        client = AsyncMock()
+        client.return_value = MagicMock()  # JoinChannelRequest OK
+
+        with patch.dict(os.environ, {"JOIN_PARTICIPANT_STAGGER_SECONDS": "1"}), patch(
+            "discovery_api.chat_resolve.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep_mock:
+            joined, fail = _run(
+                _join_channel_entity(client, channel, raw_ref="@g", role="listen")
+            )
+
+        self.assertTrue(joined)
+        self.assertIsNone(fail)
+        sleep_mock.assert_awaited_once_with(1.0)
+
+    def test_no_stagger_when_already_participant(self) -> None:
+        from telethon.errors import UserAlreadyParticipantError
+
+        channel = _make_channel(megagroup=True, channel_id=556, title="G2")
+        client = AsyncMock()
+        client.side_effect = UserAlreadyParticipantError(request=None)
+
+        with patch.dict(os.environ, {"JOIN_PARTICIPANT_STAGGER_SECONDS": "1"}), patch(
+            "discovery_api.chat_resolve.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep_mock:
+            joined, fail = _run(
+                _join_channel_entity(client, channel, raw_ref="@g2", role="listen")
+            )
+
+        self.assertTrue(joined)
+        self.assertIsNone(fail)
+        sleep_mock.assert_not_called()
+
+    def test_stagger_disabled_via_env(self) -> None:
+        channel = _make_channel(megagroup=True, channel_id=557, title="G3")
+        client = AsyncMock()
+        client.return_value = MagicMock()
+
+        with patch.dict(os.environ, {"JOIN_PARTICIPANT_STAGGER_SECONDS": "0"}), patch(
+            "discovery_api.chat_resolve.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep_mock:
+            joined, fail = _run(
+                _join_channel_entity(client, channel, raw_ref="@g3", role="listen")
+            )
+
+        self.assertTrue(joined)
+        self.assertIsNone(fail)
+        sleep_mock.assert_not_called()
 
 
 if __name__ == "__main__":
