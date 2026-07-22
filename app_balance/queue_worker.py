@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from app_balance.queue import db
+from app_balance.queue import timing
 from app_balance.queue.accounts import AccountsRepo
 from app_balance.queue.dispatch import DispatchResult, TaskDispatcher
 from app_balance.queue.mock_adapter import TaskAdapter, default_mock_adapter
@@ -25,7 +26,7 @@ from app_balance.queue.per_op_reading import TaskTypesRepo
 from app_balance.queue.resource_check import ResourceChecker
 from app_balance.queue.resource_usage import ResourceUsageRepo
 from app_balance.queue.task_queue import ClaimedTask, TaskQueueRepo
-from app_balance.queue.watchdog import StuckTaskWatchdog
+from app_balance.queue.watchdog import StuckTaskWatchdog, WatchdogAutoRetryConfig
 
 logger = logging.getLogger("queue_worker")
 
@@ -42,6 +43,9 @@ class WorkerConfig:
     task_type_codes: list[str] | None = None
     watchdog_enabled: bool = True
     watchdog_interval_seconds: float = 30.0
+    watchdog_auto_retry: WatchdogAutoRetryConfig = field(
+        default_factory=WatchdogAutoRetryConfig
+    )
 
     @classmethod
     def from_env(cls) -> "WorkerConfig":
@@ -62,6 +66,7 @@ class WorkerConfig:
             watchdog_interval_seconds=float(
                 os.getenv("WORKER_WATCHDOG_INTERVAL_SECONDS", "30")
             ),
+            watchdog_auto_retry=WatchdogAutoRetryConfig.from_env(),
         )
 
 
@@ -147,7 +152,16 @@ class QueueWorker:
         if self._legacy_handler is not None:
             await self._process_legacy(task)
             return
-        result = await self._dispatcher.dispatch(task)
+        with timing.track_task() as t:
+            result = await self._dispatcher.dispatch(task)
+        if t is not None:
+            outcome = result.value if isinstance(result, DispatchResult) else str(result)
+            timing.note_finished(
+                t,
+                outcome=outcome,
+                task_id=task.id,
+                task_type=task.task_type_code,
+            )
         if result == DispatchResult.COMPLETED:
             self._processed += 1
 
@@ -173,7 +187,7 @@ class QueueWorker:
                 )
         finally:
             if task.account_id is not None:
-                await self._accounts.release(task.account_id)
+                await self._accounts.release(task.account_id, task.id)
 
     async def _idle_wait(self) -> None:
         """Пауза между опросами; прерывается сигналом остановки."""
@@ -199,6 +213,7 @@ class QueueWorker:
                 self._queue,
                 interval_seconds=self.config.watchdog_interval_seconds,
                 stop=self._stop,
+                auto_retry=self.config.watchdog_auto_retry,
             )
             wd_task = asyncio.create_task(watchdog.run())
         try:

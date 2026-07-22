@@ -119,6 +119,19 @@ class GroupDiscoveryResult:
     errors: List[str] = field(default_factory=list)
 
 
+@dataclass
+class UnifiedDiscoveryResult:
+    """Каналы + группы из единого поиска (POST /discover async)."""
+
+    query: str
+    channels: List[DiscoveredChannel] = field(default_factory=list)
+    groups: List[DiscoveredGroup] = field(default_factory=list)
+    seeds: List[str] = field(default_factory=list)
+    total: int = 0
+    depth_stats: Dict[int, int] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+
+
 async def discover_channels(
     session_string: str,
     api_id: int | str,
@@ -147,6 +160,28 @@ async def discover_channels(
         await client.disconnect()
 
 
+async def discover_groups_on_client(
+    client: TelegramClient,
+    word: str,
+    *,
+    search_limit: int = 20,
+    max_depth: int = 2,
+    delay: float = 0.25,
+    max_seeds: int = 20,
+    max_runtime_sec: float = 90.0,
+) -> GroupDiscoveryResult:
+    """Поиск групп через уже подключённый Telethon-клиент (PG queue / clump)."""
+    return await _discover_groups(
+        client,
+        word,
+        search_limit,
+        max_depth,
+        delay,
+        max_seeds,
+        max_runtime_sec,
+    )
+
+
 async def discover_groups(
     session_string: str,
     api_id: int | str,
@@ -162,9 +197,176 @@ async def discover_groups(
     client = TelegramClient(StringSession(session_string), int(api_id), api_hash)
     await client.connect()
     try:
-        return await _discover_groups(client, word, search_limit, max_depth, delay, max_seeds, max_runtime_sec)
+        return await discover_groups_on_client(
+            client,
+            word,
+            search_limit=search_limit,
+            max_depth=max_depth,
+            delay=delay,
+            max_seeds=max_seeds,
+            max_runtime_sec=max_runtime_sec,
+        )
     finally:
         await client.disconnect()
+
+
+def serialize_group_discovery_result(result: GroupDiscoveryResult) -> dict[str, Any]:
+    return {
+        "query": result.query,
+        "seeds": list(result.seeds),
+        "total": result.total,
+        "depth_stats": {str(k): v for k, v in result.depth_stats.items()},
+        "errors": list(result.errors),
+        "groups": [
+            {
+                "peer_id": g.peer_id,
+                "title": g.title,
+                "username": g.username,
+                "participants_count": g.participants_count,
+                "depth": g.depth,
+                "source": g.source,
+                "recommended_by": g.recommended_by,
+                "matched_seed": g.matched_seed,
+                "score_total": g.score_total,
+                "score_breakdown": dict(g.score_breakdown),
+                "score_signals": dict(g.score_signals),
+                "score_hard_flags": dict(g.score_hard_flags),
+                **(g.meta or {}),
+            }
+            for g in result.groups
+        ],
+    }
+
+
+def _discovered_channel_to_dict(channel: DiscoveredChannel) -> dict[str, Any]:
+    return {
+        "peer_id": channel.peer_id,
+        "title": channel.title,
+        "username": channel.username,
+        "participants_count": channel.participants_count,
+        "depth": channel.depth,
+        "source": channel.source,
+        "recommended_by": channel.recommended_by,
+        "score": channel.score_total,
+        "score_total": channel.score_total,
+        "score_breakdown": dict(channel.score_breakdown),
+        "score_signals": dict(channel.score_signals),
+        "score_hard_flags": dict(channel.score_hard_flags),
+        **(channel.meta or {}),
+    }
+
+
+def serialize_unified_discovery_result(
+    result: UnifiedDiscoveryResult,
+    *,
+    persist: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Сериализация unified discover для payload.task_queue.result."""
+    payload: dict[str, Any] = {
+        "query": result.query,
+        "seeds": list(result.seeds),
+        "total": result.total,
+        "depth_stats": {str(k): v for k, v in result.depth_stats.items()},
+        "errors": list(result.errors),
+        "channels": [_discovered_channel_to_dict(c) for c in result.channels],
+        "groups": [
+            {
+                "peer_id": g.peer_id,
+                "title": g.title,
+                "username": g.username,
+                "participants_count": g.participants_count,
+                "depth": g.depth,
+                "source": g.source,
+                "recommended_by": g.recommended_by,
+                "matched_seed": g.matched_seed,
+                "score_total": g.score_total,
+                "score_breakdown": dict(g.score_breakdown),
+                "score_signals": dict(g.score_signals),
+                "score_hard_flags": dict(g.score_hard_flags),
+                **(g.meta or {}),
+            }
+            for g in result.groups
+        ],
+    }
+    if persist is not None:
+        payload["persist"] = persist
+    return payload
+
+
+async def discover_unified_on_client(
+    client: TelegramClient,
+    query: str,
+    *,
+    search_limit: int = 10,
+    max_depth: int = 2,
+    delay: float = 0.25,
+    include_global_search: bool = True,
+    include_groups: bool = True,
+    max_runtime_sec: float = 90.0,
+) -> UnifiedDiscoveryResult:
+    """Единый поиск каналов и групп (discover + seeds group search)."""
+    channel_result = await _discover(
+        client,
+        query,
+        search_limit,
+        max_depth,
+        delay,
+        include_global_search=include_global_search,
+        include_groups=include_groups,
+    )
+    group_result = await _discover_groups(
+        client,
+        query,
+        search_limit,
+        max_depth,
+        delay,
+        max_seeds=20,
+        max_runtime_sec=max_runtime_sec,
+    )
+
+    channel_peer_ids = {c.peer_id for c in channel_result.channels}
+    extra_groups = [g for g in group_result.groups if g.peer_id not in channel_peer_ids]
+
+    depth_stats = dict(channel_result.depth_stats)
+    for depth, count in group_result.depth_stats.items():
+        depth_stats[depth] = depth_stats.get(depth, 0) + count
+
+    total = len(channel_result.channels) + len(extra_groups)
+    return UnifiedDiscoveryResult(
+        query=query,
+        channels=channel_result.channels,
+        groups=extra_groups,
+        seeds=group_result.seeds,
+        total=total,
+        depth_stats=depth_stats,
+        errors=list(group_result.errors),
+    )
+
+
+async def persist_unified_discovery(
+    result: UnifiedDiscoveryResult,
+    *,
+    channels_repo: Any | None = None,
+) -> Any:
+    """Записывает отфильтрованные каналы/группы в source_channels."""
+    from app_balance.queue.discover_persist import (
+        PersistStats,
+        build_upsert_fields,
+        get_telegram_platform_id,
+        should_persist_discovered,
+    )
+    from app_balance.queue.source_channels import SourceChannelsRepo
+
+    repo = channels_repo or SourceChannelsRepo()
+    platform_id = await get_telegram_platform_id()
+    all_items: list[Any] = list(result.channels) + list(result.groups)
+    stats: PersistStats = await repo.batch_upsert_discovered(
+        all_items,
+        platform_id=platform_id,
+        should_persist=should_persist_discovered,
+        build_fields=build_upsert_fields,
+    )
+    return stats
 
 
 async def _score_discovered_channel_lidgen(

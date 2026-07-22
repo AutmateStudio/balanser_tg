@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import logging
+import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from discovery_api.add_channel_via_link_or_name import add_channel_via_link
 from discovery_api.chat_resolve import ChannelHasNoDiscussionError, ChatAccessError
 from discovery_api.auth import cleanup_session, create_qr_session, get_qr_session
-from discovery_api.config import get_api_hash, get_api_id
-from discovery_api.discovery import discover_channels, discover_groups
+from discovery_api.config import get_use_pg_queue
+from discovery_api.discovery import (
+    DiscoveredChannel,
+    DiscoveredGroup,
+    discover_unified_on_client,
+    persist_unified_discovery,
+)
+from discovery_api.queue.producer import enqueue_telegram_discover
 from discovery_api.send_bot_message import send_bot_message
-from discovery_api.session_registry import get_or_create_client, get_session_string
+from discovery_api.session_registry import get_or_create_client
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/discovery-api", tags=["discovery-api"])
 
@@ -47,12 +57,21 @@ class QRStatusResponse(BaseModel):
     session_string: Optional[str] = None
     session_file: Optional[str] = None
     session_file_error: Optional[str] = None
+    telegram_channel_count: Optional[int] = None
+    required_channel_total: Optional[int] = None
+    required_channel_present: Optional[int] = None
+    membership_check_error: Optional[str] = None
 
 
 class DiscoveryRequest(BaseModel):
-    session_name: str = Field(
-        ...,
-        description="Имя или путь к Telethon .session-файлу на сервере (без расширения)",
+    session_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "Имя или путь к Telethon .session-файлу на сервере (без расширения). "
+            "Не указан + async=true + USE_PG_QUEUE=true — аккаунт подберёт "
+            "балансировщик автоматически (dispatch auto-pick, C5 resource_check). "
+            "Обязателен для синхронного режима (async=false или USE_PG_QUEUE=false)."
+        ),
     )
     query: str = Field(...)
     first_pass_limit: int = Field(default=10, ge=1, le=100)
@@ -67,12 +86,11 @@ class DiscoveryRequest(BaseModel):
         ),
     )
     include_groups: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Помимо broadcast-каналов возвращать также группы/супергруппы/чаты "
-            "(megagroup, gigagroup, классические Chat). По умолчанию выключено — "
-            "/discover отдаёт только каналы. При включении растёт нагрузка на "
-            "Telegram (для megagroup добавляется выборка участников)."
+            "(megagroup, gigagroup, классические Chat). По умолчанию включено. "
+            "При включении растёт нагрузка на Telegram."
         ),
     )
 
@@ -127,23 +145,6 @@ class ChannelItem(BaseModel):
     access_note: Optional[str] = None
 
 
-class DiscoveryResponse(BaseModel):
-    query: str
-    total: int
-    depth_stats: Dict[int, int]
-    channels: List[ChannelItem]
-
-
-class GroupDiscoveryRequest(BaseModel):
-    session_name: str = Field(
-        ...,
-        description="Имя или путь к Telethon .session-файлу на сервере (без расширения)",
-    )
-    word: str = Field(...)
-    limit: int = Field(default=20, ge=1, le=100)
-    depth: int = Field(default=2, ge=0, le=5)
-
-
 class GroupItem(BaseModel):
     peer_id: int
     title: str
@@ -178,6 +179,41 @@ class GroupItem(BaseModel):
     restriction_reason: Optional[List[Dict[str, Any]]] = None
 
 
+class PersistStatsResponse(BaseModel):
+    inserted: int = 0
+    updated: int = 0
+    skipped_no_discussion: int = 0
+    channel_ids: List[int] = Field(default_factory=list)
+
+
+class DiscoveryResponse(BaseModel):
+    query: str
+    total: int
+    depth_stats: Dict[int, int]
+    channels: List[ChannelItem]
+    groups: List[GroupItem] = Field(default_factory=list)
+    seeds: List[str] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+    persist: Optional[PersistStatsResponse] = None
+    task_id: Optional[int] = Field(
+        default=None,
+        description="id задачи PG-очереди (async); результат — GET /parser/queue/tasks/{task_id}",
+    )
+    action_id: Optional[str] = None
+    async_mode: bool = False
+    deprecated: bool = False
+
+
+class GroupDiscoveryRequest(BaseModel):
+    session_name: str = Field(
+        ...,
+        description="Имя или путь к Telethon .session-файлу на сервере (без расширения)",
+    )
+    word: str = Field(...)
+    limit: int = Field(default=20, ge=1, le=100)
+    depth: int = Field(default=2, ge=0, le=5)
+
+
 class GroupDiscoveryResponse(BaseModel):
     query: str
     seeds: List[str]
@@ -185,6 +221,18 @@ class GroupDiscoveryResponse(BaseModel):
     depth_stats: Dict[int, int]
     groups: List[GroupItem]
     errors: List[str] = Field(default_factory=list)
+    task_id: Optional[int] = Field(
+        default=None,
+        description="id задачи PG-очереди (async); результат — GET /parser/queue/tasks/{task_id}",
+    )
+    action_id: Optional[str] = Field(
+        default=None,
+        description="Корреляционный id async-запроса",
+    )
+    async_mode: bool = Field(
+        default=False,
+        description="true — поиск поставлен в очередь, groups пуст до завершения задачи",
+    )
 
 
 class AddChannelByLinkRequest(BaseModel):
@@ -215,6 +263,74 @@ class BotMessageResponse(BaseModel):
     ok: bool
     message_id: Optional[int] = None
     chat_id: Optional[int] = None
+
+
+def _channel_item(c: DiscoveredChannel) -> ChannelItem:
+    return ChannelItem(
+        peer_id=c.peer_id,
+        title=c.title,
+        username=c.username,
+        participants_count=c.participants_count,
+        depth=c.depth,
+        source=c.source,
+        recommended_by=c.recommended_by,
+        score=c.score_total,
+        score_breakdown=c.score_breakdown,
+        score_signals=c.score_signals,
+        score_hard_flags=c.score_hard_flags,
+        **(c.meta or {}),
+    )
+
+
+def _group_item(g: DiscoveredGroup) -> GroupItem:
+    return GroupItem(
+        peer_id=g.peer_id,
+        title=g.title,
+        username=g.username,
+        participants_count=g.participants_count,
+        depth=g.depth,
+        source=g.source,
+        recommended_by=g.recommended_by,
+        matched_seed=g.matched_seed,
+        score_total=g.score_total,
+        score_breakdown=g.score_breakdown,
+        score_signals=g.score_signals,
+        score_hard_flags=g.score_hard_flags,
+        **(g.meta or {}),
+    )
+
+
+def _discovery_response_from_unified(
+    result,
+    *,
+    persist=None,
+    task_id: int | None = None,
+    action_id: str | None = None,
+    async_mode: bool = False,
+    deprecated: bool = False,
+) -> DiscoveryResponse:
+    persist_resp = None
+    if persist is not None:
+        persist_resp = PersistStatsResponse(
+            inserted=persist.inserted,
+            updated=persist.updated,
+            skipped_no_discussion=persist.skipped_no_discussion,
+            channel_ids=list(persist.channel_ids),
+        )
+    return DiscoveryResponse(
+        query=result.query,
+        total=result.total,
+        depth_stats=result.depth_stats,
+        channels=[_channel_item(c) for c in result.channels],
+        groups=[_group_item(g) for g in result.groups],
+        seeds=list(result.seeds),
+        errors=list(result.errors),
+        persist=persist_resp,
+        task_id=task_id,
+        action_id=action_id,
+        async_mode=async_mode,
+        deprecated=deprecated,
+    )
 
 
 @router.post("/auth/qr", response_model=QRCreateResponse)
@@ -248,6 +364,10 @@ async def auth_qr_status(session_id: str):
         response.session_string = session.result.get("session_string")
         response.session_file = session.result.get("session_file")
         response.session_file_error = session.result.get("session_file_error")
+        response.telegram_channel_count = session.result.get("telegram_channel_count")
+        response.required_channel_total = session.result.get("required_channel_total")
+        response.required_channel_present = session.result.get("required_channel_present")
+        response.membership_check_error = session.result.get("membership_check_error")
     return response
 
 
@@ -258,103 +378,101 @@ async def auth_qr_delete(session_id: str):
 
 
 @router.post("/discover", response_model=DiscoveryResponse)
-async def discover(req: DiscoveryRequest):
-    try:
-        session_string = await get_session_string(req.session_name)
-        result = await discover_channels(
-            session_string=session_string,
-            api_id=get_api_id(),
-            api_hash=get_api_hash(),
+async def discover(
+    req: DiscoveryRequest,
+    async_mode: bool = Query(
+        default=True,
+        alias="async",
+        description="При true и USE_PG_QUEUE — задача в PG-очередь с резервом аккаунта и upsert в БД",
+    ),
+):
+    if async_mode and get_use_pg_queue():
+        action_id = uuid.uuid4().hex
+        pg_result = await enqueue_telegram_discover(
+            session_name=req.session_name,
             query=req.query,
+            first_pass_limit=req.first_pass_limit,
+            similarity_depth=req.similarity_depth,
+            include_global_search=req.include_global_search,
+            include_groups=req.include_groups,
+            action_id=action_id,
+        )
+        if pg_result.task_id is None:
+            error = (
+                "Не удалось поставить задачу: пустой query"
+                if not req.session_name
+                else "Не удалось поставить задачу: аккаунт не найден в PG "
+                f"(session_name={req.session_name!r}) или пустой query"
+            )
+            return DiscoveryResponse(
+                query=req.query,
+                total=0,
+                depth_stats={},
+                channels=[],
+                groups=[],
+                errors=[error],
+            )
+        return DiscoveryResponse(
+            query=req.query,
+            total=0,
+            depth_stats={},
+            channels=[],
+            groups=[],
+            errors=[],
+            task_id=pg_result.task_id,
+            action_id=pg_result.action_id,
+            async_mode=True,
+        )
+
+    if not req.session_name:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "session_name обязателен для синхронного режима "
+                "(async=false или USE_PG_QUEUE=false) — без PG-очереди "
+                "нет диспетчера, который подберёт аккаунт автоматически"
+            ),
+        )
+
+    try:
+        client = await get_or_create_client(req.session_name)
+        result = await discover_unified_on_client(
+            client,
+            req.query,
             search_limit=req.first_pass_limit,
             max_depth=req.similarity_depth,
             include_global_search=req.include_global_search,
             include_groups=req.include_groups,
         )
+        persist_stats = await persist_unified_discovery(result)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка discovery: {e}")
-    return DiscoveryResponse(
-        query=result.query,
-        total=result.total,
-        depth_stats=result.depth_stats,
-        channels=[
-            ChannelItem(
-                peer_id=c.peer_id,
-                title=c.title,
-                username=c.username,
-                participants_count=c.participants_count,
-                depth=c.depth,
-                source=c.source,
-                recommended_by=c.recommended_by,
-                score=c.score_total,
-                score_breakdown=c.score_breakdown,
-                score_signals=c.score_signals,
-                score_hard_flags=c.score_hard_flags,
-                **(c.meta or {}),
-            )
-            for c in result.channels
-        ],
+        raise HTTPException(status_code=500, detail=f"Ошибка discovery: {e}") from e
+
+    return _discovery_response_from_unified(
+        result,
+        persist=persist_stats,
+        async_mode=False,
     )
 
 
-@router.post("/discover-groups", response_model=GroupDiscoveryResponse)
-async def discover_groups_endpoint(req: GroupDiscoveryRequest):
-    try:
-        session_string = await get_session_string(req.session_name)
-    except Exception as e:
-        return GroupDiscoveryResponse(
-            query=req.word,
-            seeds=[],
-            total=0,
-            depth_stats={},
-            groups=[],
-            errors=[f"Не удалось загрузить session '{req.session_name}': {e!s}"],
-        )
-
-    try:
-        result = await discover_groups(
-            session_string=session_string,
-            api_id=get_api_id(),
-            api_hash=get_api_hash(),
-            word=req.word,
-            search_limit=req.limit,
-            max_depth=req.depth,
-        )
-    except Exception as e:
-        return GroupDiscoveryResponse(
-            query=req.word,
-            seeds=[],
-            total=0,
-            depth_stats={},
-            groups=[],
-            errors=[f"Ошибка поиска групп: {e!s}"],
-        )
-
-    return GroupDiscoveryResponse(
-        query=result.query,
-        seeds=result.seeds,
-        total=result.total,
-        depth_stats=result.depth_stats,
-        groups=[
-            GroupItem(
-                peer_id=g.peer_id,
-                title=g.title,
-                username=g.username,
-                participants_count=g.participants_count,
-                depth=g.depth,
-                source=g.source,
-                recommended_by=g.recommended_by,
-                matched_seed=g.matched_seed,
-                score_total=g.score_total,
-                score_breakdown=g.score_breakdown,
-                score_signals=g.score_signals,
-                score_hard_flags=g.score_hard_flags,
-                **(g.meta or {}),
-            )
-            for g in result.groups
-        ],
-        errors=list(result.errors),
+@router.post("/discover-groups", response_model=DiscoveryResponse, deprecated=True)
+async def discover_groups_endpoint(
+    req: GroupDiscoveryRequest,
+    async_mode: bool = Query(default=True, alias="async"),
+):
+    """Deprecated: используйте POST /discover (query=word)."""
+    log.warning("POST /discover-groups deprecated — используйте POST /discover")
+    discover_req = DiscoveryRequest(
+        session_name=req.session_name,
+        query=req.word,
+        first_pass_limit=req.limit,
+        similarity_depth=req.depth,
+        include_global_search=True,
+        include_groups=True,
     )
+    response = await discover(discover_req, async_mode=async_mode)
+    response.deprecated = True
+    return response
 
 
 @router.post("/add-channel-by-link", response_model=ChannelItem)

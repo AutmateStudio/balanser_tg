@@ -217,6 +217,7 @@ class FakeAccounts:
         self.pick_calls: list[int] = []
         self.cooldowns: list[tuple[str, datetime]] = []
         self.bans: list[tuple[str, str | None]] = []
+        self.account_errors: list[tuple[str, str | None]] = []
 
     async def pick_and_reserve(
         self,
@@ -248,7 +249,7 @@ class FakeAccounts:
     async def get_by_id(self, account_id: int) -> Account | None:
         return _account(account_id)
 
-    async def release(self, account_id: int) -> None:
+    async def release(self, account_id: int, task_id: int | None = None) -> None:
         self.released.append(account_id)
 
     async def set_cooldown(self, session_name: str, until: datetime) -> bool:
@@ -257,6 +258,12 @@ class FakeAccounts:
 
     async def set_banned(self, session_name: str, *, reason: str | None = None) -> bool:
         self.bans.append((session_name, reason))
+        return True
+
+    async def set_account_error(
+        self, session_name: str, *, reason: str | None = None
+    ) -> bool:
+        self.account_errors.append((session_name, reason))
         return True
 
 
@@ -621,6 +628,40 @@ async def test_e2_ban_sets_banned() -> None:
 
     assert result == DispatchResult.FAILED
     assert accounts.bans == [("sess_99", "UserDeactivated")]
+
+
+@pytest.mark.asyncio
+async def test_e2_unauthorized_notifies_session(monkeypatch) -> None:
+    queue = _fake_queue()
+    accounts = FakeAccounts()
+    notified: list[tuple[str, str]] = []
+
+    async def _notify(session_name: str, message: str) -> None:
+        notified.append((session_name, message))
+
+    monkeypatch.setattr(
+        "discovery_api.session_registry.notify_session_unauthorized",
+        _notify,
+    )
+
+    class UnauthorizedAdapter(MockTaskAdapter):
+        async def execute(self, task, *, account):  # type: ignore[override]
+            raise RetryableError(
+                ErrorCode.ACCOUNT_UNAUTHORIZED,
+                "Сессия '/app/sessions/test4' не авторизована",
+                retry_after_seconds=1800,
+            )
+
+    dispatcher = _dispatcher(
+        queue, accounts, FakeTaskTypes(_task_type()), UnauthorizedAdapter()
+    )
+
+    result = await dispatcher.dispatch(_claimed(42, account_id=99))
+
+    assert result == DispatchResult.RETRIED
+    assert notified == [
+        ("sess_99", "Сессия '/app/sessions/test4' не авторизована"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,357 @@
+{
+  "name": "Зарегистрировать центр уведомлений ВК",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "register_username_notification_centre",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "82b13978-638f-4f27-ad34-07edf2343fb9",
+      "name": "Webhook",
+      "webhookId": "10557249-2d3d-4fa4-a780-e60128a7345d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://mokuegopasan.beget.app/webhook/register_username_notification_centre",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "11"
+            },
+            {
+              "name": "userlink",
+              "value": "https://vk.com/id616589052"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        32,
+        -176
+      ],
+      "id": "cf2c4e9e-0d35-44b2-a322-96477ea8ecd7",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"headers\": {\n      \"host\": \"mokuegopasan.beget.app\",\n      \"user-agent\": \"axios/1.13.5\",\n      \"content-length\": \"55\",\n      \"accept\": \"application/json,text/html,application/xhtml+xml,application/xml,text/*;q=0.9, image/*;q=0.8, */*;q=0.7\",\n      \"accept-encoding\": \"gzip, compress, deflate, br\",\n      \"content-type\": \"application/json\",\n      \"x-forwarded-for\": \"172.18.0.1\",\n      \"x-forwarded-host\": \"mokuegopasan.beget.app\",\n      \"x-forwarded-port\": \"443\",\n      \"x-forwarded-proto\": \"https\",\n      \"x-forwarded-server\": \"ed84361b6596\",\n      \"x-real-ip\": \"172.18.0.1\"\n    },\n    \"params\": {},\n    \"query\": {},\n    \"body\": {\n      \"user_id\": \"1\",\n      \"userlink\": \"https://vk.com/id616589052\"\n    },\n    \"webhookUrl\": \"https://mokuegopasan.beget.app/webhook/register_username_notification_centre\",\n    \"executionMode\": \"production\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        160
+      ],
+      "id": "d8d0b87c-3693-4b98-ab45-e095adf615b6",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "acdfa4b1-d8e7-477f-b571-e573f90091c4",
+              "name": "body",
+              "value": "={{ $json.body }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        336,
+        64
+      ],
+      "id": "be552c55-49f6-4eb2-9ecd-a62397b2854b",
+      "name": "Общие данные"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        160
+      ],
+      "id": "51a95b53-c643-4d0e-82bc-7052bbf762d8",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем массив входящих данных\nconst items = $input.all();\n\n// Обрабатываем каждый элемент\nconst results = items.map(item => {\n    const userLink = item.json.body.userlink;\n    const userId = extractVkUserId(userLink);\n    \n    return {\n        json: {\n            user_id: item.json.body.user_id,\n            userlink: userLink,\n            extracted_user_id: userId\n        }\n    };\n});\n\nreturn results;\n\n// Функция для извлечения ID из ссылки VK\nfunction extractVkUserId(url) {\n    if (!url || typeof url !== 'string') return null;\n    \n    const vkUrlPattern = /https?:\\/\\/(?:www\\.)?vk\\.com\\/(?:id(\\d+)|([a-zA-Z0-9_]+))/i;\n    const match = url.match(vkUrlPattern);\n    \n    if (match) {\n        // Если ссылка формата vk.com/id12345\n        if (match[1]) return match[1];\n        // Если ссылка формата vk.com/username\n        if (match[2]) return match[2];\n    }\n    \n    return null;\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        64
+      ],
+      "id": "e2a092a3-d333-4b85-859d-9d29f95458bc",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "user_notification_channels",
+          "mode": "list",
+          "cachedResultName": "user_notification_channels"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $json.user_id }}",
+            "chat_id": "={{ $json.extracted_user_id }}",
+            "channel": "vk"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "username",
+              "displayName": "username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "chat_id",
+              "displayName": "chat_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "clear_to_send",
+              "displayName": "clear_to_send",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "options",
+              "canBeUsedToMatch": true,
+              "options": [
+                {
+                  "name": "pending",
+                  "value": "pending"
+                },
+                {
+                  "name": "active",
+                  "value": "active"
+                },
+                {
+                  "name": "paused",
+                  "value": "paused"
+                },
+                {
+                  "name": "blocked",
+                  "value": "blocked"
+                },
+                {
+                  "name": "invalid",
+                  "value": "invalid"
+                }
+              ],
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        800,
+        64
+      ],
+      "id": "8d98cc0e-13ee-4500-a3f2-e74ba2e3cd86",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1008,
+        64
+      ],
+      "id": "d16dede6-3bd2-4cac-ab52-f9b925aed985",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Общие данные": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert rows in a table": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

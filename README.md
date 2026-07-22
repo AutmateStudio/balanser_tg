@@ -38,12 +38,33 @@ Postgres снаружи: `localhost:5433`, DSN внутри compose:
 
 `postgresql://lead_monitor_owner:dev_password@postgres:5432/lead_monitor`
 
+### Мониторинг (блок G)
+
+```bash
+docker compose --profile monitoring up -d queue-monitor   # или: make docker-monitor
+make docker-test-g                                        # быстрый pytest блока G
+```
+
+Runbook: [`docs/queue-runbook.md`](docs/queue-runbook.md) §G. Метрики API:
+`GET /discovery-api/parser/queue/metrics` (при `USE_PG_QUEUE=true`).
+
+### Деплой на production (полный ТЗ + G)
+
+Пошаговый ops-чеклист: Tailscale, VPN discovery, worker, продюсеры, мониторинг —
+[`docs/deploy_roadmap.md`](docs/deploy_roadmap.md).
+
 ### 3. Только pytest на сервере (без compose migrate)
 
 ```bash
 export QUEUE_DATABASE_URL='postgresql://...'
 docker compose run --rm test
 ```
+
+> На shared PG (vps-100) перед прогоном остановите ОБА claimer'а — `queue-worker`
+> и `standalone-discovery-api` (его in-process worker) — и используйте
+> `make docker-test-safe`. Guard сделает probe-проверку и прервёт integration,
+> если задачи кто-то перехватывает. Подробно:
+> [docs/testing-shared-pg.md](docs/testing-shared-pg.md).
 
 ---
 
@@ -80,6 +101,8 @@ app_balance/queue/db.py   # пул, acquire, transaction, healthcheck
 DB/                       # SQL-схема и seed
 scripts/migrate_queue.sh  # runner миграций (A11)
 docs(plan)/               # план разработки
+docs/deploy_roadmap.md    # ops: prod deploy (Tailscale, G max)
 ```
 
-Подробнее по доступу к prod БД: `docs(plan)/db-access-via-tailscale.md`.
+Подробнее: [`docs/deploy_roadmap.md`](docs/deploy_roadmap.md) (prod),
+`docs(plan)/db-access-via-tailscale.md` (сеть и ACL).

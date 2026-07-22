@@ -25,9 +25,15 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from discovery_api.config import (
+    get_account_auth_recheck_enabled,
+    get_account_auth_recheck_interval_seconds,
     get_api_hash,
     get_api_id,
     get_add_channels_per_hour,
+    get_channel_count_refresh_enabled,
+    get_channel_count_refresh_initial_delay_seconds,
+    get_channel_count_refresh_interval_seconds,
+    get_channel_count_refresh_stagger_seconds,
     get_max_channels_per_session,
     get_rebalance_cooldown_hours,
     get_rebalance_enabled,
@@ -44,6 +50,14 @@ from discovery_api.config import (
     get_session_reconnect_backoff_base,
     get_session_reconnect_backoff_max,
     get_session_resolve_min_interval,
+    get_use_pg_queue,
+)
+from app_balance.queue.monitoring.watchdog_heartbeat import (
+    WATCHDOG_ACCOUNT_AUTH,
+    WATCHDOG_CHANNEL_COUNT,
+    WATCHDOG_SESSION_HEALTH,
+    TickTimer,
+    get_watchdog_registry,
 )
 from discovery_api.session_health import (
     SessionHealth,
@@ -59,6 +73,10 @@ _session_strings: dict[str, str] = {}
 _locks: dict[str, asyncio.Lock] = {}
 _clumps: dict[str, "SessionClump"] = {}
 _health_monitor_task: asyncio.Task[None] | None = None
+_channel_count_refresh_task: asyncio.Task[None] | None = None
+
+# F3: однократный warning о выключении idle-rebalance при активном PG-балансере.
+_warned_rebalance_disabled = False
 
 
 class ChannelQuotaExceeded(Exception):
@@ -157,6 +175,16 @@ class ClumpConfig:
         return get_add_channels_per_hour()
 
     def eff_rebalance_enabled(self) -> bool:
+        # F3: при активном PG-балансере (F2) старый idle-rebalance принудительно
+        # выключен, чтобы два механизма переноса каналов не конфликтовали.
+        if get_use_pg_queue():
+            global _warned_rebalance_disabled
+            if not _warned_rebalance_disabled:
+                log.warning(
+                    "idle-rebalance отключён: активен PG-балансер (USE_PG_QUEUE=true, F2)"
+                )
+                _warned_rebalance_disabled = True
+            return False
         if self.rebalance_enabled is not None:
             return self.rebalance_enabled
         return get_rebalance_enabled()
@@ -232,8 +260,71 @@ class ClumpConfig:
         }
 
 
+def _canonical_key(session_name: str) -> str:
+    """Каноническое имя сессии (basename без `.session`).
+
+    Один физический `.session`-файл = один ключ = один `TelegramClient` = один
+    lock. Разные написания одного файла (`Test3`, `/app/sessions/Test3`,
+    `/app/sessions/Test3.session`) обязаны резолвиться в один и тот же клиент —
+    иначе на файле открывается второй SQLite-коннект, состояние сессии
+    рассинхронизируется и Telegram отзывает `auth_key` (потеря авторизации).
+    """
+    from discovery_api.account_registry import normalize_session_name
+
+    return normalize_session_name(session_name)
+
+
+def _telethon_session_base(session_name: str) -> str:
+    """Детерминированный путь к `.session` (без суффикса) в SESSIONS_DIR.
+
+    Клиент всегда создаётся по каноническому пути, чтобы разные вызовы для
+    одного аккаунта работали с одним и тем же файлом.
+    """
+    from discovery_api.account_registry import session_file_path
+
+    return session_file_path(session_name)[: -len(".session")]
+
+
+_IDENTITY_CLIENT_FIELDS = (
+    "device_model",
+    "system_version",
+    "app_version",
+    "lang_code",
+    "system_lang_code",
+)
+
+
+def _resolve_session_identity(session_base: str) -> tuple[int, str, dict[str, Any]]:
+    """`api_id`/`api_hash` + device fingerprint для `TelegramClient(...)`.
+
+    Archive-импортированные сессии (`enroll-session-from-archive`) несут рядом
+    `<name>.identity.json` с исходными `app_id`/`app_hash`/device retriv-бандла —
+    подключение под ними безопаснее глобального `API_ID`/`API_HASH`, т.к. сессия
+    авторизована именно под чужим app_id/device, а не нашим. Без sidecar-файла
+    (QR-логин и любые сессии без identity) — прежнее поведение: глобальный конфиг.
+    """
+    from discovery_api.session_archive import load_session_identity
+
+    identity = load_session_identity(session_base + ".session") or {}
+    api_id = identity.get("api_id")
+    api_hash = identity.get("api_hash")
+    if not api_id or not api_hash:
+        return int(get_api_id()), get_api_hash(), {}
+    kwargs = {k: identity[k] for k in _IDENTITY_CLIENT_FIELDS if identity.get(k)}
+    return int(api_id), str(api_hash), kwargs
+
+
 def _lock_for(session_name: str) -> asyncio.Lock:
-    return _locks.setdefault(session_name, asyncio.Lock())
+    return _locks.setdefault(_canonical_key(session_name), asyncio.Lock())
+
+
+def session_lock(session_name: str) -> asyncio.Lock:
+    """Публичный per-session lock: сериализует любой доступ к одному `.session`.
+
+    Используется вне реестра (например, `probe_session_info`), чтобы гарантировать
+    отсутствие второго одновременного коннекта к тому же файлу.
+    """
+    return _lock_for(session_name)
 
 
 def reset_for_tests() -> None:
@@ -254,45 +345,102 @@ def reset_for_tests() -> None:
         pass
 
 
+_UNAUTHORIZED_MSG = (
+    "Сессия '{session_name}' не авторизована; войдите в аккаунт для этой session"
+)
+
+
+def _unauthorized_message(session_name: str) -> str:
+    return _UNAUTHORIZED_MSG.format(session_name=session_name)
+
+
+def find_parser_client(session_name: str) -> Optional["Parser_client"]:
+    """Parser_client в загруженных clump'ах (для обновления in-memory health).
+
+    Сопоставление по каноническому имени, чтобы health обновлялся независимо от
+    того, как передано имя (basename / полный путь / с суффиксом `.session`).
+    """
+    key = _canonical_key(session_name)
+    for clump in _clumps.values():
+        pc = clump._session_index.get(session_name)
+        if pc is not None:
+            return pc
+        for name, candidate in clump._session_index.items():
+            if _canonical_key(name) == key:
+                return candidate
+    return None
+
+
+async def is_authorized_uncached(client: TelegramClient) -> bool:
+    """Проверка авторизации без доверия кэшу Telethon.
+
+    Telethon кэширует результат в `client._authorized` и после первого ответа
+    больше не ходит в сеть. Из-за этого «умершая» в памяти сессия навсегда
+    остаётся unauthorized, а восстановленный на диске `.session` не поднимается
+    без пересоздания процесса. Сбрасываем кэш, чтобы `is_user_authorized()`
+    заново выполнил серверный RPC (GetState) и вернул реальное состояние.
+    """
+    try:
+        client._authorized = None  # noqa: SLF001 — форсируем свежий серверный RPC
+    except Exception:  # noqa: BLE001 — приватный атрибут не должен ломать проверку
+        pass
+    return await client.is_user_authorized()
+
+
 async def get_or_create_client(session_name: str) -> TelegramClient:
-    """Возвращает единственный подключённый клиент для данного `session_name`."""
+    """Возвращает единственный подключённый клиент для данного `session_name`.
+
+    Ключ реестра и путь к файлу канонизируются, поэтому один физический
+    `.session` обслуживается ровно одним `TelegramClient` под одним lock'ом.
+    """
+    key = _canonical_key(session_name)
     async with _lock_for(session_name):
-        client = _clients.get(session_name)
+        client = _clients.get(key)
         if client is not None:
             if not client.is_connected():
                 await client.connect()
-            if not await client.is_user_authorized():
-                raise RuntimeError(
-                    f"Сессия '{session_name}' не авторизована; войдите в аккаунт для этой session"
-                )
+            if not await is_authorized_uncached(client):
+                await client.disconnect()
+                _clients.pop(key, None)
+                _session_strings.pop(key, None)
+                msg = _unauthorized_message(session_name)
+                await notify_session_unauthorized(session_name, msg)
+                raise RuntimeError(msg)
+            await notify_session_reauthorized(session_name)
             return client
 
-        client = TelegramClient(session_name, int(get_api_id()), get_api_hash())
+        base = _telethon_session_base(session_name)
+        api_id, api_hash, identity_kwargs = _resolve_session_identity(base)
+        client = TelegramClient(base, api_id, api_hash, **identity_kwargs)
         await client.connect()
-        if not await client.is_user_authorized():
+        if not await is_authorized_uncached(client):
             await client.disconnect()
-            raise RuntimeError(
-                f"Сессия '{session_name}' не авторизована; войдите в аккаунт для этой session"
-            )
-        _clients[session_name] = client
-        log.info("Telethon-клиент подключён и зарегистрирован: %s", session_name)
+            _clients.pop(key, None)
+            _session_strings.pop(key, None)
+            msg = _unauthorized_message(session_name)
+            await notify_session_unauthorized(session_name, msg)
+            raise RuntimeError(msg)
+        _clients[key] = client
+        log.info("Telethon-клиент подключён и зарегистрирован: %s", key)
+        await notify_session_reauthorized(session_name)
         return client
 
 
 async def get_session_string(session_name: str) -> str:
     """Строка `StringSession` для данного `session_name` (кешируется в памяти)."""
-    cached = _session_strings.get(session_name)
+    key = _canonical_key(session_name)
+    cached = _session_strings.get(key)
     if cached is not None:
         return cached
     client = await get_or_create_client(session_name)
     s = StringSession.save(client.session)
-    _session_strings[session_name] = s
+    _session_strings[key] = s
     return s
 
 
 async def is_session_active(session_name: str) -> bool:
     """True, если для сессии уже есть подключённый и авторизованный клиент."""
-    client = _clients.get(session_name)
+    client = _clients.get(_canonical_key(session_name))
     if client is None:
         return False
     try:
@@ -303,9 +451,10 @@ async def is_session_active(session_name: str) -> bool:
 
 async def release_client(session_name: str) -> None:
     """Отключает и удаляет клиент из process-wide реестра."""
+    key = _canonical_key(session_name)
     async with _lock_for(session_name):
-        client = _clients.pop(session_name, None)
-        _session_strings.pop(session_name, None)
+        client = _clients.pop(key, None)
+        _session_strings.pop(key, None)
         if client is not None:
             try:
                 await client.disconnect()
@@ -313,8 +462,28 @@ async def release_client(session_name: str) -> None:
                 pass
 
 
+def find_registered_client(session_name: str) -> Optional[TelegramClient]:
+    """Подключённый клиент из process-wide реестра (по каноническому имени)."""
+    return _clients.get(_canonical_key(session_name))
+
+
 def get_clump(parser_id: str) -> Optional["SessionClump"]:
     return _clumps.get(parser_id)
+
+
+def find_clump_for_session(session_name: str) -> Optional["SessionClump"]:
+    """Clump, в который зачислена данная сессия (по каноническому имени)."""
+    key = _canonical_key(session_name)
+    for clump in _clumps.values():
+        for name in clump._session_index:
+            if _canonical_key(name) == key:
+                return clump
+    return None
+
+
+def iter_clumps() -> list[tuple[str, "SessionClump"]]:
+    """F2: снимок (parser_id, clump) всех загруженных clump'ов реестра."""
+    return list(_clumps.items())
 
 
 async def get_or_create_clump(
@@ -364,48 +533,156 @@ async def release_all() -> None:
     log.info("session_registry: все клиенты отключены")
 
 
+async def _attempt_session_reauth(pc: "Parser_client") -> bool:
+    """Account-auth watchdog: пробует восстановить авторизацию ERROR-сессии.
+
+    Переиспользует `get_or_create_client` — при успехе он сам обновит
+    in-memory health и PG accounts (status=error → active) через
+    `notify_session_reauthorized`; при неудаче — просто ещё раз пометит
+    unauthorized (без изменения смысла существующего состояния).
+    """
+    pc.health.record_reauth_attempt()
+    session_name = pc.session_name
+    try:
+        await get_or_create_client(session_name)
+    except Exception as exc:  # noqa: BLE001 — ожидаемо: RuntimeError "не авторизована"
+        log.info(
+            "account-auth-watchdog: сессия %s всё ещё не авторизована (%s)",
+            session_name,
+            exc,
+        )
+        return False
+    log.warning(
+        "account-auth-watchdog: сессия %s реавторизована, статус восстановлен",
+        session_name,
+    )
+    return True
+
+
 async def _health_check_once() -> None:
     """Один тик HealthMonitor: обновить health всех сессий и добить миграции."""
-    for clump in list(_clumps.values()):
-        for pc in list(clump.parser_client_list):
-            health = pc.health
-            health.clear_flood_if_expired()
-            if health.banned:
-                continue
-            client = _clients.get(pc.session_name)
-            if client is None:
-                continue
-            try:
-                connected = bool(client.is_connected())
-                authorized = connected and await client.is_user_authorized()
-            except Exception:
-                connected = False
-                authorized = False
-            if connected and authorized:
-                if not health.in_flood():
-                    health.mark_connected()
-            else:
-                health.mark_disconnected()
-        # Добиваем осиротевшие каналы, если появились здоровые сессии.
-        if clump.pending_channels and clump.config.eff_auto_migrate():
-            try:
-                await clump.retry_pending_channels()
-            except Exception:
-                log.exception(
-                    "Ошибка повторного размещения pending-каналов clump %s",
-                    clump.clump_name,
-                )
-        if clump.config.eff_rebalance_enabled():
-            try:
-                await clump.rebalance_idle()
-            except Exception:
-                log.exception(
-                    "Ошибка idle-rebalance clump %s", clump.clump_name
-                )
+    health_timer = TickTimer()
+    health_error: str | None = None
+    reauth_enabled = get_account_auth_recheck_enabled()
+    reauth_interval = get_account_auth_recheck_interval_seconds()
+    reauth_error_total = 0
+    reauth_checked = 0
+    reauth_recovered = 0
+    try:
+        for clump in list(_clumps.values()):
+            for pc in list(clump.parser_client_list):
+                health = pc.health
+                health.clear_flood_if_expired()
+                if health.banned:
+                    continue
+                if health.status == SessionStatus.ERROR:
+                    reauth_error_total += 1
+                    if reauth_enabled and health.should_attempt_reauth(reauth_interval):
+                        reauth_checked += 1
+                        if await _attempt_session_reauth(pc):
+                            reauth_recovered += 1
+                    continue
+                client = _clients.get(_canonical_key(pc.session_name))
+                if client is None:
+                    # STARTING без клиента (enroll без каналов / после рестарта) —
+                    # пробуем подключить, иначе сессия навсегда «невидима» для health.
+                    if reauth_enabled and health.should_attempt_reauth(
+                        reauth_interval, allow_starting=True
+                    ):
+                        reauth_checked += 1
+                        if await _attempt_session_reauth(pc):
+                            reauth_recovered += 1
+                    continue
+                try:
+                    connected = bool(client.is_connected())
+                    authorized = connected and await is_authorized_uncached(client)
+                except Exception:
+                    connected = False
+                    authorized = False
+                if connected and authorized:
+                    if not health.in_flood():
+                        health.mark_connected()
+                else:
+                    health.mark_disconnected()
+            # Добиваем осиротевшие каналы, если появились здоровые сессии.
+            if clump.pending_channels and clump.config.eff_auto_migrate():
+                try:
+                    await clump.retry_pending_channels()
+                except Exception:
+                    log.exception(
+                        "Ошибка повторного размещения pending-каналов clump %s",
+                        clump.clump_name,
+                    )
+            if clump.config.eff_rebalance_enabled():
+                try:
+                    await clump.rebalance_idle()
+                except Exception:
+                    log.exception(
+                        "Ошибка idle-rebalance clump %s", clump.clump_name
+                    )
+        # PG cooldown зеркалит runtime flood: после истечения таймера status
+        # должен стать active (раньше сбрасывался только при pick).
+        try:
+            from app_balance.queue.account_health_sync import (
+                clear_expired_account_cooldowns,
+            )
+
+            await clear_expired_account_cooldowns()
+        except Exception:
+            log.exception("health: clear_expired_account_cooldowns")
+        if reauth_error_total:
+            log.info(
+                "account-auth-watchdog: тик завершён — ERROR-сессий=%d, "
+                "проверено=%d, восстановлено=%d",
+                reauth_error_total,
+                reauth_checked,
+                reauth_recovered,
+            )
+    except Exception as exc:  # noqa: BLE001
+        health_error = str(exc)
+        raise
+    finally:
+        registry = get_watchdog_registry()
+        health_interval = get_session_health_check_interval()
+        await registry.record_tick(
+            WATCHDOG_SESSION_HEALTH,
+            duration_ms=health_timer.duration_ms(),
+            result={"clumps": len(_clumps)},
+            error=health_error,
+            interval_seconds=health_interval,
+            enabled=True,
+            process="discovery-api",
+        )
+        await registry.record_tick(
+            WATCHDOG_ACCOUNT_AUTH,
+            duration_ms=health_timer.duration_ms(),
+            result={
+                "error_sessions": reauth_error_total,
+                "checked": reauth_checked,
+                "recovered": reauth_recovered,
+            },
+            error=health_error,
+            interval_seconds=reauth_interval,
+            enabled=reauth_enabled,
+            process="discovery-api",
+        )
 
 
 async def _health_monitor_loop() -> None:
     interval = get_session_health_check_interval()
+    registry = get_watchdog_registry()
+    registry.configure(
+        WATCHDOG_SESSION_HEALTH,
+        interval_seconds=interval,
+        enabled=True,
+        process="discovery-api",
+    )
+    registry.configure(
+        WATCHDOG_ACCOUNT_AUTH,
+        interval_seconds=get_account_auth_recheck_interval_seconds(),
+        enabled=get_account_auth_recheck_enabled(),
+        process="discovery-api",
+    )
     while True:
         try:
             await asyncio.sleep(interval)
@@ -444,16 +721,140 @@ async def stop_health_monitor() -> None:
         pass
 
 
+async def _channel_count_refresh_once() -> None:
+    """Один проход: honest telegram_channel_count для уже подключённых сессий.
+
+    Ограничивается сессиями, у которых уже есть живой клиент в реестре
+    (`_clients`) — новых подключений ради этой сверки не открываем, чтобы не
+    трогать аккаунты вне clump/офлайн без явного enroll/reactivate.
+    """
+    from discovery_api.session_dialogs import refresh_and_persist_channel_count
+
+    timer = TickTimer()
+    error: str | None = None
+    refreshed = 0
+    failed = 0
+    stagger = get_channel_count_refresh_stagger_seconds()
+    try:
+        seen: set[str] = set()
+        for clump in list(_clumps.values()):
+            for pc in list(clump.parser_client_list):
+                session_name = pc.session_name
+                key = _canonical_key(session_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if key not in _clients or not pc.health.is_available():
+                    continue
+                snapshot = await refresh_and_persist_channel_count(session_name, clump)
+                if snapshot.error is None:
+                    refreshed += 1
+                else:
+                    failed += 1
+                if stagger > 0:
+                    await asyncio.sleep(stagger)
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+        raise
+    finally:
+        registry = get_watchdog_registry()
+        await registry.record_tick(
+            WATCHDOG_CHANNEL_COUNT,
+            duration_ms=timer.duration_ms(),
+            result={"refreshed": refreshed, "failed": failed},
+            error=error,
+            interval_seconds=get_channel_count_refresh_interval_seconds(),
+            enabled=get_channel_count_refresh_enabled(),
+            process="discovery-api",
+        )
+        if refreshed or failed:
+            log.info(
+                "channel-count-refresher: тик завершён — обновлено=%d, ошибок=%d",
+                refreshed,
+                failed,
+            )
+
+
+async def _channel_count_refresh_loop() -> None:
+    registry = get_watchdog_registry()
+    registry.configure(
+        WATCHDOG_CHANNEL_COUNT,
+        interval_seconds=get_channel_count_refresh_interval_seconds(),
+        enabled=get_channel_count_refresh_enabled(),
+        process="discovery-api",
+    )
+    # Первый проход — почти сразу после старта (небольшая задержка, чтобы
+    # restore_persisted_parsers успел поднять clump'ы), а не через полный
+    # interval (иначе telegram_channel_count был бы null на /accounts/all
+    # до получаса после каждого деплоя/рестарта).
+    try:
+        await asyncio.sleep(get_channel_count_refresh_initial_delay_seconds())
+        if get_channel_count_refresh_enabled():
+            await _channel_count_refresh_once()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("Ошибка в первом проходе channel-count-refresher")
+
+    while True:
+        interval = get_channel_count_refresh_interval_seconds()
+        registry.configure(
+            WATCHDOG_CHANNEL_COUNT,
+            interval_seconds=interval,
+            enabled=get_channel_count_refresh_enabled(),
+            process="discovery-api",
+        )
+        try:
+            await asyncio.sleep(interval)
+            if get_channel_count_refresh_enabled():
+                await _channel_count_refresh_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Ошибка в цикле channel-count-refresher")
+
+
+def start_channel_count_refresher() -> None:
+    """Запускает периодическую сверку honest telegram_channel_count (идемпотентно)."""
+    global _channel_count_refresh_task
+    if _channel_count_refresh_task is not None and not _channel_count_refresh_task.done():
+        return
+    try:
+        _channel_count_refresh_task = asyncio.create_task(
+            _channel_count_refresh_loop(), name="channel-count-refresher"
+        )
+        log.info("ChannelCountRefresher запущен")
+    except RuntimeError:
+        log.debug("ChannelCountRefresher не запущен: нет активного event loop")
+
+
+async def stop_channel_count_refresher() -> None:
+    global _channel_count_refresh_task
+    task = _channel_count_refresh_task
+    _channel_count_refresh_task = None
+    if task is None or task.done():
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 OnDownCallback = Callable[[str, str], Awaitable[None]]
 
 
 async def _persist_flood_cooldown_pg(session_name: str, seconds: int) -> None:
-    """D6: FloodWait → PG accounts.cooldown_until (no-op без QUEUE_DATABASE_URL)."""
+    """D6: FloodWait → PG accounts.cooldown_until (no-op без QUEUE_DATABASE_URL).
+
+    Имя канонизируется: строки в `accounts` хранятся по basename (`Client1`),
+    поэтому полный путь `/app/sessions/Client1` не совпал бы и sync стал бы no-op.
+    """
     try:
         from app_balance.queue.account_health_sync import persist_flood_cooldown
     except ImportError:
         return
-    await persist_flood_cooldown(session_name, seconds)
+    await persist_flood_cooldown(_canonical_key(session_name), seconds)
 
 
 async def _persist_banned_pg(session_name: str, reason: str) -> None:
@@ -462,7 +863,41 @@ async def _persist_banned_pg(session_name: str, reason: str) -> None:
         from app_balance.queue.account_health_sync import persist_banned
     except ImportError:
         return
-    await persist_banned(session_name, reason)
+    await persist_banned(_canonical_key(session_name), reason)
+
+
+async def _persist_unauthorized_pg(session_name: str, reason: str) -> None:
+    """D6: неавторизованная сессия → PG accounts.status=error."""
+    try:
+        from app_balance.queue.account_health_sync import persist_unauthorized
+    except ImportError:
+        return
+    await persist_unauthorized(_canonical_key(session_name), reason)
+
+
+async def _persist_reauthorized_pg(session_name: str) -> bool:
+    """D6: успешная re-auth → PG accounts.status error → active."""
+    try:
+        from app_balance.queue.account_health_sync import persist_account_reauthorized
+    except ImportError:
+        return False
+    return await persist_account_reauthorized(_canonical_key(session_name))
+
+
+async def notify_session_unauthorized(session_name: str, message: str) -> None:
+    """In-memory health clump + PG accounts для неавторизованной сессии."""
+    pc = find_parser_client(session_name)
+    if pc is not None:
+        pc.health.mark_unauthorized(message)
+    await _persist_unauthorized_pg(session_name, message)
+
+
+async def notify_session_reauthorized(session_name: str) -> bool:
+    """In-memory health clump + PG accounts после успешной re-auth."""
+    pc = find_parser_client(session_name)
+    if pc is not None:
+        pc.health.mark_reauthorized()
+    return await _persist_reauthorized_pg(session_name)
 
 
 class Parser_client:
@@ -520,7 +955,7 @@ class Parser_client:
             "channels": list(self.channels),
             "allowed_chat_ids": sorted(int(x) for x in self.allowed_chat_ids),
             "running": self.is_running(),
-            "channel_count": len(self.channels),
+            "channel_count": max(len(self.channels), len(self.allowed_chat_ids)),
             "health": self.health.to_dict(),
         }
 
@@ -583,6 +1018,12 @@ class Parser_client:
                     await _persist_banned_pg(self.session_name, str(exc))
                     await self._trigger_down(f"banned: {exc}")
                     break
+                if kind == "unauthorized":
+                    msg = str(exc)
+                    self.health.mark_unauthorized(msg)
+                    await _persist_unauthorized_pg(self.session_name, msg)
+                    await self._trigger_down(f"unauthorized: {exc}")
+                    break
                 # transient / fatal — наращиваем счётчик и идём в backoff
                 self.health.mark_disconnected()
                 consecutive_failures += 1
@@ -629,13 +1070,23 @@ class Parser_client:
             self._stop_requested = True
             task = self._supervisor_task
             self._supervisor_task = None
-            if task is None or task.done():
-                return
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            client = find_registered_client(self.session_name)
+            if client is not None:
+                try:
+                    if client.is_connected():
+                        await client.disconnect()
+                except Exception:  # noqa: BLE001
+                    log.debug(
+                        "parser stop: disconnect failed session=%s",
+                        self.session_name,
+                        exc_info=True,
+                    )
 
     async def _respect_resolve_pacing(self) -> None:
         """Гарантирует минимальный интервал между resolve-RPC на одну сессию."""
@@ -650,13 +1101,13 @@ class Parser_client:
 
     async def add_channel(
         self, raw: str, *, webhook_url: Optional[str] = None
-    ) -> tuple[Optional[int], Optional[str]]:
+    ) -> tuple[Optional[int], Optional[str], Optional[str]]:
         from discovery_api.parser_functions import resolve_channel_to_chat_id
 
         wh = (webhook_url or self._webhook_url or "").strip()
         client = await self.get_client()
         await self._respect_resolve_pacing()
-        chat_id, err = await resolve_channel_to_chat_id(client, raw)
+        chat_id, err, error_code = await resolve_channel_to_chat_id(client, raw, join=True)
         if err or chat_id is None:
             # FloodWait при resolve гасится в строку — поднимаем его в health,
             # чтобы балансировщик увёл следующие каналы на другую сессию.
@@ -664,11 +1115,15 @@ class Parser_client:
             if flood_secs is not None:
                 self.health.mark_flood(flood_secs)
                 await _persist_flood_cooldown_pg(self.session_name, flood_secs)
-            return None, err
+            return None, err, error_code
 
         cid = int(chat_id)
         if cid in self.allowed_chat_ids:
-            return cid, None
+            # already_present: синхронизируем channels/ref_to_chat_id
+            self.ref_to_chat_id[raw] = cid
+            if raw not in self.channels:
+                self.channels.append(raw)
+            return cid, None, None
 
         self.allowed_chat_ids.add(cid)
         self.ref_to_chat_id[raw] = cid
@@ -678,7 +1133,14 @@ class Parser_client:
 
         if wh and not self.is_running():
             await self.start(wh)
-        return cid, None
+        log.info(
+            "parser add_channel OK session=%s ref=%s chat_id=%s listener_running=%s",
+            self.session_name,
+            raw,
+            cid,
+            self.is_running(),
+        )
+        return cid, None, None
 
     async def remove_channel(self, raw: str) -> bool:
         from discovery_api.parser_functions import resolve_channel_to_chat_id
@@ -686,7 +1148,10 @@ class Parser_client:
         cid = self.ref_to_chat_id.get(raw)
         if cid is None:
             client = await self.get_client()
-            resolved, err = await resolve_channel_to_chat_id(client, raw)
+            # join=False — не вступать в канал при удалении
+            resolved, err, _code = await resolve_channel_to_chat_id(
+                client, raw, join=False
+            )
             if err or resolved is None:
                 return False
             cid = int(resolved)
@@ -757,7 +1222,20 @@ class SessionClump:
         return snapshot
 
     def has_session(self, session_name: str) -> bool:
-        return session_name in self._session_index
+        if session_name in self._session_index:
+            return True
+        key = _canonical_key(session_name)
+        return any(_canonical_key(name) == key for name in self._session_index)
+
+    def _resolve_pc(self, session_name: str) -> Optional[Parser_client]:
+        pc = self._session_index.get(session_name)
+        if pc is not None:
+            return pc
+        key = _canonical_key(session_name)
+        for name, candidate in self._session_index.items():
+            if _canonical_key(name) == key:
+                return candidate
+        return None
 
     @staticmethod
     def _default_display_name(session_name: str) -> str:
@@ -806,10 +1284,12 @@ class SessionClump:
             "status": h.status,
             "banned": h.banned,
             "ban_reason": h.ban_reason,
+            "last_error": h.last_error,
+            "flood_until": h.flood_until,
             "flood_remaining_seconds": flood_remaining,
             "connected": h.connected,
             "running": pc.is_running(),
-            "channel_count": len(pc.channels),
+            "channel_count": max(len(pc.channels), len(pc.allowed_chat_ids)),
             "max_channels_per_session": self.config.eff_max_channels_per_session(),
         }
 
@@ -818,23 +1298,25 @@ class SessionClump:
 
     def account_detail(self, session_name: str) -> Optional[dict[str, Any]]:
         """Полная карточка аккаунта для формы редактирования."""
-        pc = self._session_index.get(session_name)
+        pc = self._resolve_pc(session_name)
         if pc is None:
             return None
-        meta = self.get_account_meta(session_name)
+        meta = self.get_account_meta(pc.session_name)
         return {
             "session_name": pc.session_name,
             "display_name": meta["display_name"],
             "description": meta["description"],
             "clump_name": self.clump_name,
             "running": pc.is_running(),
-            "channel_count": len(pc.channels),
+            # UI: фактическое число слушаемых каналов (allowed_chat_ids),
+            # не только refs в channels (могут расходиться при already_present).
+            "channel_count": max(len(pc.channels), len(pc.allowed_chat_ids)),
             "limits": self.config.to_dict(),
             "health": pc.health.to_dict(),
         }
 
     def account_channels(self, session_name: str) -> Optional[list[str]]:
-        pc = self._session_index.get(session_name)
+        pc = self._resolve_pc(session_name)
         if pc is None:
             return None
         return list(pc.channels)
@@ -891,7 +1373,12 @@ class SessionClump:
     def _find_owner(self, raw: str) -> Optional[Parser_client]:
         session_name = self.assignments.get(raw)
         if session_name:
-            return self._session_index.get(session_name)
+            # assignments может хранить alias ('/app/sessions/Client1'), а
+            # _session_index — другой ('Client1'); резолвим по canonical key,
+            # иначе владелец «теряется» и канал ошибочно считается свободным.
+            pc = self._resolve_pc(session_name)
+            if pc is not None:
+                return pc
         for pc in self.parser_client_list:
             if raw in pc.channels:
                 return pc
@@ -987,7 +1474,7 @@ class SessionClump:
                 "error": "Пустое значение канала",
             }
 
-        pc = self._session_index.get(session_name)
+        pc = self._resolve_pc(session_name)
         if pc is None:
             return {
                 "channel": ref,
@@ -1000,14 +1487,19 @@ class SessionClump:
 
         owner = self._find_owner(ref)
         if owner is not None:
-            if owner.session_name != session_name:
+            if _canonical_key(owner.session_name) != _canonical_key(session_name):
+                # Канал уже слушается в этом же clump другой сессией — цель
+                # (канал под мониторингом) уже достигнута. Возвращаем
+                # идемпотентный успех, а НЕ ошибку: иначе воркер уводит задачу
+                # в бесконечный RETRYABLE ("Канал уже на другой сессии").
+                # Перенос между сессиями — отдельная операция move_channel.
                 return {
                     "channel": ref,
-                    "session_name": session_name,
-                    "chat_id": None,
-                    "error": (
-                        f"Канал уже на другой сессии: {owner.session_name}"
-                    ),
+                    "session_name": owner.session_name,
+                    "chat_id": owner.ref_to_chat_id.get(ref),
+                    "error": None,
+                    "already_present": True,
+                    "owner_conflict": True,
                 }
             if ref in owner.channels:
                 return {
@@ -1019,24 +1511,44 @@ class SessionClump:
                 }
 
         existing_ids = self.all_allowed_chat_ids()
-        chat_id, err = await pc.add_channel(ref, webhook_url=wh)
+        chat_id, err, error_code = await pc.add_channel(ref, webhook_url=wh)
+        already_present = False
         if chat_id is not None and err is None:
             if int(chat_id) in existing_ids:
+                already_present = True
+                # Синхронизируем assignments даже при already_present
+                self.assignments[ref] = session_name
+                log.info(
+                    "clump add_channel_on_session OK parser=%s session=%s ref=%s chat_id=%s already_present=true",
+                    self.clump_name,
+                    session_name,
+                    ref,
+                    chat_id,
+                )
                 return {
                     "channel": ref,
                     "session_name": session_name,
                     "chat_id": int(chat_id),
                     "error": None,
+                    "error_code": None,
                     "already_present": True,
                 }
             self.assignments[ref] = session_name
+            log.info(
+                "clump add_channel_on_session OK parser=%s session=%s ref=%s chat_id=%s already_present=false",
+                self.clump_name,
+                session_name,
+                ref,
+                chat_id,
+            )
 
         return {
             "channel": ref,
             "session_name": session_name,
             "chat_id": chat_id,
             "error": err,
-            "already_present": False,
+            "error_code": error_code,
+            "already_present": already_present,
         }
 
     @staticmethod
@@ -1130,7 +1642,7 @@ class SessionClump:
                 self.assignments.pop(channel_ref, None)
 
         wh = (webhook_url or self.webhook_url or "").strip() or None
-        chat_id, err = await target.add_channel(channel_ref, webhook_url=wh)
+        chat_id, err, error_code = await target.add_channel(channel_ref, webhook_url=wh)
         if chat_id is not None and err is None:
             self.assignments[channel_ref] = to_session
 
@@ -1141,6 +1653,7 @@ class SessionClump:
             "session_name": to_session,
             "chat_id": chat_id,
             "error": err,
+            "error_code": error_code,
             "already_present": False,
             "moved": chat_id is not None and err is None,
         }
@@ -1167,12 +1680,13 @@ class SessionClump:
                     "error": None,
                     "already_present": True,
                 }
-            chat_id, err = await owner.add_channel(ref, webhook_url=self.webhook_url)
+            chat_id, err, error_code = await owner.add_channel(ref, webhook_url=self.webhook_url)
             return {
                 "channel": ref,
                 "session_name": owner.session_name,
                 "chat_id": chat_id,
                 "error": err,
+                "error_code": error_code,
                 "already_present": False,
             }
 
@@ -1188,17 +1702,20 @@ class SessionClump:
                 "session_name": None,
                 "chat_id": None,
                 "error": str(e),
+                "error_code": None,
                 "already_present": False,
                 "deferred": True,
             }
-        chat_id, err = await pc.add_channel(ref, webhook_url=self.webhook_url)
+        chat_id, err, error_code = await pc.add_channel(ref, webhook_url=self.webhook_url)
         if chat_id is not None and err is None:
             if int(chat_id) in existing_ids:
+                self.assignments[ref] = pc.session_name
                 return {
                     "channel": ref,
                     "session_name": pc.session_name,
                     "chat_id": int(chat_id),
                     "error": None,
+                    "error_code": None,
                     "already_present": True,
                 }
             self.assignments[ref] = pc.session_name
@@ -1207,6 +1724,7 @@ class SessionClump:
             "session_name": pc.session_name,
             "chat_id": chat_id,
             "error": err,
+            "error_code": error_code,
             "already_present": False,
         }
 
@@ -1367,7 +1885,7 @@ class SessionClump:
                     errors.append(f"{ref}: {e!s}")
                     continue
 
-                chat_id, err = await target.add_channel(
+                chat_id, err, error_code = await target.add_channel(
                     ref, webhook_url=self.webhook_url
                 )
                 if err or chat_id is None:
@@ -1416,7 +1934,7 @@ class SessionClump:
                     still_pending.append(ref)
                     errors.append(f"{ref}: {e!s}")
                     continue
-                chat_id, err = await target.add_channel(
+                chat_id, err, error_code = await target.add_channel(
                     ref, webhook_url=self.webhook_url
                 )
                 if err or chat_id is None:
@@ -1503,7 +2021,7 @@ class SessionClump:
                     source.ref_to_chat_id.pop(ref, None)
                     source.channels[:] = [c for c in source.channels if c != ref]
                     self.assignments.pop(ref, None)
-                    chat_id, err = await target.add_channel(
+                    chat_id, err, error_code = await target.add_channel(
                         ref, webhook_url=self.webhook_url
                     )
                     if err or chat_id is None:
@@ -1624,6 +2142,15 @@ class SessionClump:
         if isinstance(allowed_raw, list):
             allowed_set = {int(x) for x in allowed_raw}
 
+        ref_map_raw = record.get("ref_to_chat_id")
+        ref_map: dict[str, int] = {}
+        if isinstance(ref_map_raw, dict):
+            for k, v in ref_map_raw.items():
+                try:
+                    ref_map[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    continue
+
         # Legacy: один session_name в записи
         legacy_session = record.get("session_name")
         if legacy_session and str(legacy_session) in self._session_index:
@@ -1638,7 +2165,9 @@ class SessionClump:
             pc = self._session_index.get(session_name) if session_name else default_pc
             if pc is None:
                 pc = default_pc
-            cid = pc.ref_to_chat_id.get(ref)
+            cid = ref_map.get(ref)
+            if cid is None:
+                cid = pc.ref_to_chat_id.get(ref)
             if cid is None:
                 try:
                     numeric = int(ref)
@@ -1647,9 +2176,13 @@ class SessionClump:
                 except ValueError:
                     pass
             if cid is None:
-                try:
-                    cid = next(chat_ids_iter)
-                except StopIteration:
+                # Legacy fallback: только если нет ref_to_chat_id в записи
+                if not ref_map:
+                    try:
+                        cid = next(chat_ids_iter)
+                    except StopIteration:
+                        continue
+                else:
                     continue
             pc.restore_channel(ref, int(cid), webhook_url=wh)
             if ref not in self.assignments:

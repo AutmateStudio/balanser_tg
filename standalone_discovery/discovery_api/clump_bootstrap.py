@@ -49,11 +49,6 @@ async def restore_all_clumps_from_store() -> int:
             log.warning("clump_bootstrap: пропуск некорректной записи: %s", rec)
             continue
 
-        ch_list = [str(x) for x in channel_list]
-        if not ch_list:
-            log.warning("clump_bootstrap: пропуск записи без каналов: %s", parser_id)
-            continue
-
         try:
             clump = await get_or_create_clump(
                 parser_id,

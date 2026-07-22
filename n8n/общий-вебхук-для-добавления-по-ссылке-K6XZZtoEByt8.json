@@ -1,0 +1,244 @@
+{
+  "name": "Общий вебхук для добавления по ссылке",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "common_by_link",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -144,
+        16
+      ],
+      "id": "3088a47e-45a2-4641-8f8c-677b9e64c4e8",
+      "name": "Webhook",
+      "webhookId": "bd561db1-2be3-4657-8938-d0189e0904c5"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "841158f2-3c0c-481c-a788-767d1c55a8db",
+              "name": "=link ",
+              "value": "={{ $json.body.target }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        64,
+        16
+      ],
+      "id": "0ed4707e-e297-4029-9249-64999a6725bd",
+      "name": "Ссылка"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e40f8a21-ad91-488a-8c99-56022ed26ce3",
+              "leftValue": "={{ $json['link '] }}",
+              "rightValue": "vk",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        272,
+        16
+      ],
+      "id": "0430c05e-8bb4-4190-a525-4c547cf28c5c",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "url": "https://mokuegopasan.beget.app/webhook/common_by_link",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "https://t.me/maxapi_github/1/10404"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -112,
+        -208
+      ],
+      "id": "fd5c2078-43bb-485b-8933-8eb83a3b7c65",
+      "name": "Тестовый запуск"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"headers\": {\n      \"host\": \"mokuegopasan.beget.app\",\n      \"user-agent\": \"axios/1.13.5\",\n      \"content-length\": \"41\",\n      \"accept\": \"application/json,text/html,application/xhtml+xml,application/xml,text/*;q=0.9, image/*;q=0.8, */*;q=0.7\",\n      \"accept-encoding\": \"gzip, compress, deflate, br\",\n      \"content-type\": \"application/json\",\n      \"x-forwarded-for\": \"172.18.0.1\",\n      \"x-forwarded-host\": \"mokuegopasan.beget.app\",\n      \"x-forwarded-port\": \"443\",\n      \"x-forwarded-proto\": \"https\",\n      \"x-forwarded-server\": \"ed84361b6596\",\n      \"x-real-ip\": \"172.18.0.1\"\n    },\n    \"params\": {},\n    \"query\": {},\n    \"body\": {\n      \"target\": \"https://vk.com/club102246790\"\n    },\n    \"webhookUrl\": \"https://mokuegopasan.beget.app/webhook/common_by_link\",\n    \"executionMode\": \"production\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -128,
+        176
+      ],
+      "id": "4ec3cb1f-702b-448b-8024-a5126c188527",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -352,
+        176
+      ],
+      "id": "c4a052a1-9c81-4988-a7c9-50a738789a94",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://mokuegopasan.beget.app/webhook/vk-resolve-score",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "={{ $json['link '] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        512,
+        -128
+      ],
+      "id": "2f7a9eef-ecd8-467f-be01-e2f307ccf286",
+      "name": "Добавление ВК"
+    },
+    {
+      "parameters": {
+        "url": "https://mokuegopasan.beget.app/webhook/tg-resolve-score",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "={{ $('Ссылка').item.json['link '] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        512,
+        128
+      ],
+      "id": "1979569a-093c-494b-9108-a18e0aff2b8a",
+      "name": "Добавление ТГ"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Ссылка",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ссылка": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Ссылка",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Добавление ВК",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Добавление ТГ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

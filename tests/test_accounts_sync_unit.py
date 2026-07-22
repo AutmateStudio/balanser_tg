@@ -110,3 +110,113 @@ def test_load_clump_sessions_v2_and_legacy(tmp_path) -> None:
 
 def test_load_clump_sessions_missing_file() -> None:
     assert load_clump_sessions("/nonexistent/parser_jobs.json") == set()
+
+
+async def test_sync_best_effort_skips_without_dsn(monkeypatch) -> None:
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+
+    monkeypatch.delenv("QUEUE_DATABASE_URL", raising=False)
+    assert await sync_accounts_to_pg_best_effort(context="test") is None
+
+
+async def test_sync_best_effort_calls_sync_when_dsn_set(monkeypatch) -> None:
+    from app_balance.queue import accounts_sync
+    from app_balance.queue.accounts_sync import SyncResult, sync_accounts_to_pg_best_effort
+
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/test")
+
+    async def _fake_sync(_config, *, dry_run=False):
+        return SyncResult(inserted=1, updated=0, unchanged=2, total=3)
+
+    monkeypatch.setattr(accounts_sync, "sync_accounts_to_pg", _fake_sync)
+    result = await sync_accounts_to_pg_best_effort(context="qr:Test2")
+    assert result is not None
+    assert result.inserted == 1
+    assert result.total == 3
+
+
+async def test_sync_best_effort_swallows_pg_errors(monkeypatch) -> None:
+    from app_balance.queue import accounts_sync
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/test")
+
+    async def _fail(_config, *, dry_run=False):
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr(accounts_sync, "sync_accounts_to_pg", _fail)
+    assert await sync_accounts_to_pg_best_effort(context="qr:Test2") is None
+
+
+async def test_sync_best_effort_forwards_parser_store_path_override(monkeypatch) -> None:
+    """Регресс fix/accounts-sync-parser-store-path: путь writer'а доходит до reader'а.
+
+    Если override передан — синк должен читать membership именно из него,
+    а не из захардкоженного репозиторного пути (который в контейнере не существует).
+    """
+    from app_balance.queue import accounts_sync
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/test")
+
+    captured: dict[str, str] = {}
+
+    async def _capture_sync(config, *, dry_run=False):
+        captured["parser_store_path"] = config.parser_store_path
+        from app_balance.queue.accounts_sync import SyncResult
+
+        return SyncResult(inserted=0, updated=0, unchanged=0, total=0)
+
+    monkeypatch.setattr(accounts_sync, "sync_accounts_to_pg", _capture_sync)
+
+    real_path = "/app/discovery_api/data/parser_jobs.json"
+    await sync_accounts_to_pg_best_effort(
+        context="enroll:Reriv8095", parser_store_path=real_path
+    )
+    assert captured["parser_store_path"] == real_path
+
+
+def test_default_parser_store_path_prefers_env(monkeypatch) -> None:
+    from app_balance.queue.accounts_sync import default_parser_store_path
+
+    monkeypatch.setenv("PARSER_STORE_PATH", "/explicit/parser_jobs.json")
+    assert default_parser_store_path() == "/explicit/parser_jobs.json"
+
+
+def test_default_parser_store_path_uses_writer_resolver(monkeypatch) -> None:
+    """Без env путь берётся из того же резолвера, что и писатель discovery_api."""
+    import sys
+    import types
+
+    from app_balance.queue.accounts_sync import default_parser_store_path
+
+    monkeypatch.delenv("PARSER_STORE_PATH", raising=False)
+
+    fake_ps = types.ModuleType("discovery_api.parser_store")
+    fake_ps._store_path = lambda: "/app/discovery_api/data/parser_jobs.json"  # type: ignore[attr-defined]
+    fake_pkg = sys.modules.get("discovery_api") or types.ModuleType("discovery_api")
+    monkeypatch.setitem(sys.modules, "discovery_api", fake_pkg)
+    monkeypatch.setitem(sys.modules, "discovery_api.parser_store", fake_ps)
+
+    assert default_parser_store_path() == "/app/discovery_api/data/parser_jobs.json"
+
+
+async def test_sync_best_effort_uses_env_path_when_no_override(monkeypatch) -> None:
+    from app_balance.queue import accounts_sync
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+
+    monkeypatch.setenv("QUEUE_DATABASE_URL", "postgresql://u:p@localhost/test")
+    monkeypatch.setenv("PARSER_STORE_PATH", "/env/driven/parser_jobs.json")
+
+    captured: dict[str, str] = {}
+
+    async def _capture_sync(config, *, dry_run=False):
+        captured["parser_store_path"] = config.parser_store_path
+        from app_balance.queue.accounts_sync import SyncResult
+
+        return SyncResult(inserted=0, updated=0, unchanged=0, total=0)
+
+    monkeypatch.setattr(accounts_sync, "sync_accounts_to_pg", _capture_sync)
+
+    await sync_accounts_to_pg_best_effort(context="enroll:Reriv8095")
+    assert captured["parser_store_path"] == "/env/driven/parser_jobs.json"

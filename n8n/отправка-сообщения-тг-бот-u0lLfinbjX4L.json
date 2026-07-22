@@ -1,0 +1,193 @@
+{
+  "name": "отправка сообщения ТГ Бот",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "chat_id",
+              "type": "number"
+            },
+            {
+              "name": "text"
+            },
+            {
+              "name": "img_url"
+            },
+            {
+              "name": "layout"
+            },
+            {
+              "name": "buttons",
+              "type": "any"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -96,
+        0
+      ],
+      "id": "642dbfce-a057-4a15-9d5c-775be311488b",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://194.156.117.160:8100/discovery-api/bot/send-message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        320,
+        0
+      ],
+      "id": "3b096852-9a02-4c19-9b7d-cc06b1596cd7",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "u0lLfinbjX4L5oMK",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/u0lLfinbjX4L5oMK",
+          "cachedResultName": "отправка сообщения ТГ Бот"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "chat_id": 816740390,
+            "text": "<b>Пупупу</b>",
+            "layout": "inline",
+            "buttons": "[\n  {\n  \"text\": \"Кнопка 1\", \n  \"url\": \"https://www.qrcode-monkey.com/\"\n  }\n]"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "chat_id",
+              "displayName": "chat_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "img_url",
+              "displayName": "img_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "layout",
+              "displayName": "layout",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "buttons",
+              "displayName": "buttons",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        48,
+        -208
+      ],
+      "id": "acb8afbe-b497-4d47-bfd8-cd058bc86100",
+      "name": "Call 'отправка сообщения ТГ Бот'"
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $input.first().json;\nconst item = Array.isArray(source) ? source[0] : source;\n\nconst body = {\n  chat_id: Number(item.chat_id),\n  text: item.text || \"\",\n  image_url: item.img_url ?? item.image_url ?? null,\n  layout: item.layout || \"inline\",\n  buttons: Array.isArray(item.buttons) ? item.buttons : [],\n};\n\nreturn [\n  {\n    json: body,\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        0
+      ],
+      "id": "983e8c4a-047a-4e1a-8297-caa4fe5c1831",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

@@ -1,0 +1,822 @@
+{
+  "name": "VK поиск и запись с метаданными и скором",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vk/search-with-score",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "bb979d59-9ba9-4ec8-a88c-72719e0919fc",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "vk-search-with-score",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:8000/groups/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"q\": {{ JSON.stringify($json.body.q || $json.query.q || \"\") }},\n  \"count\": {{ Number($json.body.count || $json.query.count || 20) }},\n  \"offset\": {{ Number($json.body.offset || $json.query.offset || 0) }},\n  \"type\": {{ JSON.stringify($json.body.type || $json.query.type || \"group\") }},\n  \"sort\": {{ Number($json.body.sort || $json.query.sort || 6) }},\n  \"include_score\": {{ ($json.body.include_score === false || $json.query.include_score === \"false\") ? false : true }},\n  \"wall_posts_count\": {{ Number($json.body.wall_posts_count || $json.query.wall_posts_count || 20) }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "1e23fe15-013e-456c-a81f-478af59555c4",
+      "name": "Call /groups/search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        304,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QZxEpjB2O8iPdiP0",
+          "name": "Авторизация поиск ВК"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"ok\": Array.isArray($json) ? true : !($json && $json.detail),\n  \"query\": $('Webhook').item.json.body || {},\n  \"count\": Array.isArray($json) ? $json.length : 0,\n  \"items\": Array.isArray($json) ? $json : [],\n  \"raw\": $json\n} }}",
+        "options": {}
+      },
+      "id": "c0a43090-cd3f-4d82-ac30-e21d6f061e68",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        656,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://mokuegopasan.beget.app/webhook/vk/search-with-score",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "Ищу работу"
+            },
+            {
+              "name": "count",
+              "value": "40"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        -176
+      ],
+      "id": "5b467588-d59e-45f3-81f9-f902d31f406e",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -176
+      ],
+      "id": "1ec83590-398c-4f5e-b35a-4d8c1d6ee297",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        608,
+        0
+      ],
+      "id": "a92ab49e-89a3-4c7f-853a-52d63152335f",
+      "name": "Loop Over Items",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_active": false,
+            "id": 0,
+            "platform_id": 0,
+            "linked_projects_count": 0
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "platform_id",
+              "displayName": "platform_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_channel_id",
+              "displayName": "external_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "external_url",
+              "displayName": "external_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "image_url",
+              "displayName": "image_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "metadata",
+              "displayName": "metadata",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "linked_projects_count",
+              "displayName": "linked_projects_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "is_active",
+              "displayName": "is_active",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        832,
+        16
+      ],
+      "id": "5c9b61ca-8044-46ee-99bc-a329fc67c202",
+      "name": "Insert or update rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "[\n  {\n    \"vk_id\": 229597469,\n    \"name\": \"Лидогенерация и Продажи\",\n    \"screen_name\": \"lidogeneration_pro\",\n    \"members_count\": 2969,\n    \"score\": 20.84,\n    \"er\": 0.043,\n    \"likes_avg\": 128.7,\n    \"comments_avg\": 0.05\n  },\n  {\n    \"vk_id\": 134530089,\n    \"name\": \"Таргетинг • Комплексный маркетинг• Лидогенерация\",\n    \"screen_name\": \"irkutsk_ads_m_ru\",\n    \"members_count\": 2809,\n    \"score\": 20.69,\n    \"er\": 0.0002,\n    \"likes_avg\": 0.55,\n    \"comments_avg\": 0\n  },\n  {\n    \"vk_id\": 54342281,\n    \"name\": \"SMM Лидогенерация\",\n    \"screen_name\": \"bm_rus\",\n    \"members_count\": 2124,\n    \"score\": 19.96,\n    \"er\": 0.00016,\n    \"likes_avg\": 0.3,\n    \"comments_avg\": 0.05\n  },\n  {\n    \"vk_id\": 70935124,\n    \"name\": \"Лидогенерация и базы клиентов для Вашего бизнеса\",\n    \"screen_name\": \"lidochkaru\",\n    \"members_count\": 1870,\n    \"score\": 19.63,\n    \"er\": 0,\n    \"likes_avg\": 0,\n    \"comments_avg\": 0\n  },\n  {\n    \"vk_id\": 80671196,\n    \"name\": \"Продвижение Яндекс карты, 2гис/ Лидогенерация\",\n    \"screen_name\": \"local_top\",\n    \"members_count\": 1274,\n    \"score\": 18.63,\n    \"er\": 0.0024,\n    \"likes_avg\": 2.75,\n    \"comments_avg\": 0.35\n  },\n  {\n    \"vk_id\": 147890143,\n    \"name\": \"Line Agency | Лидогенерация, привлечение лидов\",\n    \"screen_name\": \"sitedevrus\",\n    \"members_count\": 1207,\n    \"score\": 18.49,\n    \"er\": 0.0041,\n    \"likes_avg\": 4.8,\n    \"comments_avg\": 0.2\n  },\n  {\n    \"vk_id\": 167356851,\n    \"name\": \"Интернет-продвижение | Лидогенерация\",\n    \"screen_name\": \"leadgen27\",\n    \"members_count\": 1146,\n    \"score\": 18.36,\n    \"er\": 0.054,\n    \"likes_avg\": 62.2,\n    \"comments_avg\": 0\n  },\n  {\n    \"vk_id\": 81153090,\n    \"name\": \"Технологии Лидогенерации\",\n    \"screen_name\": \"lidogeneration\",\n    \"members_count\": 961,\n    \"score\": 17.90,\n    \"er\": 0.135,\n    \"likes_avg\": 130.05,\n    \"comments_avg\": 0.05\n  },\n  {\n    \"vk_id\": 80816548,\n    \"name\": \"SMM | Таргетинг | Лидогенерация\",\n    \"screen_name\": \"promarketing_biz\",\n    \"members_count\": 939,\n    \"score\": 17.84,\n    \"er\": 0.0035,\n    \"likes_avg\": 2.05,\n    \"comments_avg\": 1.25\n  },\n  {\n    \"vk_id\": 96450835,\n    \"name\": \"Клиенты для бизнеса. Лидогенерация.\",\n    \"screen_name\": \"landing_diz1\",\n    \"members_count\": 889,\n    \"score\": 17.70,\n    \"er\": 0.0041,\n    \"likes_avg\": 3.67,\n    \"comments_avg\": 0\n  }\n]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        464,
+        288
+      ],
+      "id": "447175a0-c4a4-4cf9-a5a6-e967368fc47e",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "a8d68ac9-08ed-4615-aa14-68efb3a92341",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        64,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a01",
+              "name": "id",
+              "type": "string",
+              "value": "=vk_{{ $json.vk_id }}"
+            },
+            {
+              "id": "a02",
+              "name": "platform_id",
+              "type": "number",
+              "value": "=0"
+            },
+            {
+              "id": "a03",
+              "name": "external_channel_id",
+              "type": "string",
+              "value": "={{ String($json.vk_id) }}"
+            },
+            {
+              "id": "a04",
+              "name": "name",
+              "type": "string",
+              "value": "={{ $json.name || '' }}"
+            },
+            {
+              "id": "a05",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.description || '' }}"
+            },
+            {
+              "id": "a06",
+              "name": "external_url",
+              "type": "string",
+              "value": "=https://vk.com/{{ $json.screen_name || ('club' + $json.vk_id) }}"
+            },
+            {
+              "id": "a07",
+              "name": "image_url",
+              "type": "string",
+              "value": "={{ $json.photo_200 || $json.photo_100 || $json.photo_50 || '' }}"
+            },
+            {
+              "id": "a08",
+              "name": "metadata",
+              "type": "object",
+              "value": "={{ {\n  vk_type: $json.vk_type,\n  is_closed: $json.is_closed,\n  verified: $json.verified,\n  members_count: $json.members_count,\n  activity: $json.activity,\n  country: $json.country,\n  city: $json.city,\n  site: $json.site,\n  counters: $json.counters,\n  score: $json.score,\n  score_error: $json.score_error\n} }}"
+            },
+            {
+              "id": "a09",
+              "name": "linked_projects_count",
+              "type": "number",
+              "value": "=0"
+            },
+            {
+              "id": "a10",
+              "name": "is_active",
+              "type": "boolean",
+              "value": "={{ !$json.is_closed && !$json.deactivated }}"
+            },
+            {
+              "id": "a11",
+              "name": "created_at",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "id": "a12",
+              "name": "updated_at",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b0eeb23e-2c6a-49bb-ac50-345ed38283c8",
+      "name": "Set: row for DB",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        384,
+        608
+      ],
+      "notes": "Здесь после Set подключаешь свою ноду БД (Postgres/MySQL/...). Стратегия дублей — skip по id или (platform_id, external_channel_id)."
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vk/search-with-score",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "85e7125e-0b5f-4a9e-8c99-8302ac62b6f6",
+      "name": "Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        592
+      ],
+      "webhookId": "vk-search-with-score"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.26.32:8000/groups/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "hvOoL4RQZ6QOKUEKGk8cfJlE0ZONAT+b04qbCALgmDQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"q\": {{ JSON.stringify($json.body.q || $json.query.q || \"\") }},\n  \"count\": {{ Number($json.body.count || $json.query.count || 20) }},\n  \"offset\": {{ Number($json.body.offset || $json.query.offset || 0) }},\n  \"type\": {{ JSON.stringify($json.body.type || $json.query.type || \"group\") }},\n  \"sort\": {{ Number($json.body.sort || $json.query.sort || 6) }},\n  \"include_score\": {{ ($json.body.include_score === false || $json.query.include_score === \"false\") ? false : true }},\n  \"wall_posts_count\": {{ Number($json.body.wall_posts_count || $json.query.wall_posts_count || 20) }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "758945cc-8702-41d8-8b33-59d0b793b7dc",
+      "name": "Call /groups/search1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -256,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  ok: true,\n  query: $('Webhook1').item.json.body || {},\n  processed: $items('Set: row for DB').length\n} }}",
+        "options": {}
+      },
+      "id": "2201a135-f523-49a4-bec1-4b978d2258aa",
+      "name": "Respond1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        384,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"id\": \"vk_96450835\",\n    \"platform_id\": 0,\n    \"external_channel_id\": \"96450835\",\n    \"name\": \"Клиенты для бизнеса. Лидогенерация.\",\n    \"description\": \"Наш сервис VK-HUNTER.RU прорыв в технологии продающих сайтов.\\nУстановите на ваш сайт виджет обратной связи сервиса VK-HUNTER.RU \\nи получайте потенциальный клиентов из социальной сети Вконтакте\",\n    \"external_url\": \"https://vk.com/landing_diz1\",\n    \"image_url\": \"https://sun1-92.userapi.com/s/v1/ig1/a1pckCA5pjBezaz13tQ0qElHtHkFNz5gZSpayJeSEiHOhYbkqJ9r-t63ptzeBB9HbEkUpVVZ.jpg?quality=96&crop=0,0,400,400&as=32x32,48x48,72x72,108x108,160x160,240x240,360x360&ava=1&cs=200x200\",\n    \"metadata\": {\n      \"vk_type\": \"group\",\n      \"is_closed\": false,\n      \"verified\": 0,\n      \"members_count\": 889,\n      \"activity\": \"Публичная страница\",\n      \"country\": null,\n      \"city\": \"Санкт-Петербург\",\n      \"site\": \"http://xn----7sbabao7avaqh2bdcfiils.xn--p1ai/\",\n      \"counters\": null,\n      \"score\": {\n        \"score\": 17.696340039869472,\n        \"members_count\": 889,\n        \"er\": 0.004124484439445069,\n        \"activity_norm\": 0,\n        \"block_activity\": 0,\n        \"scale\": 0.49156500110748547,\n        \"trust\": 0,\n        \"block_lead\": 0.29493900066449125,\n        \"recent_post_flag\": 0,\n        \"likes_avg\": 3.6666666666666665,\n        \"comments_avg\": 0\n      },\n      \"score_error\": null\n    },\n    \"linked_projects_count\": 0,\n    \"is_active\": true,\n    \"created_at\": \"2026-05-05T09:00:37.669+03:00\",\n    \"updated_at\": \"2026-05-05T09:00:37.670+03:00\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        384,
+        848
+      ],
+      "id": "76996bcb-f076-4b56-80a0-2c8e4f6dab6e",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_active": false,
+            "linked_projects_count": 0,
+            "platform_id": 1,
+            "external_channel_id": "=-{{ $json.external_channel_id }}",
+            "name": "={{ $json.name }}",
+            "description": "={{ $json.description }}",
+            "external_url": "={{ $json.external_url }}",
+            "image_url": "={{ $json.image_url }}",
+            "metadata": "={{ $json.metadata }}",
+            "created_at": "={{ $json.created_at }}",
+            "updated_at": "={{ $json.updated_at }}"
+          },
+          "matchingColumns": [
+            "external_channel_id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "platform_id",
+              "displayName": "platform_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_channel_id",
+              "displayName": "external_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "external_url",
+              "displayName": "external_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "image_url",
+              "displayName": "image_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "metadata",
+              "displayName": "metadata",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "linked_projects_count",
+              "displayName": "linked_projects_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "is_active",
+              "displayName": "is_active",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        640,
+        608
+      ],
+      "id": "636e2884-0ea6-4c35-b7b1-892242c5fa72",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -464,
+        592
+      ],
+      "id": "75a61e58-c8bf-4f26-af51-a9da702a1f88",
+      "name": "Wait",
+      "webhookId": "cdb5fc0a-f5a6-4244-b2bc-3f93a6f00a5e"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Call /groups/search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call /groups/search": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert or update rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert or update rows in a table": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Respond1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set: row for DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: row for DB": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call /groups/search1": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert rows in a table": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Call /groups/search1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

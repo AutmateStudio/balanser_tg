@@ -1,0 +1,431 @@
+{
+  "name": "VK_entrypoint",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vk-entrypoint",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -224,
+        48
+      ],
+      "id": "99a28d4b-069e-4c1e-84db-fe796ff958d6",
+      "name": "VK_webhook",
+      "webhookId": "ab493401-3385-4afc-aa4a-9e2b1beed736"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"headers\": {\n      \"host\": \"mokuegopasan.beget.app\",\n      \"user-agent\": \"Python-urllib/3.12\",\n      \"content-length\": \"579\",\n      \"accept-encoding\": \"identity\",\n      \"content-type\": \"application/json\",\n      \"x-forwarded-for\": \"217.26.24.119\",\n      \"x-forwarded-host\": \"mokuegopasan.beget.app\",\n      \"x-forwarded-port\": \"443\",\n      \"x-forwarded-proto\": \"https\",\n      \"x-forwarded-server\": \"ed84361b6596\",\n      \"x-real-ip\": \"217.26.24.119\"\n    },\n    \"params\": {},\n    \"query\": {},\n    \"body\": {\n      \"channel\": \"vk\",\n      \"source_type\": \"user_monitor\",\n      \"event_type\": \"wall_comment\",\n      \"client\": \"vk_user_Server_account_2_comments\",\n      \"owner_id\": -227993547,\n      \"post_id\": 16181,\n      \"comment_id\": 16399,\n      \"sender_id\": 33846611,\n      \"sender_name\": \"Кристина Никитинская\",\n      \"text\": \"Так важно, чтобы люди перестали стыдиться своих финансовых проблем и начали искать решения\",\n      \"date\": \"2026-04-03T07:08:58\",\n      \"reply_to_user\": null,\n      \"reply_to_comment\": null,\n      \"has_media\": false,\n      \"media\": [],\n      \"likes_count\": 0\n    },\n    \"webhookUrl\": \"https://mokuegopasan.beget.app/webhook/comment-reciever\",\n    \"executionMode\": \"production\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -224,
+        224
+      ],
+      "id": "40a481db-d387-40e3-b28e-f2f2b46d8a37",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        224
+      ],
+      "id": "8d66c244-a48f-424d-94b6-2a0c1c46dd01",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a9db822b-4d43-4db3-9b63-0c2e90e226ec",
+              "leftValue": "={{$json.body.event_type}}",
+              "rightValue": "wall_comment",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "0438ced2-b866-4306-9fdf-bd0510120a62",
+              "leftValue": "={{ $json.body.text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        48,
+        48
+      ],
+      "id": "c71e41a2-5399-408f-8d6b-118dbe0813d1",
+      "name": "Проверка на комментарий и непустоту сообщения"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "294d149a-dc8c-4512-8501-5b0175701e30",
+              "name": "source_channel_id",
+              "value": "={{ $json.body.owner_id }}",
+              "type": "number"
+            },
+            {
+              "id": "8fa9b264-08f2-4e0f-8134-54d0c13aeb41",
+              "name": "external_message_id",
+              "value": "={{ $json.body.comment_id }}",
+              "type": "number"
+            },
+            {
+              "id": "50a217bc-c732-4acf-9a4d-16dca31f5a47",
+              "name": "published_at",
+              "value": "={{ $json.body.date }}",
+              "type": "string"
+            },
+            {
+              "id": "3417a930-2952-4afb-a621-d9601f4a8bb6",
+              "name": "ingested_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "325ad23e-8ec2-4ddd-a497-90d71cae2636",
+              "name": "edited_at",
+              "value": "=",
+              "type": "string"
+            },
+            {
+              "id": "841e8dcb-ab56-42f5-94aa-0402149db767",
+              "name": "deleted_at",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "1d13310d-6a98-476a-bfb3-9152e16c70de",
+              "name": "message_text",
+              "value": "={{ $('Edit Fields').item.json.body.text }}",
+              "type": "string"
+            },
+            {
+              "id": "c72d5805-b380-48ec-840f-ecb523f24e8c",
+              "name": "message_url",
+              "value": "=https://vk.com/wall{{ $json.body.owner_id }}_{{ $json.body.post_id }}?reply={{ $json.body.comment_id }}",
+              "type": "string"
+            },
+            {
+              "id": "08e48149-9ddd-4fd2-a6c5-f7f565f2c9f2",
+              "name": "raw_message_payload",
+              "value": "={{ $json.body }}",
+              "type": "object"
+            },
+            {
+              "id": "2bdc5f36-4d2d-45fd-b36d-fe6d5a0368ed",
+              "name": "sender_external_id",
+              "value": "={{ $json.body.sender_id }}",
+              "type": "number"
+            },
+            {
+              "id": "081cd079-e75d-4e0f-97b0-21b74c5acc43",
+              "name": "created_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "b338d2ff-9b1b-4d3a-9239-71caf36f2f43",
+              "name": "updated_at",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        288,
+        32
+      ],
+      "id": "e57541a8-d5c5-4008-a15b-7a82ce577d66",
+      "name": "Формируем запись source_messages"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_messages",
+          "mode": "list",
+          "cachedResultName": "source_messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_channel_id": "={{ $json.source_channel_id }}",
+            "external_message_id": "={{ $json.external_message_id }}",
+            "published_at": "={{ $json.published_at }}",
+            "ingested_at": "={{ $json.ingested_at }}",
+            "edited_at": "={{ $json.edited_at }}",
+            "deleted_at": "={{ $json.deleted_at }}",
+            "message_text": "={{ $json.message_text }}",
+            "message_url": "={{ $json.message_url }}",
+            "raw_message_payload": "={{ $json.raw_message_payload }}",
+            "sender_external_id": "={{ $json.sender_external_id }}",
+            "created_at": "={{ $json.created_at }}",
+            "updated_at": "={{ $json.updated_at }}",
+            "id": 0,
+            "sender_payload": "={\n  {{ $json.raw_message_payload.sender_name }},\n  {{ $json.raw_message_payload.sender_id }}\n} "
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "source_channel_id",
+              "displayName": "source_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_message_id",
+              "displayName": "external_message_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ingested_at",
+              "displayName": "ingested_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "edited_at",
+              "displayName": "edited_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "deleted_at",
+              "displayName": "deleted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_text",
+              "displayName": "message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_url",
+              "displayName": "message_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "raw_message_payload",
+              "displayName": "raw_message_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender_external_id",
+              "displayName": "sender_external_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender_payload",
+              "displayName": "sender_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        496,
+        32
+      ],
+      "id": "ad91ace9-d81c-4bc6-872d-7b88db5f943d",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "MT0DVs8fV57WNl5G",
+          "name": "Доступ_к_ядру"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "VK_webhook": {
+      "main": [
+        [
+          {
+            "node": "Проверка на комментарий и непустоту сообщения",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Проверка на комментарий и непустоту сообщения",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверка на комментарий и непустоту сообщения": {
+      "main": [
+        [
+          {
+            "node": "Формируем запись source_messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Формируем запись source_messages": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

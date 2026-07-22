@@ -6,13 +6,16 @@ name: lidogen-telegram-balancer
 #   docker builder prune -f                # очистка битого кэша BuildKit
 #
 # Локальная PG (profile local):  docker compose --profile local up -d postgres
-# Миграции (любая БД):           docker compose run --rm migrate
+# Миграции (БД из standalone_discovery/.env):  docker compose run --rm migrate
 # Тесты все (БД из .env):        docker compose run --rm test
 #   (на Linux dev-сервере: network_mode: host + .env с vps-100; preflight + pytest)
 # Тесты все (локальная PG):      docker compose --profile local run --rm test-local
 # Миграции перед первым test:    docker compose run --rm migrate
 # Воркер очереди (Z4):           docker compose up -d queue-worker
-# На хосте Linux:                 bash scripts/run_all_tests.sh
+# Продюсеры (F8):                 docker compose --profile producers up -d producer-collect producer-update producer-balancer producer-inactive-remove
+# Мониторинг (G4+G6+G7):          docker compose --profile monitoring up -d queue-monitor
+# Быстрые тесты блока G:          make docker-test-g
+# Полный pytest (shared PG):      make docker-test-safe
 
 # Общий образ приложения. build: только у сервиса test — остальные переиспользуют image.
 x-balancer-image: &balancer-image
@@ -40,12 +43,11 @@ services:
   migrate:
     <<: *balancer-image
     # Tailscale/MagicDNS на хосте (Linux dev-сервер); иначе vps-100 из контейнера недоступен.
+    # DSN очереди — тот же, что у discovery-api/worker (standalone_discovery/.env).
     network_mode: host
     env_file:
-      - path: .env
+      - path: standalone_discovery/.env
         required: false
-    environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
     command: ["bash", "scripts/migrate_queue.sh", "--mode", "${MIGRATE_MODE:-auto}"]
 
   migrate-local:
@@ -59,31 +61,166 @@ services:
     command: ["bash", "scripts/migrate_queue.sh", "--mode", "greenfield"]
 
   # Z4 — процесс воркера очереди (C1: claim_next loop + graceful SIGTERM).
+  # Telethon → Telegram через WireGuard (тот же network namespace, что discovery-api).
+  #
+  # Co-located prod (API + worker на одном хосте, напр. vps-104): используйте D12 Вариант A —
+  # DISCOVERY_INPROCESS_WORKER=true в standalone_discovery/.env и НЕ запускайте этот сервис
+  # параллельно с discovery-api (два claimer'а + конфликт .session SQLite).
   queue-worker:
     <<: *balancer-image
+    network_mode: "container:standalone-discovery-vpn"
     restart: unless-stopped
+    # DSN очереди — standalone_discovery/.env (после корневого .env, чтобы перекрыть).
     env_file:
       - path: .env
         required: false
+      - path: standalone_discovery/.env
+        required: false
     environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WORKER_TASK_ADAPTER: ${WORKER_TASK_ADAPTER:-mock}
       WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-1.0}
       WORKER_LOCK_TTL_SECONDS: ${WORKER_LOCK_TTL_SECONDS:-300}
       WORKER_POSTPONE_DELAY_SECONDS: ${WORKER_POSTPONE_DELAY_SECONDS:-300}
+      WORKER_WATCHDOG_ENABLED: ${WORKER_WATCHDOG_ENABLED:-true}
+      WORKER_WATCHDOG_INTERVAL_SECONDS: ${WORKER_WATCHDOG_INTERVAL_SECONDS:-30}
+      WATCHDOG_AUTO_RETRY_ENABLED: ${WATCHDOG_AUTO_RETRY_ENABLED:-false}
+      WATCHDOG_AUTO_RETRY_MAX_ATTEMPTS: ${WATCHDOG_AUTO_RETRY_MAX_ATTEMPTS:-2}
+      WATCHDOG_AUTO_RETRY_DELAY_SECONDS: ${WATCHDOG_AUTO_RETRY_DELAY_SECONDS:-60}
       API_ID: ${API_ID:-}
       API_HASH: ${API_HASH:-}
       # Пути внутри контейнера (не путать с HOST_SESSIONS_DIR — bind mount на хосте).
+      # PARSER_STORE_PATH / ACCOUNT_STORE_PATH = тот же каталог, что пишет discovery-api
+      # (./standalone_discovery/data → /app/discovery_api/data).
       SESSIONS_DIR: /app/sessions
-      PARSER_STORE_PATH: /app/standalone_discovery/discovery_api/data/parser_jobs.json
+      PARSER_STORE_PATH: /app/discovery_api/data/parser_jobs.json
+      ACCOUNT_STORE_PATH: /app/discovery_api/data/telegram_accounts.db
     volumes:
       # Bind mount: путь на хосте должен начинаться с ./ или / (Compose иначе считает volume name).
       - ${HOST_SESSIONS_DIR:-./standalone_discovery/sessions}:/app/sessions
-      - ./standalone_discovery/discovery_api/data:/app/standalone_discovery/discovery_api/data
+      - ./standalone_discovery/data:/app/discovery_api/data
     stop_signal: SIGTERM
     stop_grace_period: 30s
     command: ["python", "-m", "app_balance.queue_worker"]
+
+  # F8 — планировщики продюсеров. Job'ы на одном образе через subcommands
+  # queue_scheduler: collect (F4), update (F5), balancer (F2), inactive-remove.
+  # Интервал — PRODUCER_INTERVAL_SECONDS. balancer восстанавливает clump'ы из
+  # стора, поэтому ему нужны те же session/data-маунты, что и queue-worker.
+  # inactive-remove читает только parser_jobs.json (без Telethon restore).
+  producer-collect:
+    <<: *balancer-image
+    profiles: [producers]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      - path: standalone_discovery/.env
+        required: false
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PRODUCER_INTERVAL_SECONDS: ${PRODUCER_COLLECT_INTERVAL_SECONDS:-300}
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_scheduler", "collect"]
+
+  producer-update:
+    <<: *balancer-image
+    profiles: [producers]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      - path: standalone_discovery/.env
+        required: false
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PRODUCER_INTERVAL_SECONDS: ${PRODUCER_UPDATE_INTERVAL_SECONDS:-3600}
+      UPDATE_CHANNEL_STALE_AFTER_SECONDS: ${UPDATE_CHANNEL_STALE_AFTER_SECONDS:-}
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_scheduler", "update"]
+
+  producer-balancer:
+    <<: *balancer-image
+    profiles: [producers]
+    restart: unless-stopped
+    # Co-located prod с in-process worker: не запускать параллельно с discovery-api —
+    # restore_all_clumps_from_store() поднимает listener'ы и конфликтует с .session (см. queue-runbook).
+    env_file:
+      - path: .env
+        required: false
+      - path: standalone_discovery/.env
+        required: false
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PRODUCER_INTERVAL_SECONDS: ${PRODUCER_BALANCER_INTERVAL_SECONDS:-300}
+      WORKER_TASK_ADAPTER: ${WORKER_TASK_ADAPTER:-mock}
+      API_ID: ${API_ID:-}
+      API_HASH: ${API_HASH:-}
+      SESSIONS_DIR: /app/sessions
+      PARSER_STORE_PATH: /app/discovery_api/data/parser_jobs.json
+    volumes:
+      - ${HOST_SESSIONS_DIR:-./standalone_discovery/sessions}:/app/sessions
+      - ./standalone_discovery/data:/app/discovery_api/data
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_scheduler", "balancer"]
+
+  producer-inactive-remove:
+    <<: *balancer-image
+    profiles: [producers]
+    restart: unless-stopped
+    # Без restore clump / без открытия .session — совместим с co-located discovery-api.
+    env_file:
+      - path: .env
+        required: false
+      - path: standalone_discovery/.env
+        required: false
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PRODUCER_INTERVAL_SECONDS: ${PRODUCER_INACTIVE_REMOVE_INTERVAL_SECONDS:-86400}
+      INACTIVE_CHANNEL_REMOVE_AFTER_SECONDS: ${INACTIVE_CHANNEL_REMOVE_AFTER_SECONDS:-}
+      INACTIVE_CHANNEL_REMOVE_CLEAR_ORPHAN_ASSIGNED: ${INACTIVE_CHANNEL_REMOVE_CLEAR_ORPHAN_ASSIGNED:-true}
+      PARSER_STORE_PATH: /app/discovery_api/data/parser_jobs.json
+    volumes:
+      - ./standalone_discovery/data:/app/discovery_api/data
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_scheduler", "inactive-remove"]
+
+  # G4 + G6 + G7 — мониторинг очереди, алерты §26.4, детектор ошибок, пороги загрузки.
+  queue-monitor:
+    <<: *balancer-image
+    profiles: [monitoring]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      - path: standalone_discovery/.env
+        required: false
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MONITOR_INTERVAL_SECONDS: ${MONITOR_INTERVAL_SECONDS:-120}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_COOLDOWN_SECONDS: ${ALERT_COOLDOWN_SECONDS:-1800}
+      ALERT_ENABLED: ${ALERT_ENABLED:-true}
+      THRESHOLD_ALERT_ENABLED: ${THRESHOLD_ALERT_ENABLED:-true}
+      THRESHOLD_CHANNEL_PERCENT: ${THRESHOLD_CHANNEL_PERCENT:-75}
+      THRESHOLD_RESOURCE_PERCENT: ${THRESHOLD_RESOURCE_PERCENT:-0}
+      MAX_CHANNELS_PER_SESSION: ${MAX_CHANNELS_PER_SESSION:-500}
+      DEV_ALERT_TELEGRAM_CHAT_ID: ${DEV_ALERT_TELEGRAM_CHAT_ID:-}
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      ERROR_DETECTOR_ENABLED: ${ERROR_DETECTOR_ENABLED:-true}
+      ERROR_DETECTOR_WINDOW_SECONDS: ${ERROR_DETECTOR_WINDOW_SECONDS:-3600}
+      ERROR_DETECTOR_MIN_COUNT: ${ERROR_DETECTOR_MIN_COUNT:-5}
+      ERROR_DETECTOR_RPH_FACTOR: ${ERROR_DETECTOR_RPH_FACTOR:-0.7}
+      ERROR_DETECTOR_MIN_RPH: ${ERROR_DETECTOR_MIN_RPH:-2}
+      ERROR_DETECTOR_REPEAT_WINDOW_SECONDS: ${ERROR_DETECTOR_REPEAT_WINDOW_SECONDS:-86400}
+      ERROR_DETECTOR_COOLDOWN_SECONDS: ${ERROR_DETECTOR_COOLDOWN_SECONDS:-3600}
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_monitor", "all"]
 
   queue-worker-local:
     <<: *balancer-image
@@ -106,11 +243,14 @@ services:
     build: .
     # Доступ к vps-100 через Tailscale хоста (vps-101 и др. Linux dev-серверы).
     network_mode: host
+    # DSN очереди — тот же файл, что у migrate/discovery-api (standalone_discovery/.env).
     env_file:
       - path: .env
         required: false
+      - path: standalone_discovery/.env
+        required: false
     environment:
-      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:-}
+      # Не перекрываем пустым ${QUEUE_DATABASE_URL:-}: берём из env_file выше.
       PYTEST_TEST_PRIORITY: ${PYTEST_TEST_PRIORITY:-2000000000}
       DISCOVERY_BASE_URL: ${DISCOVERY_BASE_URL:-}
       DISCOVERY_API_KEY: ${DISCOVERY_API_KEY:-}
@@ -132,6 +272,7 @@ services:
       - ./standalone_discovery/sessions:/app/standalone_discovery/sessions
       - ./standalone_discovery/discovery_api/data:/app/standalone_discovery/discovery_api/data
       - ./scripts:/app/scripts
+      - ./DB:/app/DB:ro
     command: ["bash", "scripts/run_docker_tests.sh"]
 
   test-local:

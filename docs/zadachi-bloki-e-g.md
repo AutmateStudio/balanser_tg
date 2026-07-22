@@ -1,6 +1,9 @@
 # Задачи блоков E–G — очередь PostgreSQL (Lidogen Telegram Balancer)
 
 **Дата:** 2026-06-24  
+**Статус S4 (блок E):** ✅ **закрыт** — vps-101, `594 passed, 3 skipped` (2026-06-24, `make docker-test-safe`)  
+**Статус S5 (блок F):** ✅ **закрыт** — vps-101, `674 passed, 3 skipped` (2026-06-24, `make docker-test-safe`)  
+**Статус S5 (блок G):** ✅ **закрыт** — local PG: `756 passed` (2026-06-25, `docker-test-local`); shared PG vps-101: **`756 passed, 0 failed`** (2026-06-25, `make docker-test-safe` после migrate A11+A12)  
 **Источники:** `docs(plan)/итоговый-план-разработки.md`, `docs(plan)/_gen_tasks_xlsx.py`, `docs(plan)/tz-extract.txt` (§10, §20, §21–24, §26–29), `docs(plan)/diff-tz-vs-standalone-discovery.md`
 
 Документ описывает **все запланированные задачи после MVP (S3)** — блоки **E** (ошибки и идемпотентность), **F** (продюсеры), **G** (мониторинг и оповещения), включая **G6** и **G7** из утверждённого ТЗ.
@@ -13,9 +16,9 @@
 
 | Спринт | Блок | Задачи | MVP | Критерий завершения |
 |--------|------|--------|-----|---------------------|
-| **S4** | E | E1–E8 | Нет | Retry, история попыток, идемпотентность multi-op, каталог op |
-| **S5** | F | F1–F8 | Нет | Три продюсера без дублей; adapter-ветки collect/update |
-| **S5** | G | G1–G7 | Нет | Метрики, алерты, детектор ошибок, чат-оповещения |
+| **S4** | E | E1–E8 | Нет | ✅ Retry, история попыток, идемпотентность multi-op, каталог op |
+| **S5** | F | F1–F8 | Нет | ✅ Три продюсера без дублей; adapter-ветки collect/update |
+| **S5** | G | G1–G7 | Нет | ✅ Метрики, алерты, детектор ошибок, чат-оповещения |
 
 **Оценка (идеальные часы, из `_gen_tasks_xlsx.py`):**
 
@@ -70,28 +73,52 @@
 
 ---
 
-## Блок E — Ошибки и идемпотентность (S4)
+## Блок E — Ошибки и идемпотентность (S4) ✅ ЗАКРЫТ
 
 **Зачем блок:** связать классификацию ошибок Telethon с действиями воркера (retry / postpone / failed), обеспечить историю попыток и идемпотентность многошаговых задач (§10, §20, §27, §29 ТЗ).
 
-| ID | Название | Часы | SP | Deps | MVP |
-|----|----------|------|----|------|-----|
-| E1 | Typed errors в адаптере | 4 | 2 | D3 | Нет |
-| E2 | Маппинг `classify_telethon_error` | 6 | 2 | E1, D6 | Нет |
-| E3 | Retry с backoff из `task_types` | 4 | 2 | E2, B5 | Нет |
-| E4 | `task_attempts` на каждую попытку | 3 | 2 | D3, B9 | Нет |
-| E5 | Стабильные коды `last_error` | 3 | 2 | E1, B5 | Нет |
-| E6 | Идемпотентность: `last_completed_step` | 8 | 2 | E3 | Нет |
-| E7 | Каталог op-кодов (`ops_catalog.py`) | 6 | 2 | E6, A9 | Нет |
-| E8 | Тест: retry с упавшего op | 4 | 2 | E6 | Нет |
+**Приёмка (2026-06-24):** полный pytest на shared PG (vps-101): **594 passed, 3 skipped, 0 failed**. Прогон: `make docker-test-safe` (см. [testing-shared-pg.md](testing-shared-pg.md)).
+
+| ID | Название | Часы | SP | Deps | MVP | Статус |
+|----|----------|------|----|------|-----|--------|
+| E1 | Typed errors в адаптере | 4 | 2 | D3 | Нет | ✅ |
+| E2 | Маппинг `classify_telethon_error` | 6 | 2 | E1, D6 | Нет | ✅ |
+| E3 | Retry с backoff из `task_types` | 4 | 2 | E2, B5 | Нет | ✅ |
+| E4 | `task_attempts` на каждую попытку | 3 | 2 | D3, B9 | Нет | ✅ |
+| E5 | Стабильные коды `last_error` | 3 | 2 | E1, B5 | Нет | ✅ |
+| E6 | Идемпотентность: `last_completed_step` | 8 | 2 | E3 | Нет | ✅ |
+| E7 | Каталог op-кодов (`ops_catalog.py`) | 6 | 2 | E6, A9 | Нет | ✅ |
+| E8 | Тест: retry с упавшего op | 4 | 2 | E6 | Нет | ✅ |
+
+### Покрытие тестами (блок E)
+
+| ID | Код / артефакты | Тесты |
+|----|-----------------|-------|
+| E1 | `app_balance/queue/errors.py`, ветки `dispatch.py` | `tests/test_dispatch.py` (typed errors, classify) |
+| E2 | `map_telethon_error`, `set_cooldown` / `set_banned` | `tests/test_e2_account_health_integration.py` |
+| E3 | `_calc_retry_delay`, `reschedule_or_fail` | `tests/test_e3_retry_backoff_integration.py`, `tests/tz30/test_scenarios_e2e.py` (§30.18) |
+| E4 | wiring `TaskAttemptsRepo` в dispatch | `tests/test_task_attempts.py`, `tests/test_dispatch_integration.py` (e4) |
+| E5 | `error_codes.py`, runbook | `tests/test_error_codes.py`, `tests/test_task_queue_get.py`, `docs/queue-runbook.md` |
+| E6 | `last_completed_step`, per-op skip | `tests/test_per_op_pipeline.py`, `tests/test_e6_dispatch_pipeline_integration.py` |
+| E7 | seed ↔ `ops_catalog.py` | `scripts/verify_ops_catalog_seed.py` (preflight в `run_docker_tests.sh`) |
+| E8 | идемпотентность multi-op retry | `tests/test_e8_idempotent_retry.py` |
+
+### §30 ТЗ — закрытые пункты блока E
+
+| Пункт §30 | Суть | Проверка |
+|-----------|------|----------|
+| п.11 | Неуспешная попытка учитывается, retry | `test_tz30_11`, E4 integration |
+| п.18 | Backoff `run_after` (10s → 20s) | `test_tz30_18`, `test_e3_*` |
+| п.29 | Retry multi-op без дублей usage | E6, E8 |
 
 ---
 
-### E1. Typed errors в адаптере: `RetryableError`, `PermanentError`, `ResourceError`
+### E1. Typed errors в адаптере: `RetryableError`, `PermanentError`, `ResourceError` ✅
 
 | | |
 |---|---|
 | **Спринт** | S4 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | D3 |
 | **Раздел ТЗ** | §27 |
 | **Суть** | В адаптере различать ошибки: повторить позже, завершить навсегда, нет ресурса — без разбора текста ошибки в dispatch. |
@@ -101,11 +128,12 @@
 
 ---
 
-### E2. Маппинг `classify_telethon_error` → действие worker
+### E2. Маппинг `classify_telethon_error` → действие worker ✅
 
 | | |
 |---|---|
 | **Спринт** | S4 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | E1, D6 |
 | **Раздел ТЗ** | §27; diff §14 |
 | **Суть** | Переиспользовать логику `session_health.py` / `classify_telethon_error`: flood → retry + cooldown в PG, ban → failed + banned, и т.д. |
@@ -115,11 +143,12 @@
 
 ---
 
-### E3. Retry с backoff из `task_types`
+### E3. Retry с backoff из `task_types` ✅
 
 | | |
 |---|---|
 | **Спринт** | S4 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | E2, B5 |
 | **Раздел ТЗ** | §20 |
 | **Суть** | Повторные попытки с нарастающей задержкой по полям типа задачи в БД (`retry_delay_seconds`, `retry_backoff_multiplier`, `max_attempts`). |
@@ -129,11 +158,12 @@
 
 ---
 
-### E4. `task_attempts` на каждую реальную попытку
+### E4. `task_attempts` на каждую реальную попытку ✅
 
 | | |
 |---|---|
 | **Спринт** | S4 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | D3, **B9** (repo insert/finish — уже реализован) |
 | **Раздел ТЗ** | §10 |
 | **Суть** | Записывать в `task_attempts` каждую реальную попытку execute, синхронно с `attempt_count` в `task_queue`. |
@@ -143,11 +173,12 @@
 
 ---
 
-### E5. Стабильные коды `last_error`
+### E5. Стабильные коды `last_error` ✅
 
 | | |
 |---|---|
 | **Спринт** | S4 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | E1, B5 |
 | **Раздел ТЗ** | §27; мониторинг |
 | **Суть** | Стабильные машиночитаемые коды последней ошибки (`flood_wait`, `channel_private`, …) для мониторинга и runbook. |
@@ -157,11 +188,12 @@
 
 ---
 
-### E6. Идемпотентность: `payload.last_completed_step`
+### E6. Идемпотентность: `payload.last_completed_step` ✅
 
 | | |
 |---|---|
 | **Спринт** | S4 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | E3 |
 | **Раздел ТЗ** | §29 |
 | **Суть** | При повторе многошаговой задачи (`collect_extra_data` и др.) продолжать с последнего успешно выполненного op. **per-op:** шаг = op-код из `ops_catalog.py`; retry списывает ресурс только за **новые** op'ы. |
@@ -171,11 +203,12 @@
 
 ---
 
-### E7. Каталог op-кодов из `queue_prot_blance/ops_catalog.py`
+### E7. Каталог op-кодов из `queue_prot_blance/ops_catalog.py` ✅
 
 | | |
 |---|---|
 | **Спринт** | S4 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | E6, A9 |
 | **Раздел ТЗ** | §0.5 per-op |
 | **Суть** | Синхронизация имён op между `ops_catalog.py`, `resource_op_types.code`, `task_type_ops`. Расширение seed для `collect_extra_data` / `update_channel`; сверка RPH-лимитов с runbook. |
@@ -186,41 +219,66 @@
 
 ---
 
-### E8. Тест: retry продолжает с упавшего op
+### E8. Тест: retry продолжает с упавшего op ✅
 
 | | |
 |---|---|
 | **Спринт** | S4 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | E6 |
 | **Суть** | Приёмочный тест идемпотентности: после сбоя повтор не дублирует уже выполненные шаги пайплайна. |
 | **Приёмка** | pytest green; нет лишних INSERT в `account_resource_usage`. |
 
 ---
 
-## Блок F — Продюсеры (S5)
+## Блок F — Продюсеры (S5) ✅ ЗАКРЫТ
 
 **Зачем блок:** автоматическое создание задач по правилам ТЗ §8.3, §12, §21–24 — балансировка каналов, сбор данных, обновление метаданных.
 
-| ID | Название | Часы | SP | Deps | MVP |
-|----|----------|------|----|------|-----|
-| F1 | `producers/base.py` | 4 | 1 | B3, B2 | Нет |
-| F2 | `channel_balancer.py` ±5% | 8 | 1 | F1, A8 | Нет |
-| F3 | `REBALANCE_IDLE_ENABLED=false` | 1 | 1 | F2, Z3 | Нет |
-| F4 | `collect_extra_data.py` | 6 | 1 | F1, A8 | Нет |
-| F5 | `update_channel.py` | 5 | 1 | F1, A8 | Нет |
-| F6 | Adapter: `collect_extra_data` | 8 | 1 | F4, D3 | Нет |
-| F7 | Adapter: `update_channel` | 5 | 1 | F5, D3 | Нет |
-| F8 | Cron / docker schedule | 3 | 1 | F2, F4, F5 | Нет |
+**Приёмка (2026-06-24):** полный pytest на shared PG (vps-101): **674 passed, 3 skipped, 0 failed**. Прогон: `make docker-test-safe` (см. [testing-shared-pg.md](testing-shared-pg.md)).
 
-> **F9** (включить `is_enabled` для update/collect в seed) **убрана** из утверждённого ТЗ — выполняется в рамках A9 / F6 / F7.
+| ID | Название | Часы | SP | Deps | MVP | Статус |
+|----|----------|------|----|------|-----|--------|
+| F1 | `producers/base.py` | 4 | 1 | B3, B2 | Нет | ✅ |
+| F2 | `channel_balancer.py` ±5% | 8 | 1 | F1, A8 | Нет | ✅ |
+| F3 | idle-rebalance off при PG balancer | 1 | 1 | F2, Z3 | Нет | ✅ |
+| F4 | `collect_extra_data.py` | 6 | 1 | F1, A8 | Нет | ✅ |
+| F5 | `update_channel.py` | 5 | 1 | F1, A8 | Нет | ✅ |
+| F6 | Adapter: `collect_extra_data` | 8 | 1 | F4, D3 | Нет | ✅ |
+| F7 | Adapter: `update_channel` | 5 | 1 | F5, D3 | Нет | ✅ |
+| F8 | Cron / docker schedule | 3 | 1 | F2, F4, F5 | Нет | ✅ |
+
+> **Rollout seed (A9/A18):** `update_channel` и `collect_extra_data` — `is_enabled=true` в seed;
+> на уже развёрнутых инстансах collect включается миграцией A18.
+
+### Покрытие тестами (блок F)
+
+| ID | Код / артефакты | Тесты |
+|----|-----------------|-------|
+| F1 | `app_balance/queue/producers/base.py` | `tests/test_producers_base.py` |
+| F2 | `producers/channel_balancer.py` | `tests/test_channel_balancer.py` |
+| F3 | `eff_rebalance_enabled()` при `USE_PG_QUEUE=true` | `standalone_discovery/tests/test_clump_balancer.py`; runbook §F2/F3 |
+| F4 | `producers/collect_extra_data.py` | `tests/test_f4_collect_extra_data_producer.py`, `tests/test_f4_collect_producer_integration.py` |
+| F5 | `producers/update_channel.py` | `tests/test_producers_update_channel.py` |
+| F6 | adapter `_execute_collect_extra_data` | `tests/test_adapter_collect_extra_data.py` |
+| F7 | adapter `_execute_update_channel` | `tests/test_adapter_update_channel.py`, `tests/test_f7_update_channel_integration.py` |
+| F8 | `app_balance/queue_scheduler.py`, compose `producers` | `tests/test_f8_scheduler.py` |
+
+### §30 ТЗ — закрытые пункты блока F
+
+| Пункт §30 | Суть | Проверка |
+|-----------|------|----------|
+| п.15 | Фоновые инструменты не создают дубли | F1 dedup, integration F4/F5/F7 |
+| п.16 | Количество задач из `target_queue_size` | F1 `enqueue_if_room`, F2/F4/F5 producers |
 
 ---
 
-### F1. `producers/base.py`: dedup + `target_queue_size`
+### F1. `producers/base.py`: dedup + `target_queue_size` ✅
 
 | | |
 |---|---|
 | **Спринт** | S5 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | B3, B2 |
 | **Раздел ТЗ** | §8.3, §12 |
 | **Суть** | Общая логика продюсеров: не создавать дубликаты активных задач и не переполнять очередь сверх `target_queue_size` типа задачи. |
@@ -230,11 +288,12 @@
 
 ---
 
-### F2. `channel_balancer.py`: ±5%, INSERT `move_channel`
+### F2. `channel_balancer.py`: ±5%, INSERT `move_channel` ✅
 
 | | |
 |---|---|
 | **Спринт** | S5 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | F1, A8 |
 | **Раздел ТЗ** | §22 |
 | **Суть** | Периодически создавать задачи `move_channel`, если skew нагрузки между аккаунтами > 5%. |
@@ -244,22 +303,25 @@
 
 ---
 
-### F3. Env: `REBALANCE_IDLE_ENABLED=false` при PG balancer
+### F3. Idle-rebalance off при PG balancer ✅
 
 | | |
 |---|---|
 | **Спринт** | S5 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | F2, Z3 |
-| **Суть** | Отключить старый механизм переноса «в простое» (`rebalance_idle` в SessionClump), когда работает PG balancer (F2). |
-| **Приёмка** | Документировано в runbook; при F2 on — idle rebalance off. |
+| **Суть** | Отключить старый механизм переноса «в простое» (`rebalance_idle` в SessionClump), когда работает PG balancer (F2). Реализовано через `eff_rebalance_enabled()` → `false` при `USE_PG_QUEUE=true` (не отдельный env `REBALANCE_IDLE_ENABLED`). |
+| **Приёмка** | Документировано в runbook §F2/F3; при PG-очереди idle-rebalance принудительно off. |
+| **Тесты** | `standalone_discovery/tests/test_clump_balancer.py` (F3). |
 
 ---
 
-### F4. `collect_extra_data.py`
+### F4. `collect_extra_data.py` ✅
 
 | | |
 |---|---|
 | **Спринт** | S5 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | F1, A8 |
 | **Раздел ТЗ** | §23 |
 | **Суть** | Продюсер: ставить задачи сбора доп. данных по каналам, где `extra_data_collected = false`, до `target_queue_size`. |
@@ -267,11 +329,12 @@
 
 ---
 
-### F5. `update_channel.py`
+### F5. `update_channel.py` ✅
 
 | | |
 |---|---|
 | **Спринт** | S5 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | F1, A8 |
 | **Раздел ТЗ** | §24 |
 | **Суть** | Продюсер: ставить задачи обновления метаданных у каналов с устаревшим `last_updated_at`. |
@@ -279,52 +342,59 @@
 
 ---
 
-### F6. Adapter: `collect_extra_data` (scorer / messages)
+### F6. Adapter: `collect_extra_data` (scorer / messages) ✅
 
 | | |
 |---|---|
 | **Спринт** | S5 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | F4, D3, **E7** |
 | **Суть** | Ветка adapter: выполнение multi-op пайплайна сбора данных (scorer, messages, …). |
 | **Приёмка** | `extra_data_collected = true` в PG; E6 идемпотентность при retry. |
 
 ---
 
-### F7. Adapter: `update_channel`
+### F7. Adapter: `update_channel` ✅
 
 | | |
 |---|---|
 | **Спринт** | S5 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | F5, D3, **E7** |
 | **Суть** | Ветка adapter: обновление метаданных канала через Telethon. |
 | **Приёмка** | `last_updated_at` обновлён в `source_channels`. |
 
 ---
 
-### F8. Cron / docker schedule для продюсеров
+### F8. Cron / docker schedule для продюсеров ✅
 
 | | |
 |---|---|
 | **Спринт** | S5 |
+| **Статус** | ✅ готова (2026-06-24) |
 | **Зависимости** | F2, F4, F5 |
 | **Суть** | Задачи продюсеров не создаются сами — нужен cron или отдельные job в `docker-compose`. |
 | **Приёмка** | 3 job в compose: balancer, collect, update (или один scheduler с subcommands). |
+| **Артефакты** | `app_balance/queue_scheduler.py` (один scheduler с subcommands collect/update/balancer); сервисы `producer-collect`/`producer-update`/`producer-balancer` под профилем `producers` в `docker-compose.yml`; runbook §F8. |
+| **Тесты** | `tests/test_f8_scheduler.py` (реестр, интервал, цикл/once, graceful, restore clumps для balancer). |
 
 ---
 
-## Блок G — Мониторинг и оповещения (S5)
+## Блок G — Мониторинг и оповещения (S5) ✅ ЗАКРЫТ
 
 **Зачем блок:** observability очереди и ресурсов (§26 ТЗ), алерты, автоматическая реакция на паттерны ошибок и пороги загрузки.
 
-| ID | Название | Часы | SP | Deps | MVP |
-|----|----------|------|----|------|-----|
-| G1 | SQL views: очередь | 3 | 1 | A5 | Нет |
-| G2 | SQL views: resource %, cooldown | 3 | 1 | A6, A4, A3 | Нет |
-| G3 | `GET /queue/metrics` | 4 | 1 | G1, G2 | Нет |
-| G4 | Алерты | 6 | 1 | G3 | Нет |
-| G5 | Watchdog → auto-retry | 4 | 1 | C6, E3 | Нет |
-| **G6★** | Детектор повторяющихся ошибок | — | — | G3, G4 | Нет |
-| **G7★** | Оповещение в чат при порогах | — | — | G3, G4 | Нет |
+**Приёмка (2026-06-25):** local PG: **756 passed** (`docker compose --profile local run --rm test-local`, `PYTEST_DB_ISOLATED=1`); shared PG vps-101: **756 passed, 0 failed** (`make docker-test-safe` после `docker compose run --rm migrate`, preflight `monitoring_views=11/11`). Runbook §G, compose profile `monitoring`, Makefile `docker-test-g` / `docker-monitor`. План: [`plan-ispolneniya-blok-g.md`](plan-ispolneniya-blok-g.md).
+
+| ID | Название | Часы | SP | Deps | MVP | Статус |
+|----|----------|------|----|------|-----|--------|
+| G1 | SQL views: очередь | 3 | 1 | A5 | Нет | ✅ |
+| G2 | SQL views: resource %, cooldown | 3 | 1 | A6, A4, A3 | Нет | ✅ |
+| G3 | `GET /queue/metrics` | 4 | 1 | G1, G2 | Нет | ✅ |
+| G4 | Алерты | 6 | 1 | G3 | Нет | ✅ |
+| G5 | Watchdog → auto-retry | 4 | 1 | C6, E3 | Нет | ✅ |
+| **G6★** | Детектор повторяющихся ошибок | — | — | G3, G4 | Нет | ✅ |
+| **G7★** | Оповещение в чат при порогах | — | — | G3, G4 | Нет | ✅ |
 
 ---
 
@@ -477,14 +547,48 @@
 
 ---
 
-## Приложение B — Чеклист перед стартом S4
+## Приложение B — Чеклист закрытия S4 ✅
 
 ```
-☐ S3 закрыт: D8, D9, D10, D11, D12 (E2E + чеклист)
-☐ B9 repo готов (insert/finish) — для E4
-☐ D5 INSERT usage до RPC — для E4/E6
-☐ Runbook: коды ошибок (заготовка под E5)
-☐ Ветка: feat/e1-typed-errors (не main)
+☑ S3 закрыт: D8, D9, D10, D11, D12 (E2E + чеклист)
+☑ B9 repo готов (insert/finish) — для E4
+☑ D5 INSERT usage до RPC — для E4/E6
+☑ Runbook: коды ошибок (E5) — docs/queue-runbook.md
+☑ E1–E8: unit + integration на shared PG (vps-101)
+☑ Полный pytest: 594 passed, 3 skipped (2026-06-24, make docker-test-safe)
+☑ Probe-guard + pg_cleanup для shared PG — docs/testing-shared-pg.md
+```
+
+**Следующий спринт:** S5 — блок **G** (мониторинг и оповещения).
+
+---
+
+## Приложение C — Чеклист закрытия S5 (блок F) ✅
+
+```
+☑ F1–F8: unit + integration на shared PG (vps-101)
+☑ Полный pytest: 674 passed, 3 skipped (2026-06-24, make docker-test-safe)
+☑ Продюсеры: base, channel_balancer, collect_extra_data, update_channel
+☑ Scheduler + compose profile producers (F8)
+☑ Adapter-ветки collect/update (F6, F7); update_channel is_enabled=true в A9 seed
+☑ F3: idle-rebalance off при USE_PG_QUEUE=true — runbook + test_clump_balancer
+☑ collect_extra_data is_enabled в prod — A9 seed + миграция A18
+```
+
+---
+
+## Приложение D — Чеклист закрытия S5 (блок G) ✅
+
+```
+☑ G0–G7: unit + integration (local PG + preflight 11/11 VIEW)
+☑ Полный pytest: 756 passed (2026-06-25, docker-test-local, PYTEST_DB_ISOLATED=1)
+☑ Быстрый прогон G: make docker-test-g (19 passed subset + tz30.19/20)
+☑ Runbook §G — docs/queue-runbook.md (overview, env, incident response)
+☑ docker-compose profile monitoring + WATCHDOG_AUTO_RETRY_* на queue-worker
+☑ .env.example: G4, G5, G6, G7
+☑ Makefile: docker-monitor, docker-test-g
+☑ migrate A11 (G6 audit + v_recurring_errors_window) + A12 (VIEW на integrate-PG) в migrate_queue.sh
+☑ Shared PG vps-101: make docker-test-safe — **756 passed, 0 failed** (2026-06-25)
 ```
 
 ---
@@ -493,8 +597,12 @@
 
 | Документ | Назначение |
 |----------|------------|
+| [`docs/plan-ispolneniya-blok-g.md`](plan-ispolneniya-blok-g.md) | План исполнения блока G: порядок, параллельность, DoD |
 | `docs(plan)/итоговый-план-разработки.md` | Канон карточек задач A–G |
 | `docs(plan)/план-исполнения-s2-s3.md` | S3 MVP, зависимости D→E |
+| `docs/testing-shared-pg.md` | Прогон integration/E на shared PG (vps-101) |
+| `docs/queue-runbook.md` | Коды ошибок E5 |
+| `docs/ops-catalog.md` | Каталог op E7 |
 | `docs(plan)/tz-extract.txt` | Полный текст ТЗ §1–§30 |
 | `docs(plan)/queue-architecture.md` | per-op, последовательность ops |
 | `scripts/e2e_d12/checklist.md` | Приёмка MVP (до S4) |

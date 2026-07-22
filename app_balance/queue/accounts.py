@@ -31,6 +31,34 @@ class DualReserveResult:
     target: Account
 
 
+@dataclass(frozen=True, slots=True)
+class BestPickResult:
+    """Результат pick_best_and_reserve: аккаунт + ops-scoped availability %."""
+
+    account: Account
+    availability_percent: float
+
+
+@dataclass(frozen=True, slots=True)
+class AccountQueueState:
+    """Снимок PG accounts для дашборда (без pick/reserve)."""
+
+    id: int
+    session_name: str
+    status: str
+    is_enabled: bool
+    cooldown_until: datetime | None
+    current_task_id: int | None
+    last_error: str | None
+    last_error_at: datetime | None
+
+
+_LIST_QUEUE_STATES_SQL = """
+SELECT id, session_name, status, is_enabled, cooldown_until,
+       current_task_id, last_error, last_error_at
+FROM accounts
+"""
+
 _PICK_SQL = """
 SELECT id, session_name, status, is_enabled, current_task_id, cooldown_until, last_used_at
 FROM accounts
@@ -58,6 +86,42 @@ LIMIT 1
 FOR UPDATE SKIP LOCKED
 """
 
+# Внеочередной pick: максимальный available % среди op task_type (primary).
+# $1 = task_type_code, $2 = exclude account ids, $3 = min_available_percent.
+_PICK_BEST_FOR_UPDATE_SQL = """
+SELECT
+    a.id,
+    a.session_name,
+    a.status,
+    a.is_enabled,
+    a.current_task_id,
+    a.cooldown_until,
+    a.last_used_at,
+    COALESCE(s.score, 100.0)::float8 AS availability_percent
+FROM accounts a
+LEFT JOIN (
+    SELECT
+        u.account_id,
+        MIN(u.available_resource_percent) FILTER (WHERE u.effective_rph > 0) AS score
+    FROM v_account_op_usage_last_hour u
+    INNER JOIN task_type_ops tto ON tto.op_type_id = u.op_type_id
+    INNER JOIN task_types tt
+        ON tt.id = tto.task_type_id
+       AND tt.code = $1
+    WHERE tto.account_role = 'primary'
+    GROUP BY u.account_id
+) s ON s.account_id = a.id
+WHERE a.status IN ('active', 'cooldown')
+  AND a.is_enabled = true
+  AND a.current_task_id IS NULL
+  AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())
+  AND NOT (a.id = ANY($2::bigint[]))
+  AND COALESCE(s.score, 100.0) >= $3::float8
+ORDER BY COALESCE(s.score, 100.0) DESC, a.last_used_at ASC NULLS FIRST, a.id ASC
+FOR UPDATE OF a SKIP LOCKED
+LIMIT 1
+"""
+
 _RESERVE_SQL = """
 UPDATE accounts
 SET current_task_id = $2, last_used_at = now()
@@ -72,6 +136,17 @@ WHERE id = $1
 RETURNING id
 """
 
+_RELEASE_FOR_TASK_SQL = """
+UPDATE accounts
+SET current_task_id = NULL
+WHERE id = $1 AND current_task_id = $2
+RETURNING id
+"""
+
+
+class _ReservePairAborted(Exception):
+    """Частичный dual-reserve откатывается через rollback транзакции."""
+
 _SET_COOLDOWN_SQL = """
 UPDATE accounts
 SET cooldown_until = GREATEST(COALESCE(cooldown_until, $2::timestamptz), $2::timestamptz),
@@ -84,14 +159,53 @@ WHERE session_name = $1
 RETURNING id
 """
 
+# Истёкший / «залипший» cooldown: таймера уже нет, но status остался cooldown.
+# Без этого UI и metrics.accounts.in_cooldown показывают cooldown вечно,
+# пока аккаунт не попадёт в pick_and_reserve (который ставит active).
+_CLEAR_EXPIRED_COOLDOWNS_SQL = """
+UPDATE accounts
+SET status = 'active',
+    cooldown_until = NULL,
+    updated_at = now()
+WHERE status = 'cooldown'
+  AND (cooldown_until IS NULL OR cooldown_until <= now())
+RETURNING session_name
+"""
+
 _SET_BANNED_SQL = """
 UPDATE accounts
 SET status = 'banned',
     cooldown_until = NULL,
+    current_task_id = NULL,
     last_error = $2,
     last_error_at = now(),
     updated_at = now()
 WHERE session_name = $1
+RETURNING id
+"""
+
+_SET_ACCOUNT_ERROR_SQL = """
+UPDATE accounts
+SET status = 'error',
+    is_enabled = false,
+    current_task_id = NULL,
+    last_error = $2,
+    last_error_at = now(),
+    updated_at = now()
+WHERE session_name = $1
+  AND status <> 'banned'
+RETURNING id
+"""
+
+_REACTIVATE_FROM_ERROR_SQL = """
+UPDATE accounts
+SET status = 'active',
+    is_enabled = true,
+    last_error = NULL,
+    last_error_at = NULL,
+    updated_at = now()
+WHERE session_name = $1
+  AND status = 'error'
 RETURNING id
 """
 
@@ -108,6 +222,19 @@ FOR UPDATE
 """
 
 
+def _row_to_queue_state(row) -> AccountQueueState:
+    return AccountQueueState(
+        id=row["id"],
+        session_name=row["session_name"],
+        status=str(row["status"]),
+        is_enabled=bool(row["is_enabled"]),
+        cooldown_until=row["cooldown_until"],
+        current_task_id=row["current_task_id"],
+        last_error=row["last_error"],
+        last_error_at=row["last_error_at"],
+    )
+
+
 def _row_to_account(row) -> Account:
     return Account(
         id=row["id"],
@@ -118,6 +245,12 @@ def _row_to_account(row) -> Account:
         cooldown_until=row["cooldown_until"],
         last_used_at=row["last_used_at"],
     )
+
+
+def _normalize_session_name_for_pg(session_name: str) -> str:
+    from app_balance.queue.accounts_sync import normalize_session_name
+
+    return normalize_session_name(session_name)
 
 
 class AccountsRepo:
@@ -144,56 +277,63 @@ class AccountsRepo:
         if source_id == target_id:
             return None
 
-        async with transaction() as conn:
-            rows = await conn.fetch(_PAIR_LOCK_SQL, source_id, target_id)
-            if len(rows) != 2:
-                return None
+        try:
+            async with transaction() as conn:
+                rows = await conn.fetch(_PAIR_LOCK_SQL, source_id, target_id)
+                if len(rows) != 2:
+                    return None
 
-            by_id = {row["id"]: _row_to_account(row) for row in rows}
-            source = by_id.get(source_id)
-            target = by_id.get(target_id)
-            if source is None or target is None:
-                return None
+                by_id = {row["id"]: _row_to_account(row) for row in rows}
+                source = by_id.get(source_id)
+                target = by_id.get(target_id)
+                if source is None or target is None:
+                    return None
 
-            reserved_source = await conn.fetchval(
-                _RESERVE_SQL, source_id, task_id
-            )
-            if reserved_source is None:
-                return None
+                reserved_source = await conn.fetchval(
+                    _RESERVE_SQL, source_id, task_id
+                )
+                if reserved_source is None:
+                    return None
 
-            reserved_target = await conn.fetchval(
-                _RESERVE_SQL, target_id, task_id
-            )
-            if reserved_target is None:
-                return None
+                reserved_target = await conn.fetchval(
+                    _RESERVE_SQL, target_id, task_id
+                )
+                if reserved_target is None:
+                    raise _ReservePairAborted()
 
-            source_row = await conn.fetchrow(
-                """
-                SELECT id, session_name, status, is_enabled, current_task_id,
-                       cooldown_until, last_used_at
-                FROM accounts WHERE id = $1
-                """,
-                source_id,
-            )
-            target_row = await conn.fetchrow(
-                """
-                SELECT id, session_name, status, is_enabled, current_task_id,
-                       cooldown_until, last_used_at
-                FROM accounts WHERE id = $1
-                """,
-                target_id,
-            )
-            if source_row is None or target_row is None:
-                return None
+                source_row = await conn.fetchrow(
+                    """
+                    SELECT id, session_name, status, is_enabled, current_task_id,
+                           cooldown_until, last_used_at
+                    FROM accounts WHERE id = $1
+                    """,
+                    source_id,
+                )
+                target_row = await conn.fetchrow(
+                    """
+                    SELECT id, session_name, status, is_enabled, current_task_id,
+                           cooldown_until, last_used_at
+                    FROM accounts WHERE id = $1
+                    """,
+                    target_id,
+                )
+                if source_row is None or target_row is None:
+                    raise _ReservePairAborted()
 
-            return DualReserveResult(
-                source=_row_to_account(source_row),
-                target=_row_to_account(target_row),
-            )
+                return DualReserveResult(
+                    source=_row_to_account(source_row),
+                    target=_row_to_account(target_row),
+                )
+        except _ReservePairAborted:
+            return None
 
-    async def release(self, account_id: int) -> None:
+    async def release(self, account_id: int, task_id: int | None = None) -> None:
+        """Освобождает аккаунт. С task_id — CAS: снимает резерв только своей задачи."""
         async with acquire() as conn:
-            await conn.execute(_RELEASE_SQL, account_id)
+            if task_id is None:
+                await conn.execute(_RELEASE_SQL, account_id)
+            else:
+                await conn.execute(_RELEASE_FOR_TASK_SQL, account_id, task_id)
 
     async def get_by_id(self, account_id: int) -> Account | None:
         async with acquire() as conn:
@@ -222,22 +362,84 @@ class AccountsRepo:
             )
             return int(val) if val is not None else None
 
+    async def get_ids_by_session_names(
+        self, session_names: list[str]
+    ) -> dict[str, int]:
+        """Batch: нормализованный session_name → accounts.id (один SELECT)."""
+        from app_balance.queue.accounts_sync import normalize_session_name
+
+        names: list[str] = []
+        seen: set[str] = set()
+        for raw in session_names:
+            name = normalize_session_name(raw)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        if not names:
+            return {}
+        async with acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, session_name FROM accounts WHERE session_name = ANY($1::text[])",
+                names,
+            )
+        return {str(row["session_name"]): int(row["id"]) for row in rows}
+
+    async def list_queue_states(self) -> dict[str, AccountQueueState]:
+        """session_name → PG snapshot (один SELECT на весь парк)."""
+        async with acquire() as conn:
+            rows = await conn.fetch(_LIST_QUEUE_STATES_SQL)
+        return {row["session_name"]: _row_to_queue_state(row) for row in rows}
+
     async def set_cooldown(self, session_name: str, until: datetime) -> bool:
         """Flood/cooldown: продлевает cooldown_until, status → cooldown (кроме banned)."""
-        name = (session_name or "").strip()
+        name = _normalize_session_name_for_pg(session_name)
         if not name:
             return False
         async with acquire() as conn:
             row = await conn.fetchrow(_SET_COOLDOWN_SQL, name, until)
             return row is not None
 
+    async def clear_expired_cooldowns(self) -> list[str]:
+        """Сбрасывает status=cooldown → active, если таймер истёк или NULL.
+
+        is_enabled / banned / error не трогает. Pick и так допускает истёкший
+        cooldown, но UI/metrics без этого «залипают» на cooldown.
+        """
+        async with acquire() as conn:
+            rows = await conn.fetch(_CLEAR_EXPIRED_COOLDOWNS_SQL)
+        return [str(r["session_name"]) for r in rows]
+
     async def set_banned(self, session_name: str, *, reason: str | None = None) -> bool:
-        """Telegram ban: status → banned, сбрасывает cooldown."""
-        name = (session_name or "").strip()
+        """Telegram ban: status → banned, сбрасывает cooldown и current_task_id."""
+        name = _normalize_session_name_for_pg(session_name)
         if not name:
             return False
         async with acquire() as conn:
             row = await conn.fetchrow(_SET_BANNED_SQL, name, reason)
+            return row is not None
+
+    async def set_account_error(
+        self,
+        session_name: str,
+        *,
+        reason: str | None = None,
+    ) -> bool:
+        """Неавторизованная/сломанная сессия: status → error, is_enabled → false."""
+        name = _normalize_session_name_for_pg(session_name)
+        if not name:
+            return False
+        async with acquire() as conn:
+            row = await conn.fetchrow(_SET_ACCOUNT_ERROR_SQL, name, reason)
+            return row is not None
+
+    async def reactivate_from_unauthorized(self, session_name: str) -> bool:
+        """Снимает PG error после успешной re-auth (только status=error, не banned/cooldown)."""
+        name = _normalize_session_name_for_pg(session_name)
+        if not name:
+            return False
+        async with acquire() as conn:
+            row = await conn.fetchrow(_REACTIVATE_FROM_ERROR_SQL, name)
             return row is not None
 
     async def pick_and_reserve(
@@ -271,3 +473,44 @@ class AccountsRepo:
                 task_id,
             )
             return _row_to_account(row)
+
+    async def pick_best_and_reserve(
+        self,
+        task_id: int,
+        *,
+        task_type_code: str,
+        min_available_percent: float = 0.0,
+        exclude_account_ids: frozenset[int] | None = None,
+    ) -> BestPickResult | None:
+        """Pick аккаунта с макс. ops-scoped available % + атомарный reserve.
+
+        Score = MIN(available_resource_percent) по primary-op'ам `task_type_code`
+        (effective_rph > 0). При отсутствии строк в usage — 100%.
+        Исключает аккаунты с score < min_available_percent.
+        """
+        code = (task_type_code or "").strip()
+        if not code:
+            return None
+        excluded = list(exclude_account_ids or ())
+        threshold = float(min_available_percent)
+        async with transaction() as conn:
+            row = await conn.fetchrow(
+                _PICK_BEST_FOR_UPDATE_SQL,
+                code,
+                excluded,
+                threshold,
+            )
+            if row is None:
+                return None
+            await conn.execute(
+                "UPDATE accounts SET current_task_id = $2, last_used_at = now(), "
+                "status = 'active' "
+                "WHERE id = $1",
+                row["id"],
+                task_id,
+            )
+            account = _row_to_account(row)
+            return BestPickResult(
+                account=account,
+                availability_percent=float(row["availability_percent"]),
+            )

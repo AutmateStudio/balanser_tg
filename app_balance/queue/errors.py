@@ -5,14 +5,10 @@ E2 расширит маппинг Telethon через classify_telethon_error.
 """
 from __future__ import annotations
 
+import os
+
 from app_balance.queue.error_codes import ErrorCode
 
-FLOOD_WAIT = ErrorCode.FLOOD_WAIT
-ACCOUNT_BANNED = ErrorCode.BANNED
-TRANSIENT = ErrorCode.TRANSIENT_ERROR
-FATAL = ErrorCode.UNEXPECTED_ERROR
-
-# Алиасы для E2-тестов и dispatch (значения = ErrorCode).
 FLOOD_WAIT = ErrorCode.FLOOD_WAIT
 ACCOUNT_BANNED = ErrorCode.BANNED
 TRANSIENT = ErrorCode.TRANSIENT_ERROR
@@ -77,22 +73,22 @@ class ResourceError(QueueTaskError):
         return self.code
 
 
-def map_telethon_exception(exc: BaseException) -> QueueTaskError:
-    """Маппинг raw Telethon-исключений через classify_telethon_error (E2)."""
+def join_pending_retry_seconds() -> int:
+    """Интервал retry для join_pending (env JOIN_PENDING_RETRY_SECONDS, default 1800)."""
+    raw = os.getenv("JOIN_PENDING_RETRY_SECONDS", "1800").strip()
     try:
-        from discovery_api.session_health import classify_telethon_error
-    except ImportError:
-        return RetryableError(TRANSIENT, str(exc) or TRANSIENT)
+        return max(60, int(raw))
+    except ValueError:
+        return 1800
 
-    kind, seconds = classify_telethon_error(exc)
-    message = str(exc) or kind
-    if kind == "flood":
-        return RetryableError(FLOOD_WAIT, message, retry_after_seconds=seconds or None)
-    if kind == "banned":
-        return PermanentError(ACCOUNT_BANNED, message)
-    if kind == "transient":
-        return RetryableError(TRANSIENT, message)
-    return PermanentError(FATAL, message)
+
+def account_unauthorized_retry_seconds() -> int:
+    """Интервал retry для account_unauthorized (env ACCOUNT_UNAUTHORIZED_RETRY_SECONDS, default 1800)."""
+    raw = os.getenv("ACCOUNT_UNAUTHORIZED_RETRY_SECONDS", "1800").strip()
+    try:
+        return max(60, int(raw))
+    except ValueError:
+        return 1800
 
 
 def map_clump_error_message(err: str) -> QueueTaskError:
@@ -101,18 +97,53 @@ def map_clump_error_message(err: str) -> QueueTaskError:
     if not text:
         return RetryableError(ErrorCode.CLUMP_ERROR, "empty clump error")
 
-    normalized = text.lower().replace(" ", "")
+    lowered = text.lower()
+    normalized = lowered.replace(" ", "")
+
+    # Unauthorized / re-auth — retryable (проблема аккаунта, не канала).
+    if any(
+        marker in lowered
+        for marker in (
+            "не авторизована",
+            "not authorized",
+            "session not authorized",
+            "unauthorized",
+        )
+    ):
+        return RetryableError(
+            ErrorCode.ACCOUNT_UNAUTHORIZED,
+            text,
+            retry_after_seconds=account_unauthorized_retry_seconds(),
+        )
+
+    # Бан в конкретном канале — permanent для задачи, но не глобальный бан аккаунта.
+    if (
+        "userbannedinchannel" in normalized
+        or "banned in channel" in lowered
+        or "banned_in_channel" in lowered
+    ):
+        return PermanentError(ErrorCode.BANNED_IN_CHANNEL, text)
+
+    # Глобальный бан / revoke сессии.
     ban_markers = (
         "userdeactivated",
         "authkeyunregistered",
         "sessionrevoked",
         "phonenumberbanned",
-        "banned",
-        "deactivated",
-        "unauthorized",
+        "authkeyduplicated",
+        "sessionexpired",
     )
-    if any(marker in normalized for marker in ban_markers):
+    if any(marker in normalized for marker in ban_markers) or (
+        "banned" in normalized and "channel" not in normalized
+    ):
         return PermanentError(ACCOUNT_BANNED, text)
+
+    if "channels_too_much" in lowered or "channelstoomuch" in normalized:
+        return RetryableError(
+            ErrorCode.CHANNELS_TOO_MUCH,
+            text,
+            retry_after_seconds=1800,
+        )
 
     try:
         from discovery_api.session_health import parse_flood_wait_seconds
@@ -130,38 +161,76 @@ def map_clump_error_message(err: str) -> QueueTaskError:
     if "floodwait" in normalized:
         return RetryableError(ErrorCode.FLOOD_WAIT, text)
 
-    lowered = text.lower()
-    if any(
-        marker in lowered
-        for marker in (
-            "userdeactivated",
-            "authkeyunregistered",
-            "phonenumberbanned",
-            "sessionrevoked",
-            "unauthorized",
+    if "нет чата обсуждений" in lowered or "channel_has_no_discussion" in lowered:
+        return PermanentError(ErrorCode.CHANNEL_HAS_NO_DISCUSSION, text)
+
+    # Telethon utils.get_entity: username не занят никем (удалён/сменён) —
+    # ResolveUsernameRequest стабильно вернёт то же самое, retry не поможет.
+    # См. telethon/client/users.py: 'No user has "{}" as username'.
+    if "no user has" in lowered and "as username" in lowered:
+        return PermanentError(ErrorCode.USERNAME_NOT_FOUND, text)
+
+    if "channel_private" in lowered or "приватн" in lowered:
+        return PermanentError(ErrorCode.CHANNEL_PRIVATE, text)
+
+    join_pending_markers = (
+        "не участник",
+        "нет доступа к чату",
+        "не удалось вступить",
+        "заявка на вступление",
+        "ожидает_одобрения_заявки",
+        "join_pending",
+    )
+    if any(marker in lowered for marker in join_pending_markers):
+        return RetryableError(
+            ErrorCode.JOIN_PENDING,
+            text,
+            retry_after_seconds=join_pending_retry_seconds(),
         )
-    ):
-        return PermanentError(ErrorCode.BANNED, text)
 
     return RetryableError(ErrorCode.CLUMP_ERROR, text)
 
 
 def map_telethon_exception(exc: BaseException) -> QueueTaskError:
-    """E2: Telethon/сеть → typed error через classify_telethon_error."""
+    """E2: Telethon/сеть/сессия → typed error через classify_telethon_error."""
+    # Без импорта discovery_api: TypeError от get_input_peer(None).
+    msg_lower = str(exc).lower()
+    if isinstance(exc, TypeError) and (
+        "peer" in msg_lower or "nonetype" in msg_lower
+    ):
+        return PermanentError(ErrorCode.INVALID_PAYLOAD, str(exc) or "null_peer")
+
     try:
-        from discovery_api.session_health import classify_telethon_error
+        from discovery_api.session_health import (
+            classify_telethon_error,
+            is_session_unauthorized_error,
+        )
     except ImportError:
-        return PermanentError(FATAL, str(exc))
+        return RetryableError(TRANSIENT, str(exc))
+
+    if is_session_unauthorized_error(exc):
+        return RetryableError(
+            ErrorCode.ACCOUNT_UNAUTHORIZED,
+            str(exc) or ErrorCode.ACCOUNT_UNAUTHORIZED,
+            retry_after_seconds=account_unauthorized_retry_seconds(),
+        )
 
     kind, seconds = classify_telethon_error(exc)
+    message = str(exc) or kind
     if kind == "flood":
         return RetryableError(
             FLOOD_WAIT,
-            str(exc),
+            message,
             retry_after_seconds=int(seconds or 0) or None,
         )
     if kind == "banned":
-        return PermanentError(ACCOUNT_BANNED, str(exc))
+        return PermanentError(ACCOUNT_BANNED, message)
+    if kind == "unauthorized":
+        return RetryableError(
+            ErrorCode.ACCOUNT_UNAUTHORIZED,
+            message,
+            retry_after_seconds=account_unauthorized_retry_seconds(),
+        )
     if kind == "transient":
-        return RetryableError(TRANSIENT, str(exc))
-    return PermanentError(FATAL, str(exc))
+        return RetryableError(TRANSIENT, message)
+    return PermanentError(FATAL, message)

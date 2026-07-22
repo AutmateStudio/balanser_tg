@@ -16,19 +16,35 @@ from app_balance.queue.errors import (
     PermanentError,
     QueueTaskError,
     RetryableError,
+    account_unauthorized_retry_seconds,
+    join_pending_retry_seconds,
     map_clump_error_message,
     map_telethon_exception,
+)
+from app_balance.queue.collect_pipeline import (
+    ClientGetter,
+    CollectContext,
+    build_collect_op_executor,
+    build_signals,
+    default_client_getter,
 )
 from app_balance.queue.per_op_pipeline import OpExecutor, run_pipeline
 from app_balance.queue.per_op_reading import TaskType
 from app_balance.queue.resource_usage import ResourceUsageRepo
+from app_balance.queue.source_channels import SourceChannelsRepo
 from app_balance.queue.task_queue import ClaimedTask, TaskQueueRepo
+from app_balance.queue import timing
 
 log = logging.getLogger(__name__)
 
 PARSER_ADD_CHANNEL = "parser_add_channel"
 PARSER_REMOVE_CHANNEL = "parser_remove_channel"
 MOVE_CHANNEL = "move_channel"
+COLLECT_EXTRA_DATA = "collect_extra_data"
+UPDATE_CHANNEL = "update_channel"
+DISCOVER_GROUPS = "discover_groups"  # legacy alias
+TELEGRAM_DISCOVER = "telegram_discover"
+TELEGRAM_DISCOVER_LEADS = "telegram_discover_leads"
 
 SyncAfterAdd = Callable[[ClaimedTask, Account, Any], Awaitable[None]]
 SyncAfterMove = Callable[[ClaimedTask, Account, Any], Awaitable[None]]
@@ -84,6 +100,20 @@ def _parse_parser_channel_payload(
     return parser_id.strip(), channel_ref.strip(), webhook
 
 
+def validate_task(
+    task_type_code: str,
+    payload: dict[str, Any],
+    *,
+    task: ClaimedTask | None = None,
+) -> None:
+    """Лёгкая проверка payload до списания ресурса (без RPC / clump)."""
+    if task_type_code in (PARSER_ADD_CHANNEL, PARSER_REMOVE_CHANNEL, MOVE_CHANNEL):
+        _parse_parser_channel_payload(payload)
+    if task_type_code == MOVE_CHANNEL and task is not None:
+        if task.source_account_id is None or task.target_account_id is None:
+            raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing dual account ids")
+
+
 def _session_basename(session_name: str) -> str:
     """basename без .session — каноническая форма имени аккаунта (как в PG, A10)."""
     base = (session_name or "").replace("\\", "/").rsplit("/", 1)[-1]
@@ -122,6 +152,43 @@ def _default_account_getter() -> AccountGetter:
     return repo.get_by_id
 
 
+def _raise_clump_result_error(result: dict[str, Any]) -> None:
+    """Поднимает typed error из ответа clump (предпочитает error_code)."""
+    error = result.get("error")
+    if not error:
+        return
+    error_code = result.get("error_code")
+    if isinstance(error_code, str) and error_code.strip():
+        code = error_code.strip()
+        if code in (
+            ErrorCode.CHANNEL_PRIVATE,
+            ErrorCode.CHANNEL_HAS_NO_DISCUSSION,
+            ErrorCode.USERNAME_NOT_FOUND,
+            ErrorCode.INVALID_PAYLOAD,
+            ErrorCode.BANNED_IN_CHANNEL,
+            ErrorCode.BANNED,
+        ):
+            raise PermanentError(code, str(error))
+        if code == ErrorCode.JOIN_PENDING:
+            raise RetryableError(
+                code,
+                str(error),
+                retry_after_seconds=join_pending_retry_seconds(),
+            )
+        if code == ErrorCode.ACCOUNT_UNAUTHORIZED:
+            raise RetryableError(
+                code,
+                str(error),
+                retry_after_seconds=account_unauthorized_retry_seconds(),
+            )
+        if code == ErrorCode.CHANNELS_TOO_MUCH:
+            raise RetryableError(code, str(error), retry_after_seconds=1800)
+        if code == ErrorCode.FLOOD_WAIT:
+            raise map_clump_error_message(str(error))
+        raise RetryableError(code, str(error))
+    raise map_clump_error_message(str(error))
+
+
 async def _start_clump_after_execute(*, parser_id: str, clump: ClumpLike) -> None:
     try:
         await clump.start()
@@ -150,18 +217,42 @@ async def _execute_parser_add_channel(
 
     session_name = _resolve_clump_session_name(clump, account.session_name)
     try:
-        result = await clump.add_channel_on_session(
-            session_name,
-            channel_ref,
-            webhook_url=webhook_url,
-        )
+        with timing.track_telegram():
+            result = await clump.add_channel_on_session(
+                session_name,
+                channel_ref,
+                webhook_url=webhook_url,
+            )
     except QueueTaskError:
         raise
     except Exception as exc:  # noqa: BLE001
         raise map_telethon_exception(exc) from exc
     error = result.get("error")
     if error:
-        raise map_clump_error_message(str(error))
+        _raise_clump_result_error(result)
+
+    if result.get("owner_conflict"):
+        # Канал уже слушается другой сессией того же clump — задача идемпотентно
+        # выполнена (цель достигнута). НЕ делаем dual-write на выбранный
+        # (не-владелец) аккаунт, иначе PG разойдётся с clump. Задача помечается
+        # done и покидает очередь — никаких RETRYABLE.
+        log.info(
+            "execute_task: parser_add_channel idempotent (already in clump on "
+            "another session) task_id=%s ref=%s owner=%s",
+            task.id,
+            channel_ref,
+            result.get("session_name"),
+        )
+        await _start_clump_after_execute(parser_id=parser_id, clump=clump)
+        return
+
+    log.info(
+        "execute_task: parser_add_channel OK task_id=%s ref=%s session=%s chat_id=%s",
+        task.id,
+        channel_ref,
+        session_name,
+        result.get("chat_id"),
+    )
 
     await sync_after_add(task, account, clump)
     await _start_clump_after_execute(parser_id=parser_id, clump=clump)
@@ -217,7 +308,7 @@ async def _execute_move_channel(
         raise map_telethon_exception(exc) from exc
     error = result.get("error")
     if error:
-        raise map_clump_error_message(str(error))
+        _raise_clump_result_error(result)
 
     await sync_after_move(task, target, clump)
     await _start_clump_after_execute(parser_id=parser_id, clump=clump)
@@ -255,12 +346,310 @@ async def _execute_parser_remove_channel(
     await _start_clump_after_execute(parser_id=parser_id, clump=clump)
 
 
+async def _execute_collect_extra_data(
+    task: ClaimedTask,
+    *,
+    account: Account,
+    task_type: TaskType,
+    attempt_id: int | None,
+    client_getter: ClientGetter,
+    channels_repo: SourceChannelsRepo,
+    queue: TaskQueueRepo,
+    usage: ResourceUsageRepo,
+) -> None:
+    """F6 — multi-op сбор доп. данных: временный вход → сбор → выход (ТЗ §23).
+
+    Идемпотентный per-op пайплайн (E6): ресурс списывается и прогресс
+    фиксируется пошагово. Итоговые сигналы пишутся в source_channels.metadata,
+    `extra_data_collected` выставляется в true.
+    """
+    channel_id = task.channel_id
+    if channel_id is None:
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing channel_id")
+
+    target = await channels_repo.get_collect_target(channel_id)
+    if target is None:
+        raise PermanentError(
+            ErrorCode.INVALID_PAYLOAD, f"channel not found: {channel_id}"
+        )
+    ref = target.ref()
+    if not ref:
+        raise PermanentError(
+            ErrorCode.INVALID_PAYLOAD, f"channel {channel_id} has no ref"
+        )
+
+    try:
+        client = await client_getter(account.session_name)
+    except QueueTaskError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise map_telethon_exception(exc) from exc
+
+    ctx = CollectContext()
+    execute_op = build_collect_op_executor(client, ref, ctx)
+
+    await execute_multi_op_pipeline(
+        task,
+        task_type=task_type,
+        account=account,
+        execute_op=execute_op,
+        attempt_id=attempt_id,
+        queue=queue,
+        usage=usage,
+    )
+
+    await channels_repo.save_extra_data(channel_id, build_signals(ctx))
+
+
+async def _execute_update_channel(
+    task: ClaimedTask,
+    *,
+    account: Account,
+    task_type: TaskType,
+    attempt_id: int | None,
+    client_getter: ClientGetter,
+    channels_repo: SourceChannelsRepo,
+    queue: TaskQueueRepo,
+    usage: ResourceUsageRepo,
+) -> None:
+    """F7 — multi-op обновление метаданных канала (ТЗ §24).
+
+    Тот же per-op Telethon-пайплайн, что collect_extra_data (F6): временный вход →
+    сбор метаданных/сигналов → выход. Отличие — финальная запись: метаданные
+    мёржатся в `source_channels.metadata`, обновляется `last_updated_at` (без
+    флага `extra_data_collected`). Пайплайн идемпотентен (E6): ресурс списывается
+    и прогресс фиксируется пошагово.
+    """
+    channel_id = task.channel_id
+    if channel_id is None:
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing channel_id")
+
+    target = await channels_repo.get_collect_target(channel_id)
+    if target is None:
+        raise PermanentError(
+            ErrorCode.INVALID_PAYLOAD, f"channel not found: {channel_id}"
+        )
+    ref = target.ref()
+    if not ref:
+        raise PermanentError(
+            ErrorCode.INVALID_PAYLOAD, f"channel {channel_id} has no ref"
+        )
+
+    try:
+        client = await client_getter(account.session_name)
+    except QueueTaskError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise map_telethon_exception(exc) from exc
+
+    ctx = CollectContext()
+    execute_op = build_collect_op_executor(client, ref, ctx)
+
+    await execute_multi_op_pipeline(
+        task,
+        task_type=task_type,
+        account=account,
+        execute_op=execute_op,
+        attempt_id=attempt_id,
+        queue=queue,
+        usage=usage,
+    )
+
+    await channels_repo.save_channel_update(channel_id, build_signals(ctx))
+
+
+def _parse_telegram_discover_payload(payload: dict[str, Any]) -> tuple[str, int, int, bool, bool]:
+    query = payload.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing query")
+
+    try:
+        limit = int(payload.get("first_pass_limit", payload.get("limit", 10)))
+        depth = int(payload.get("similarity_depth", payload.get("depth", 2)))
+    except (TypeError, ValueError) as exc:
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "invalid limit/depth") from exc
+
+    if not (1 <= limit <= 100):
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "limit out of range")
+    if not (0 <= depth <= 5):
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "depth out of range")
+
+    include_global = bool(payload.get("include_global_search", True))
+    include_groups = bool(payload.get("include_groups", True))
+    return query.strip(), limit, depth, include_global, include_groups
+
+
+async def _execute_telegram_discover(
+    task: ClaimedTask,
+    *,
+    account: Account,
+    client_getter: ClientGetter,
+    queue: TaskQueueRepo,
+    channels_repo: SourceChannelsRepo | None = None,
+) -> None:
+    """POST /discover async: поиск + фильтр discussion + upsert source_channels."""
+    from discovery_api.discovery import (
+        discover_unified_on_client,
+        persist_unified_discovery,
+        serialize_unified_discovery_result,
+    )
+
+    query, limit, depth, include_global, include_groups = _parse_telegram_discover_payload(
+        dict(task.payload)
+    )
+    client = await client_getter(account.session_name)
+    try:
+        result = await discover_unified_on_client(
+            client,
+            query,
+            search_limit=limit,
+            max_depth=depth,
+            include_global_search=include_global,
+            include_groups=include_groups,
+        )
+    except QueueTaskError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise map_telethon_exception(exc) from exc
+
+    repo = channels_repo or SourceChannelsRepo()
+    persist_stats = await persist_unified_discovery(result, channels_repo=repo)
+
+    merged = await queue.merge_payload(
+        task.id,
+        {
+            "result": serialize_unified_discovery_result(
+                result,
+                persist=persist_stats.to_dict(),
+            )
+        },
+    )
+    if not merged:
+        log.warning(
+            "execute_task: не удалось записать result telegram_discover task_id=%s",
+            task.id,
+        )
+
+    log.info(
+        "execute_task: telegram_discover OK task_id=%s session=%s total=%s inserted=%s updated=%s skipped=%s",
+        task.id,
+        account.session_name,
+        result.total,
+        persist_stats.inserted,
+        persist_stats.updated,
+        persist_stats.skipped_no_discussion,
+    )
+
+
+def _parse_telegram_discover_leads_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    query = payload.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing query")
+
+    def _int(name: str, default: int, lo: int, hi: int) -> int:
+        try:
+            val = int(payload.get(name, default))
+        except (TypeError, ValueError) as exc:
+            raise PermanentError(ErrorCode.INVALID_PAYLOAD, f"invalid {name}") from exc
+        if not (lo <= val <= hi):
+            raise PermanentError(ErrorCode.INVALID_PAYLOAD, f"{name} out of range")
+        return val
+
+    extra = payload.get("extra_intents") or []
+    if not isinstance(extra, list):
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "invalid extra_intents")
+    extra_intents = [str(x).strip() for x in extra if str(x).strip()]
+
+    return {
+        "query": query.strip(),
+        "first_pass_limit": _int("first_pass_limit", 10, 1, 50),
+        "max_seeds": _int("max_seeds", 25, 1, 60),
+        "search_pages": _int("search_pages", 3, 1, 4),
+        "graph_depth": _int("graph_depth", 1, 0, 2),
+        "max_graph_seeds": _int("max_graph_seeds", 30, 0, 100),
+        "min_lead_score": _int("min_lead_score", 50, 0, 100),
+        "posts_limit": _int("posts_limit", 30, 5, 50),
+        "extra_intents": extra_intents,
+        "force_refresh_posts": bool(payload.get("force_refresh_posts", False)),
+    }
+
+
+async def _execute_telegram_discover_leads(
+    task: ClaimedTask,
+    *,
+    account: Account,
+    client_getter: ClientGetter,
+    queue: TaskQueueRepo,
+    channels_repo: SourceChannelsRepo | None = None,
+) -> None:
+    """POST /discover-leads async: intent SearchGlobal + lead scoring + metadata upsert."""
+    from discovery_api.lead_intent.pipeline import (
+        run_lead_intent_on_client,
+        serialize_lead_discovery_result,
+    )
+
+    params = _parse_telegram_discover_leads_payload(dict(task.payload))
+    client = await client_getter(account.session_name)
+    try:
+        result = await run_lead_intent_on_client(
+            client,
+            params["query"],
+            first_pass_limit=params["first_pass_limit"],
+            max_seeds=params["max_seeds"],
+            search_pages=params["search_pages"],
+            graph_depth=params["graph_depth"],
+            max_graph_seeds=params["max_graph_seeds"],
+            min_lead_score=params["min_lead_score"],
+            posts_limit=params["posts_limit"],
+            extra_intents=params["extra_intents"],
+            force_refresh_posts=params["force_refresh_posts"],
+            persist=True,
+            channels_repo=channels_repo or SourceChannelsRepo(),
+        )
+    except QueueTaskError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise map_telethon_exception(exc) from exc
+
+    persist_dict = result.persist.to_dict() if result.persist is not None else None
+    merged = await queue.merge_payload(
+        task.id,
+        {
+            "result": serialize_lead_discovery_result(
+                result,
+                persist=persist_dict,
+            )
+        },
+    )
+    if not merged:
+        log.warning(
+            "execute_task: не удалось записать result telegram_discover_leads task_id=%s",
+            task.id,
+        )
+
+    log.info(
+        "execute_task: telegram_discover_leads OK task_id=%s session=%s total=%s inserted=%s updated=%s skipped=%s",
+        task.id,
+        account.session_name,
+        result.total,
+        (result.persist.inserted if result.persist else 0),
+        (result.persist.updated if result.persist else 0),
+        (result.persist.skipped_low_score if result.persist else 0),
+    )
+
+
 async def execute_task(
     task: ClaimedTask,
     *,
     account: Account,
+    task_type: TaskType | None = None,
+    attempt_id: int | None = None,
     clump_getter: ClumpGetter | None = None,
     account_getter: AccountGetter | None = None,
+    client_getter: ClientGetter | None = None,
+    channels_repo: SourceChannelsRepo | None = None,
+    queue: TaskQueueRepo | None = None,
+    usage: ResourceUsageRepo | None = None,
     sync_after_add: SyncAfterAdd | None = None,
     sync_after_move: SyncAfterMove | None = None,
     sync_after_remove: SyncAfterRemove | None = None,
@@ -296,6 +685,54 @@ async def execute_task(
             account=account,
             clump_getter=clump_getter,
             sync_after_remove=sync_after_remove,
+        )
+    elif task.task_type_code == COLLECT_EXTRA_DATA:
+        if task_type is None:
+            raise PermanentError(
+                ErrorCode.INVALID_PAYLOAD,
+                "collect_extra_data requires task_type (multi-op)",
+            )
+        await _execute_collect_extra_data(
+            task,
+            account=account,
+            task_type=task_type,
+            attempt_id=attempt_id,
+            client_getter=client_getter or default_client_getter(),
+            channels_repo=channels_repo or SourceChannelsRepo(),
+            queue=queue or TaskQueueRepo(),
+            usage=usage or ResourceUsageRepo(),
+        )
+    elif task.task_type_code == UPDATE_CHANNEL:
+        if task_type is None:
+            raise PermanentError(
+                ErrorCode.INVALID_PAYLOAD,
+                "update_channel requires task_type (multi-op)",
+            )
+        await _execute_update_channel(
+            task,
+            account=account,
+            task_type=task_type,
+            attempt_id=attempt_id,
+            client_getter=client_getter or default_client_getter(),
+            channels_repo=channels_repo or SourceChannelsRepo(),
+            queue=queue or TaskQueueRepo(),
+            usage=usage or ResourceUsageRepo(),
+        )
+    elif task.task_type_code in (TELEGRAM_DISCOVER, DISCOVER_GROUPS):
+        await _execute_telegram_discover(
+            task,
+            account=account,
+            client_getter=client_getter or default_client_getter(),
+            queue=queue or TaskQueueRepo(),
+            channels_repo=channels_repo or SourceChannelsRepo(),
+        )
+    elif task.task_type_code == TELEGRAM_DISCOVER_LEADS:
+        await _execute_telegram_discover_leads(
+            task,
+            account=account,
+            client_getter=client_getter or default_client_getter(),
+            queue=queue or TaskQueueRepo(),
+            channels_repo=channels_repo or SourceChannelsRepo(),
         )
     else:
         raise PermanentError(
@@ -342,22 +779,40 @@ class ClumpTaskAdapter:
         *,
         clump_getter: ClumpGetter | None = None,
         account_getter: AccountGetter | None = None,
+        client_getter: ClientGetter | None = None,
+        channels_repo: SourceChannelsRepo | None = None,
         sync_after_add: SyncAfterAdd | None = None,
         sync_after_move: SyncAfterMove | None = None,
         sync_after_remove: SyncAfterRemove | None = None,
     ) -> None:
         self._clump_getter = clump_getter
         self._account_getter = account_getter
+        self._client_getter = client_getter
+        self._channels_repo = channels_repo
         self._sync_after_add = sync_after_add
         self._sync_after_move = sync_after_move
         self._sync_after_remove = sync_after_remove
 
-    async def execute(self, task: ClaimedTask, *, account: Account) -> None:
+    async def validate(self, task: ClaimedTask) -> None:
+        validate_task(task.task_type_code, dict(task.payload), task=task)
+
+    async def execute(
+        self,
+        task: ClaimedTask,
+        *,
+        account: Account,
+        task_type: TaskType | None = None,
+        attempt_id: int | None = None,
+    ) -> None:
         await execute_task(
             task,
             account=account,
+            task_type=task_type,
+            attempt_id=attempt_id,
             clump_getter=self._clump_getter,
             account_getter=self._account_getter,
+            client_getter=self._client_getter,
+            channels_repo=self._channels_repo,
             sync_after_add=self._sync_after_add,
             sync_after_move=self._sync_after_move,
             sync_after_remove=self._sync_after_remove,

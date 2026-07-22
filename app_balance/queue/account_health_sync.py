@@ -75,3 +75,69 @@ async def persist_banned(session_name: str, reason: str = "") -> None:
             name,
             exc_info=True,
         )
+
+
+async def persist_unauthorized(session_name: str, reason: str = "") -> None:
+    """Неавторизованная сессия → accounts.status=error, is_enabled=false (D6)."""
+    name = (session_name or "").strip()
+    if not name:
+        return
+    if not await _ensure_pool():
+        return
+    try:
+        ok = await _repo.set_account_error(name, reason=(reason or None))
+        if not ok:
+            log.debug(
+                "account_health_sync: unauthorized для %s — строка accounts не найдена",
+                name,
+            )
+    except Exception:
+        log.warning(
+            "account_health_sync: не удалось записать error для %s",
+            name,
+            exc_info=True,
+        )
+
+
+async def persist_account_reauthorized(session_name: str) -> bool:
+    """Успешная re-auth → accounts.status=error снимается в active (D6)."""
+    name = (session_name or "").strip()
+    if not name:
+        return False
+    if not await _ensure_pool():
+        return False
+    try:
+        ok = await _repo.reactivate_from_unauthorized(name)
+        if not ok:
+            log.debug(
+                "account_health_sync: reactivate для %s — нет строки со status=error",
+                name,
+            )
+        return ok
+    except Exception:
+        log.warning(
+            "account_health_sync: не удалось reactivate для %s",
+            name,
+            exc_info=True,
+        )
+        return False
+
+
+async def clear_expired_account_cooldowns() -> list[str]:
+    """PG: status=cooldown → active после истечения таймера (зеркало runtime clear_flood)."""
+    if not await _ensure_pool():
+        return []
+    try:
+        cleared = await _repo.clear_expired_cooldowns()
+        if cleared:
+            log.info(
+                "account_health_sync: сброшен истёкший cooldown у %d акк.",
+                len(cleared),
+            )
+        return cleared
+    except Exception:
+        log.warning(
+            "account_health_sync: clear_expired_cooldowns не удался",
+            exc_info=True,
+        )
+        return []

@@ -167,18 +167,18 @@ async def test_busy_fixed_account_postpones_second_task_done(clean_queue) -> Non
     run_task = asyncio.create_task(worker.run())
     try:
         await asyncio.wait_for(
-            _wait_until(lambda: worker.processed >= 1, timeout=5.0),
-            timeout=5.0,
+            _wait_until(lambda: worker.processed >= 1, timeout=30.0),
+            timeout=30.0,
         )
     finally:
         worker.stop()
-        await asyncio.wait_for(run_task, timeout=5.0)
+        await asyncio.wait_for(run_task, timeout=30.0)
 
     async with db.acquire() as conn:
         task1 = await conn.fetchrow(
             """
             SELECT status, postpone_count, attempt_count, last_error,
-                   run_after, locked_by, locked_until
+                   run_after, locked_by, locked_until, account_id
             FROM task_queue WHERE id = $1
             """,
             task1_id,
@@ -200,6 +200,7 @@ async def test_busy_fixed_account_postpones_second_task_done(clean_queue) -> Non
     assert task1["postpone_count"] == 1
     assert task1["attempt_count"] == task1_attempt
     assert "account_reserve_failed" in (task1["last_error"] or "")
+    assert task1["account_id"] is None  # unassign → auto-pick на следующий claim
     assert task1["run_after"] > datetime.now(timezone.utc)
     assert task1["locked_by"] is None
     assert task1["locked_until"] is None

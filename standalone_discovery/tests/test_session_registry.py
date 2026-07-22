@@ -71,6 +71,105 @@ class SessionRegistryConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(c1, c2)
         self.assertEqual(FakeTelegramClient.init_count, 1)
 
+    async def test_name_variants_map_to_single_client(self) -> None:
+        """`Test3`, `/app/sessions/Test3`, `...Test3.session` → один клиент/файл."""
+        from discovery_api import session_registry as sr
+
+        with patch("discovery_api.session_registry.TelegramClient", FakeTelegramClient), patch(
+            "discovery_api.session_registry.get_api_id", return_value=1
+        ), patch("discovery_api.session_registry.get_api_hash", return_value="hash"):
+            c1 = await sr.get_or_create_client("Test3")
+            c2 = await sr.get_or_create_client("/app/sessions/Test3")
+            c3 = await sr.get_or_create_client("/app/sessions/Test3.session")
+
+        self.assertIs(c1, c2)
+        self.assertIs(c2, c3)
+        self.assertEqual(FakeTelegramClient.init_count, 1)
+        self.assertIsNotNone(sr.find_registered_client("Test3"))
+        self.assertIs(sr.find_registered_client("/app/sessions/Test3.session"), c1)
+
+
+class SessionRegistryIdentityTests(unittest.IsolatedAsyncioTestCase):
+    """Archive-импортированные сессии подключаются под своим api_id/hash/device."""
+
+    async def asyncSetUp(self) -> None:
+        import tempfile
+
+        from discovery_api import session_registry as sr
+
+        sr.reset_for_tests()
+        FakeTelegramClient.init_count = 0
+        FakeTelegramClient.connect_count = 0
+        self._tmpdir = tempfile.mkdtemp()
+        self._prev_sessions_dir = os.environ.get("SESSIONS_DIR")
+        os.environ["SESSIONS_DIR"] = self._tmpdir
+
+    async def asyncTearDown(self) -> None:
+        from discovery_api import session_registry as sr
+
+        await sr.release_all()
+        sr.reset_for_tests()
+        if self._prev_sessions_dir is None:
+            os.environ.pop("SESSIONS_DIR", None)
+        else:
+            os.environ["SESSIONS_DIR"] = self._prev_sessions_dir
+
+    async def test_uses_identity_sidecar_when_present(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_archive import save_session_identity
+
+        session_path = os.path.join(self._tmpdir, "acc1.session")
+        save_session_identity(
+            session_path,
+            {
+                "api_id": 2040,
+                "api_hash": "archive-hash",
+                "device_model": "VHGLRT-PRO",
+                "system_version": "Windows 10",
+            },
+        )
+        captured: dict[str, object] = {}
+
+        class _CapturingClient(FakeTelegramClient):
+            def __init__(self, base, api_id, api_hash, **kwargs):
+                captured["api_id"] = api_id
+                captured["api_hash"] = api_hash
+                captured["kwargs"] = kwargs
+                super().__init__()
+
+        with patch("discovery_api.session_registry.TelegramClient", _CapturingClient), patch(
+            "discovery_api.session_registry.get_api_id", return_value=1
+        ), patch("discovery_api.session_registry.get_api_hash", return_value="global-hash"):
+            await sr.get_or_create_client("acc1")
+
+        self.assertEqual(captured["api_id"], 2040)
+        self.assertEqual(captured["api_hash"], "archive-hash")
+        self.assertEqual(
+            captured["kwargs"],
+            {"device_model": "VHGLRT-PRO", "system_version": "Windows 10"},
+        )
+
+    async def test_falls_back_to_global_config_without_sidecar(self) -> None:
+        from discovery_api import session_registry as sr
+
+        captured: dict[str, object] = {}
+
+        class _CapturingClient(FakeTelegramClient):
+            def __init__(self, base, api_id, api_hash, **kwargs):
+                captured["api_id"] = api_id
+                captured["api_hash"] = api_hash
+                captured["kwargs"] = kwargs
+                super().__init__()
+
+        with patch("discovery_api.session_registry.TelegramClient", _CapturingClient), patch(
+            "discovery_api.session_registry.get_api_id", return_value=1
+        ), patch("discovery_api.session_registry.get_api_hash", return_value="global-hash"):
+            await sr.get_or_create_client("acc2")
+
+        self.assertEqual(captured["api_id"], 1)
+        self.assertEqual(captured["api_hash"], "global-hash")
+        self.assertEqual(captured["kwargs"], {})
+
 
 class SessionRegistryStringCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -140,6 +239,343 @@ class SessionRegistryReleaseTests(unittest.IsolatedAsyncioTestCase):
             await sr.release_all()
 
         disconnect_mock.assert_awaited()
+
+
+class SessionRegistryUnauthorizedTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        from discovery_api import session_registry as sr
+
+        sr.reset_for_tests()
+
+    async def asyncTearDown(self) -> None:
+        from discovery_api import session_registry as sr
+
+        await sr.release_all()
+        sr.reset_for_tests()
+
+    async def test_unauthorized_marks_clump_health_and_raises(self) -> None:
+        from discovery_api.session_health import SessionStatus
+        from discovery_api import session_registry as sr
+
+        class UnauthorizedClient(FakeTelegramClient):
+            async def is_user_authorized(self) -> bool:
+                return False
+
+        notify_mock = AsyncMock()
+        clump = sr.SessionClump(["/sess/u1"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+
+        with (
+            patch("discovery_api.session_registry.TelegramClient", UnauthorizedClient),
+            patch("discovery_api.session_registry.get_api_id", return_value=1),
+            patch("discovery_api.session_registry.get_api_hash", return_value="hash"),
+            patch(
+                "discovery_api.session_registry._persist_unauthorized_pg",
+                notify_mock,
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                await sr.get_or_create_client("/sess/u1")
+
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
+        self.assertIn("не авторизована", pc.health.last_error or "")
+        notify_mock.assert_awaited_once()
+
+    async def test_authorized_client_triggers_reauthorize(self) -> None:
+        from discovery_api import session_registry as sr
+
+        reauth_mock = AsyncMock(return_value=True)
+
+        with (
+            patch("discovery_api.session_registry.TelegramClient", FakeTelegramClient),
+            patch("discovery_api.session_registry.get_api_id", return_value=1),
+            patch("discovery_api.session_registry.get_api_hash", return_value="hash"),
+            patch(
+                "discovery_api.session_registry.notify_session_reauthorized",
+                reauth_mock,
+            ),
+        ):
+            client = await sr.get_or_create_client("/sess/ok")
+            self.assertIsNotNone(client)
+
+        reauth_mock.assert_awaited_once_with("/sess/ok")
+
+    async def test_liveness_check_resets_telethon_auth_cache(self) -> None:
+        """is_authorized_uncached сбрасывает _authorized перед серверным RPC."""
+        from discovery_api import session_registry as sr
+
+        client = MagicMock()
+        client._authorized = True  # «залипший» кэш Telethon
+        client.is_user_authorized = AsyncMock(return_value=False)
+
+        result = await sr.is_authorized_uncached(client)
+
+        self.assertFalse(result)
+        self.assertIsNone(client._authorized)
+        client.is_user_authorized.assert_awaited_once()
+
+    async def test_cached_client_with_stale_auth_is_evicted(self) -> None:
+        """Кэшированный клиент, ставший unauthorized, выбрасывается из реестра."""
+        from discovery_api.session_health import SessionStatus
+        from discovery_api import session_registry as sr
+
+        client = MagicMock()
+        client._authorized = True
+        client.is_connected.return_value = True
+        client.is_user_authorized = AsyncMock(return_value=False)
+        client.connect = AsyncMock()
+        client.disconnect = AsyncMock()
+
+        clump = sr.SessionClump(["/sess/stale"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        key = sr._canonical_key("/sess/stale")
+        sr._clients[key] = client
+
+        with patch(
+            "discovery_api.session_registry._persist_unauthorized_pg",
+            AsyncMock(),
+        ):
+            with self.assertRaises(RuntimeError):
+                await sr.get_or_create_client("/sess/stale")
+
+        self.assertNotIn(key, sr._clients)
+        client.disconnect.assert_awaited()
+        pc = clump.parser_client_list[0]
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
+
+
+class AccountAuthWatchdogHealthCheckTests(unittest.IsolatedAsyncioTestCase):
+    """Account-auth watchdog: `_health_check_once` восстанавливает ERROR-сессии."""
+
+    async def asyncSetUp(self) -> None:
+        from discovery_api import session_registry as sr
+
+        sr.reset_for_tests()
+
+    async def asyncTearDown(self) -> None:
+        from discovery_api import session_registry as sr
+
+        await sr.release_all()
+        sr.reset_for_tests()
+
+    async def test_health_check_skips_error_before_interval(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/e1"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_unauthorized("не авторизована")
+        pc.health.record_reauth_attempt()  # только что пытались — рано повторять
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_interval_seconds",
+                return_value=300.0,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+            ) as get_client_mock,
+        ):
+            await sr._health_check_once()
+
+        get_client_mock.assert_not_awaited()
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
+
+    async def test_health_check_retries_error_after_interval_and_recovers(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/e2"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_unauthorized("не авторизована")
+
+        async def fake_get_or_create_client(session_name: str) -> object:
+            await sr.notify_session_reauthorized(session_name)
+            return object()
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_interval_seconds",
+                return_value=300.0,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                side_effect=fake_get_or_create_client,
+            ),
+            patch.object(sr, "_persist_reauthorized_pg", new_callable=AsyncMock, return_value=True),
+        ):
+            await sr._health_check_once()
+
+        self.assertEqual(pc.health.status, SessionStatus.HEALTHY)
+        self.assertEqual(pc.health.reauth_attempt_count, 1)
+
+    async def test_health_check_retries_error_and_stays_unauthorized(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/e3"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_unauthorized("не авторизована")
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_interval_seconds",
+                return_value=300.0,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("не авторизована"),
+            ) as get_client_mock,
+        ):
+            await sr._health_check_once()
+
+        get_client_mock.assert_awaited_once_with("/sess/e3")
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
+        self.assertEqual(pc.health.reauth_attempt_count, 1)
+
+    async def test_health_check_ignores_banned_sessions(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/b1"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_banned("UserDeactivatedBanError")
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+            ) as get_client_mock,
+        ):
+            await sr._health_check_once()
+
+        get_client_mock.assert_not_awaited()
+        self.assertEqual(pc.health.status, SessionStatus.BANNED)
+
+    async def test_health_check_logs_tick_summary_when_errors_present(self) -> None:
+        from discovery_api import session_registry as sr
+
+        clump = sr.SessionClump(["/sess/e5", "/sess/e6"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc1, pc2 = clump.parser_client_list
+        pc1.health.mark_unauthorized("не авторизована")
+        pc2.health.mark_unauthorized("не авторизована")
+        # pc2 недавно проверялся — в этот тик пропускается.
+        pc2.health.record_reauth_attempt()
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_interval_seconds",
+                return_value=300.0,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("не авторизована"),
+            ),
+            self.assertLogs("discovery_api.session_registry", level="INFO") as logs,
+        ):
+            await sr._health_check_once()
+
+        summary = [m for m in logs.output if "тик завершён" in m]
+        self.assertEqual(len(summary), 1)
+        self.assertIn("ERROR-сессий=2", summary[0])
+        self.assertIn("проверено=1", summary[0])
+        self.assertIn("восстановлено=0", summary[0])
+
+    async def test_health_check_no_tick_summary_without_errors(self) -> None:
+        from discovery_api import session_registry as sr
+
+        clump = sr.SessionClump(["/sess/h1"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+
+        with self.assertRaises(AssertionError):
+            with self.assertLogs(
+                "discovery_api.session_registry", level="INFO"
+            ) as logs:
+                await sr._health_check_once()
+        # Ничего не залогировано на INFO — assertLogs сам бросает AssertionError,
+        # если не было ни одной записи (нет ERROR-аккаунтов — сводка не нужна).
+
+    async def test_health_check_reauth_disabled_by_config(self) -> None:
+        from discovery_api import session_registry as sr
+        from discovery_api.session_health import SessionStatus
+
+        clump = sr.SessionClump(["/sess/e4"], "c", webhook_url="http://h")
+        sr._clumps["pid"] = clump
+        pc = clump.parser_client_list[0]
+        pc.health.mark_unauthorized("не авторизована")
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_account_auth_recheck_enabled",
+                return_value=False,
+            ),
+            patch(
+                "discovery_api.session_registry.get_or_create_client",
+                new_callable=AsyncMock,
+            ) as get_client_mock,
+        ):
+            await sr._health_check_once()
+
+        get_client_mock.assert_not_awaited()
+        self.assertEqual(pc.health.status, SessionStatus.ERROR)
+
+
+class ChannelCountRefreshLoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_first_pass_uses_initial_delay_not_full_interval(self) -> None:
+        """Регресс: без initial-delay первый тик приходил только через полный
+        CHANNEL_COUNT_REFRESH_INTERVAL_SECONDS (по умолчанию 30 мин) — все
+        аккаунты на /accounts/all оставались с telegram_channel_count=null
+        до получаса после каждого деплоя/рестарта."""
+        from discovery_api import session_registry as sr
+
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            if len(sleep_calls) >= 2:
+                raise asyncio.CancelledError()
+
+        with (
+            patch("discovery_api.session_registry.get_channel_count_refresh_initial_delay_seconds", return_value=30.0),
+            patch("discovery_api.session_registry.get_channel_count_refresh_interval_seconds", return_value=1800.0),
+            patch("discovery_api.session_registry.get_channel_count_refresh_enabled", return_value=True),
+            patch("discovery_api.session_registry.asyncio.sleep", side_effect=_fake_sleep),
+            patch.object(sr, "_channel_count_refresh_once", new_callable=AsyncMock) as once_mock,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await sr._channel_count_refresh_loop()
+
+        self.assertEqual(sleep_calls, [30.0, 1800.0])
+        once_mock.assert_awaited_once()
 
 
 if __name__ == "__main__":

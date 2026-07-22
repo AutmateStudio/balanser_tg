@@ -1,0 +1,566 @@
+{
+  "name": "VK добпавление по ссылке",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "vk-resolve-score",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "99dddf74-650f-4f14-84e0-4898e425ab67",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        224,
+        48
+      ],
+      "webhookId": "c7e3f048-ec89-41e9-8ae1-0d54cbd7c555"
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiBase = 'http://217.26.26.32:8000';\nconst apiKey = 'ПОДСТАВЬТЕ_API_KEY_ИЗ_ENV';\nconst wallPostsCount = 20;\n\nconst input = items[0].json || {};\nconst target = (input.query && input.query.target)\n  || (input.body && input.body.target)\n  || input.target\n  || '';\n\nreturn [{ json: { apiBase, apiKey, wallPostsCount, target } }];"
+      },
+      "id": "08b2eab2-5485-42df-8e4b-787cec166959",
+      "name": "Init",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.apiBase}}/groups/resolve",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"target\": \"{{$json.target}}\" }",
+        "options": {}
+      },
+      "id": "64a28020-9385-416b-89c5-fdf24ed5e8fd",
+      "name": "Resolve",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        48
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QZxEpjB2O8iPdiP0",
+          "name": "Авторизация поиск ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const init = $('Init').first().json;\nconst resolved = items[0].json;\nreturn [{ json: { ...init, vk_id: resolved.vk_id, resolve: resolved } }];"
+      },
+      "id": "eb45bd20-d683-4b5c-bb3b-852ca4c4d306",
+      "name": "Carry resolve",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.apiBase}}/groups/{{$json.vk_id}}/score?wall_posts_count={{$json.wallPostsCount}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "id": "8410f9a3-eb6d-4359-9a68-3bdc4af24b38",
+      "name": "Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1184,
+        64
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QZxEpjB2O8iPdiP0",
+          "name": "Авторизация поиск ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const init = $('Init').first().json;\nconst resolve = $('Resolve').first().json || {};\nconst score = items[0].json || {};\n\n// Объединяем metadata и score\nconst combinedMetadata = {\n    ...resolve.metadata, // старые данные из metadata\n    ...score // все поля из score\n};\n\nreturn [{ \n    json: {\n        target: init.target,\n        vk_id: resolve.vk_id,\n        vk_object_type: resolve.vk_object_type,\n        resolved_via: resolve.resolved_via,\n        screen_name_fragment: resolve.screen_name_fragment,\n        is_closed: resolve.is_closed,\n        is_closed_label: resolve.is_closed_label,\n        name: resolve.name,\n        members_count: resolve.members_count,\n        deactivated: resolve.deactivated,\n        closed_check_error: resolve.closed_check_error,\n        metadata: combinedMetadata, // теперь тут и metadata и score вместе\n        // убираем дублирующиеся поля из score, т.к. они уже в metadata\n    }\n}];"
+      },
+      "id": "1e52a9eb-94d7-43ea-bb89-49a340cc8566",
+      "name": "Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"target\": \"https://vk.com/club221310430\",\n    \"vk_id\": 221310430,\n    \"vk_object_type\": \"group\",\n    \"resolved_via\": \"embedded_id\",\n    \"screen_name_fragment\": \"club221310430\",\n    \"is_closed\": 0,\n    \"is_closed_label\": \"open\",\n    \"name\": \"Все о путешествиях\",\n    \"members_count\": 64113,\n    \"deactivated\": null,\n    \"closed_check_error\": null,\n    \"metadata\": {\n      \"vk_id\": 221310430,\n      \"name\": \"Все о путешествиях\",\n      \"screen_name\": \"club221310430\",\n      \"is_closed\": false,\n      \"vk_type\": \"group\",\n      \"deactivated\": null,\n      \"verified\": 0,\n      \"members_count\": 64113,\n      \"description\": \"Тревел блогинг – одно из самых популярных и востребованных направлений в современном мире. Многие люди мечтают путешествовать по разным странам и континентам, делиться полученными впечатлениями и опытом\",\n      \"activity\": \"Туризм, путешествия\",\n      \"photo_50\": \"https://sun1-18.userapi.com/s/v1/ig2/eTQcuWGWl2ds-xZ4vZLDzSnvZK1wMPPZxqlV7WrOFtM5KiCMRVnLsd70R9WLWvoe0eKzgxXc4109nRiYqqamSunU.jpg?quality=95&crop=552,228,816,816&as=32x32,48x48,72x72,108x108,160x160,240x240,360x360,480x480,540x540,640x640,720x720&ava=1&cs=50x50\",\n      \"photo_100\": \"https://sun1-18.userapi.com/s/v1/ig2/eTQcuWGWl2ds-xZ4vZLDzSnvZK1wMPPZxqlV7WrOFtM5KiCMRVnLsd70R9WLWvoe0eKzgxXc4109nRiYqqamSunU.jpg?quality=95&crop=552,228,816,816&as=32x32,48x48,72x72,108x108,160x160,240x240,360x360,480x480,540x540,640x640,720x720&ava=1&cs=100x100\",\n      \"photo_200\": \"https://sun1-18.userapi.com/s/v1/ig2/eTQcuWGWl2ds-xZ4vZLDzSnvZK1wMPPZxqlV7WrOFtM5KiCMRVnLsd70R9WLWvoe0eKzgxXc4109nRiYqqamSunU.jpg?quality=95&crop=552,228,816,816&as=32x32,48x48,72x72,108x108,160x160,240x240,360x360,480x480,540x540,640x640,720x720&ava=1&cs=200x200\",\n      \"country\": null,\n      \"city\": null,\n      \"site\": null,\n      \"counters\": {\n        \"photos\": 1,\n        \"albums\": 1,\n        \"audios\": null,\n        \"videos\": 589,\n        \"topics\": 0,\n        \"docs\": null,\n        \"market\": null\n      },\n      \"score\": null,\n      \"score_error\": null\n    },\n    \"score\": 52.84171723722528,\n    \"er\": 0.2199865861837693,\n    \"activity_norm\": 1,\n    \"block_activity\": 0.6,\n    \"scale\": 0.8011588121451471,\n    \"trust\": 0,\n    \"block_lead\": 0.4806952872870882,\n    \"recent_post_flag\": 1,\n    \"likes_avg\": 12589.15,\n    \"comments_avg\": 1514.85,\n    \"wall_error\": null,\n    \"groups_error\": null\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1424,
+        272
+      ],
+      "id": "fe3c729a-54ed-4f3d-b7f9-f6cebd34095a",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        432,
+        240
+      ],
+      "id": "9cb96030-527d-418d-a11c-de8cf19bf54b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_active": false,
+            "external_url": "={{ $json.target }}",
+            "description": "={{ $json.metadata.description }}",
+            "external_channel_id": "=-{{ $json.vk_id }}",
+            "platform_id": 1,
+            "name": "={{ $json.metadata.name }}",
+            "metadata": "={{ $json.metadata }}",
+            "linked_projects_count": 0,
+            "created_at": "={{ $now.toISO() }}",
+            "updated_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [
+            "platform_id",
+            "external_channel_id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "platform_id",
+              "displayName": "platform_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "external_channel_id",
+              "displayName": "external_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "external_url",
+              "displayName": "external_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "image_url",
+              "displayName": "image_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "metadata",
+              "displayName": "metadata",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "linked_projects_count",
+              "displayName": "linked_projects_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "is_active",
+              "displayName": "is_active",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1712,
+        64
+      ],
+      "id": "7116d4d3-3628-49af-838b-9fd7ea63d8f6",
+      "name": "Insert or update rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "на вебхук отправляется target, содержит ссылку на группу ВК\nЗаписывает upsert в БД\nЕсли группа закрыта вернет данные по закрытой группе с инфой что она закрыта\n"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        768,
+        -352
+      ],
+      "id": "aa9c42ae-4fc9-489b-9dd2-36ffd5549107",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"vk_id\": 102246790,\n    \"vk_object_type\": \"group\",\n    \"resolved_via\": \"embedded_id\",\n    \"screen_name_fragment\": \"club102246790\",\n    \"is_closed\": 1,\n    \"is_closed_label\": \"closed\",\n    \"name\": \"ПИАР/Бизнес/Продвижение  \\\"Звезда Успеха\\\"\",\n    \"deactivated\": null,\n    \"members_count\": 9490,\n    \"metadata\": null,\n    \"closed_check_error\": null\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        656,
+        240
+      ],
+      "id": "3fd8ec88-a7ce-4be9-92c5-8734897a8069",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a2e6dd09-80cd-4de7-9d89-ecc15fe056a1",
+              "leftValue": "={{ $json.is_closed_label }}",
+              "rightValue": "closed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        816,
+        48
+      ],
+      "id": "2664d82a-034d-47d8-8b58-e809c0983cbe",
+      "name": "Is closed"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1008,
+        -112
+      ],
+      "id": "1fd7bead-b8ab-4d74-b9a0-cabf36f96766",
+      "name": "Return closed data"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1936,
+        64
+      ],
+      "id": "be560728-44ce-4b93-ae15-de949b615601",
+      "name": "Return full"
+    },
+    {
+      "parameters": {
+        "url": "https://mokuegopasan.beget.app/webhook/vk-resolve-score",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "https://vk.com/club102246790"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        560,
+        -320
+      ],
+      "id": "23f091c2-ec9b-4123-bc1a-821220bfffaa",
+      "name": "Тестовый запуск"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Init",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init": {
+      "main": [
+        [
+          {
+            "node": "Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve": {
+      "main": [
+        [
+          {
+            "node": "Is closed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carry resolve": {
+      "main": [
+        [
+          {
+            "node": "Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score": {
+      "main": [
+        [
+          {
+            "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result": {
+      "main": [
+        [
+          {
+            "node": "Insert or update rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Insert or update rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert or update rows in a table": {
+      "main": [
+        [
+          {
+            "node": "Return full",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Is closed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is closed": {
+      "main": [
+        [
+          {
+            "node": "Return closed data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Carry resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

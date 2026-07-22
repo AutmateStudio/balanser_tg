@@ -1,0 +1,694 @@
+{
+  "name": "Discovery API — полная настройка clump (пауза 30с)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1000001-0001-4001-8001-000000000001",
+      "name": "Старт вручную",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-baseUrl",
+              "name": "baseUrl",
+              "value": "https://lidogen-balancer-tg-prod.web.oboyma.ai",
+              "type": "string"
+            },
+            {
+              "id": "cfg-apiKey",
+              "name": "apiKey",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "cfg-sessionList",
+              "name": "sessionList",
+              "value": "Client1,Client2,Client3",
+              "type": "string"
+            },
+            {
+              "id": "cfg-sessionName",
+              "name": "sessionName",
+              "value": "Client1",
+              "type": "string"
+            },
+            {
+              "id": "cfg-channels",
+              "name": "channels",
+              "value": "@telegram,@durov",
+              "type": "string"
+            },
+            {
+              "id": "cfg-webhookUrl",
+              "name": "webhookUrl",
+              "value": "https://webhook.site/ЗАМЕНИ-НА-СВОЙ-UUID",
+              "type": "string"
+            },
+            {
+              "id": "cfg-clumpName",
+              "name": "clumpName",
+              "value": "n8n-clump",
+              "type": "string"
+            },
+            {
+              "id": "cfg-query",
+              "name": "query",
+              "value": "крипта инвестиции",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000002-0002-4002-8002-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [240, 400],
+      "notes": "Заполните apiKey, sessionList (имена .session без расширения), channels, webhookUrl. sessionName — для проверки discover."
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/health",
+        "options": {}
+      },
+      "id": "a1000003-0003-4003-8003-000000000003",
+      "name": "01 Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "a1000004-0004-4004-8004-000000000004",
+      "name": "Wait 30s — после Health",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [720, 400],
+      "webhookId": "w1000004-0004-4004-8004-000000000004"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $('Config').first().json.sessionList || '';\nconst sessions = raw.split(',').map((s) => s.trim()).filter(Boolean);\nif (!sessions.length) {\n  throw new Error('sessionList пуст — укажите имена сессий в Config');\n}\nreturn sessions.map((session_name) => ({ json: { session_name } }));"
+      },
+      "id": "a1000005-0005-4005-8005-000000000005",
+      "name": "Сессии в список",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "a1000006-0006-4006-8006-000000000006",
+      "name": "QR по сессиям",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1200, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/auth/qr",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $json.session_name }}\"\n}",
+        "options": {}
+      },
+      "id": "a1000007-0007-4007-8007-000000000007",
+      "name": "02 QR создать",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 280],
+      "continueOnFail": true,
+      "notes": "Отсканируйте qr_url из ответа в Telegram до истечения паузы 30с."
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "a1000008-0008-4008-8008-000000000008",
+      "name": "Wait 30s — скан QR",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1680, 280],
+      "webhookId": "w1000008-0008-4008-8008-000000000008"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/auth/qr/{{ $('02 QR создать').item.json.session_id }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000009-0009-4009-8009-000000000009",
+      "name": "03 QR статус",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 280],
+      "continueOnFail": true,
+      "notes": "Если status != success — запустите workflow снова или добавьте цикл IF+Wait."
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "a1000010-0010-4010-8010-000000000010",
+      "name": "Wait 30s — после QR",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2160, 280],
+      "webhookId": "w1000010-0010-4010-8010-000000000010"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/start",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name_list\": {{ JSON.stringify($('Config').item.json.sessionList.split(',').map(s => s.trim()).filter(Boolean)) }},\n  \"clump_name\": \"{{ $('Config').item.json.clumpName }}\",\n  \"channel_list\": {{ JSON.stringify($('Config').item.json.channels.split(',').map(s => s.trim()).filter(Boolean)) }},\n  \"webhook_url\": \"{{ $('Config').item.json.webhookUrl }}\"\n}",
+        "options": {}
+      },
+      "id": "a1000011-0011-4011-8011-000000000011",
+      "name": "04 Parser start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 520],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "a1000012-0012-4012-8012-000000000012",
+      "name": "Wait 30s — после start",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1680, 520],
+      "webhookId": "w1000012-0012-4012-8012-000000000012"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/status/{{ $('04 Parser start').item.json.parser_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000013-0013-4013-8013-000000000013",
+      "name": "05 Parser status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 520],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "a1000014-0014-4014-8014-000000000014",
+      "name": "Wait 30s — после status",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2160, 520],
+      "webhookId": "w1000014-0014-4014-8014-000000000014"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/accounts/all",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000015-0015-4015-8015-000000000015",
+      "name": "06 Accounts all",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2400, 520],
+      "continueOnFail": true,
+      "notes": "Проверьте: session_file_exists, in_clump, connected, running = true."
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "a1000016-0016-4016-8016-000000000016",
+      "name": "Wait 30s — после accounts",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2640, 520],
+      "webhookId": "w1000016-0016-4016-8016-000000000016"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/discover",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"query\": \"{{ $('Config').item.json.query }}\",\n  \"first_pass_limit\": 5,\n  \"similarity_depth\": 1,\n  \"include_global_search\": true,\n  \"include_groups\": false\n}",
+        "options": {}
+      },
+      "id": "a1000017-0017-4017-8017-000000000017",
+      "name": "07 Discover каналы",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 520],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "a1000018-0018-4018-8018-000000000018",
+      "name": "Wait 30s — после discover",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [3120, 520],
+      "webhookId": "w1000018-0018-4018-8018-000000000018"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/discover-groups",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session_name\": \"{{ $('Config').item.json.sessionName }}\",\n  \"word\": \"{{ $('Config').item.json.query }}\",\n  \"limit\": 20,\n  \"depth\": 2\n}",
+        "options": {}
+      },
+      "id": "a1000019-0019-4019-8019-000000000019",
+      "name": "08 Discover группы",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3360, 520],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "a1000020-0020-4020-8020-000000000020",
+      "name": "Wait 30s — после discover-groups",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [3600, 520],
+      "webhookId": "w1000020-0020-4020-8020-000000000020"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/{{ $('04 Parser start').item.json.parser_id }}/channels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000021-0021-4021-8021-000000000021",
+      "name": "09 Parser channels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3840, 520],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "a1000022-0022-4022-8022-000000000022",
+      "name": "Wait 30s — после channels",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [4080, 520],
+      "webhookId": "w1000022-0022-4022-8022-000000000022"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.baseUrl }}/discovery-api/parser/queue/metrics",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Config').item.json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000023-0023-4023-8023-000000000023",
+      "name": "10 Queue metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4320, 520],
+      "continueOnFail": true,
+      "notes": "503 — PG-очередь выключена, это нормально если USE_PG_QUEUE=false."
+    }
+  ],
+  "connections": {
+    "Старт вручную": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "01 Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01 Health": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s — после Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s — после Health": {
+      "main": [
+        [
+          {
+            "node": "Сессии в список",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сессии в список": {
+      "main": [
+        [
+          {
+            "node": "QR по сессиям",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "QR по сессиям": {
+      "main": [
+        [
+          {
+            "node": "02 QR создать",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "04 Parser start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 QR создать": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s — скан QR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s — скан QR": {
+      "main": [
+        [
+          {
+            "node": "03 QR статус",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 QR статус": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s — после QR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s — после QR": {
+      "main": [
+        [
+          {
+            "node": "QR по сессиям",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Parser start": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s — после start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s — после start": {
+      "main": [
+        [
+          {
+            "node": "05 Parser status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s — после status": {
+      "main": [
+        [
+          {
+            "node": "06 Accounts all",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Parser status": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s — после status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Accounts all": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s — после accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s — после accounts": {
+      "main": [
+        [
+          {
+            "node": "07 Discover каналы",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Discover каналы": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s — после discover",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s — после discover": {
+      "main": [
+        [
+          {
+            "node": "08 Discover группы",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Discover группы": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s — после discover-groups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s — после discover-groups": {
+      "main": [
+        [
+          {
+            "node": "09 Parser channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Parser channels": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s — после channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s — после channels": {
+      "main": [
+        [
+          {
+            "node": "10 Queue metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

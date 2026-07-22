@@ -1,0 +1,335 @@
+{
+  "name": "Обновить данные слушателя",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "Name"
+            },
+            {
+              "name": "webhook"
+            },
+            {
+              "name": "walls",
+              "type": "array"
+            },
+            {
+              "name": "post_count",
+              "type": "number"
+            },
+            {
+              "name": "poll_interval",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -352,
+        128
+      ],
+      "id": "b95198ad-44dd-42fd-ad54-4a884ae55a20",
+      "name": "Получаем данные для обновления"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/{{ $json.Name }}/stop",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -112,
+        128
+      ],
+      "id": "6b06279b-8153-4e43-88a0-b2623a0ff781",
+      "name": "Останавливаем текущий слушатель",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/{{ $('Получаем данные для обновления').item.json.Name }}/start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"webhook_url\": \"{{ $('Получаем данные для обновления').item.json.webhook }}\",\n  \"watch_walls\": [{{ $('Получаем данные для обновления').item.json.walls }}],\n  \"wall_posts_count\": {{ $('Получаем данные для обновления').item.json.post_count }},\n  \"poll_interval\": {{ $('Получаем данные для обновления').item.json.poll_interval }}\n}",
+        "options": {
+          "timeout": "={{ 600*1000 }}"
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        304,
+        128
+      ],
+      "id": "5516d6cc-e8c9-4d9c-abe6-3cfb9e268783",
+      "name": "Запускаем слушатель с обновленнными данными",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "MHgyxnT6ZHKNLLnL",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/MHgyxnT6ZHKNLLnL",
+          "cachedResultName": "Обновить данные слушателя"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "Server_account_3",
+            "walls": "[-223842311, -119391806, -233538348]",
+            "webhook": "https://mokuegopasan.beget.app/webhook/comment-reciever",
+            "post_count": 30,
+            "poll_interval": 30
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "webhook",
+              "displayName": "webhook",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "walls",
+              "displayName": "walls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array",
+              "removed": false
+            },
+            {
+              "id": "post_count",
+              "displayName": "post_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "poll_interval",
+              "displayName": "poll_interval",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -128,
+        -224
+      ],
+      "id": "31a649d9-e854-403c-b7f3-72d375fed07c",
+      "name": "Call 'Обновить данные слушателя'"
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        96,
+        128
+      ],
+      "id": "0c6325dc-6aa2-4472-8546-d468b618bcec",
+      "name": "Ждем 60 сек.",
+      "webhookId": "7786e36e-c928-4f57-acc6-3754086b6099"
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:3000/listeners/vk-user/Server_account_3/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        304,
+        320
+      ],
+      "id": "efabba8d-ea46-49c7-9de2-8c49d6de0d2e",
+      "name": "VK: статус мониторинга",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/Server_account_3/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        128
+      ],
+      "id": "dbe872d1-d699-4904-97c4-e8e6c0c75611",
+      "name": "VK: статус мониторинга1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 20
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        496,
+        128
+      ],
+      "id": "365d41ae-d45f-42e1-9baa-a35caef39be2",
+      "name": "Ждем 20 сек.1",
+      "webhookId": "7786e36e-c928-4f57-acc6-3754086b6099"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/Server_account_3/stop",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -96,
+        368
+      ],
+      "id": "37f8b011-eded-4b01-86cd-be7ee06bef01",
+      "name": "Останавливаем текущий слушатель1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Получаем данные для обновления": {
+      "main": [
+        [
+          {
+            "node": "Останавливаем текущий слушатель",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Останавливаем текущий слушатель": {
+      "main": [
+        [
+          {
+            "node": "Ждем 60 сек.",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ждем 60 сек.": {
+      "main": [
+        [
+          {
+            "node": "Запускаем слушатель с обновленнными данными",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запускаем слушатель с обновленнными данными": {
+      "main": [
+        [
+          {
+            "node": "Ждем 20 сек.1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ждем 20 сек.1": {
+      "main": [
+        [
+          {
+            "node": "VK: статус мониторинга1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

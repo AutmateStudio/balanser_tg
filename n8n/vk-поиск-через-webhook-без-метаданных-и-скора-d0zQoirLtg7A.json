@@ -1,0 +1,392 @@
+{
+  "name": "VK — поиск (через webhook)(Без метаданных и скора)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vk/search",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "e51f5179-20c1-4862-9466-7b0f5c746481",
+      "name": "Webhook вход",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "vk-search-start"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "q",
+              "type": "string",
+              "value": "={{$json.body.q}}"
+            },
+            {
+              "id": "a2",
+              "name": "type",
+              "type": "string",
+              "value": "={{$json.body.type || 'group'}}"
+            },
+            {
+              "id": "a3",
+              "name": "count",
+              "type": "number",
+              "value": "={{$json.body.count || 20}}"
+            },
+            {
+              "id": "a4",
+              "name": "offset",
+              "type": "number",
+              "value": "={{$json.body.offset || 0}}"
+            },
+            {
+              "id": "a5",
+              "name": "sort",
+              "type": "number",
+              "value": "={{$json.body.sort || 6}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3060c76f-c1d7-412f-a7e5-b39299661524",
+      "name": "Нормализовать вход",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        256,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:8000/groups/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ q: $json.q, type: $json.type, count: $json.count, offset: $json.offset, sort: $json.sort }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "006d6908-60b1-4be5-8bbb-98f967b4ff61",
+      "name": "VK API: /groups/search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        512,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QZxEpjB2O8iPdiP0",
+          "name": "Авторизация поиск ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "661a4d76-609b-44a8-887c-365cfbdd021b",
+      "name": "Ответ клиенту",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -256
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_active": false,
+            "id": 0,
+            "platform_id": 0,
+            "linked_projects_count": 0
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "platform_id",
+              "displayName": "platform_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_channel_id",
+              "displayName": "external_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "external_url",
+              "displayName": "external_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "image_url",
+              "displayName": "image_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "metadata",
+              "displayName": "metadata",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "linked_projects_count",
+              "displayName": "linked_projects_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "is_active",
+              "displayName": "is_active",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        912,
+        -256
+      ],
+      "id": "b6b12b16-950e-473c-ba9f-f7fd4fd64d8f",
+      "name": "Insert or update rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "MT0DVs8fV57WNl5G",
+          "name": "Доступ_к_ядру"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://mokuegopasan.beget.app/webhook/vk/search",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "йога"
+            },
+            {
+              "name": "type",
+              "value": "group"
+            },
+            {
+              "name": "count",
+              "value": "20"
+            },
+            {
+              "name": "offset",
+              "value": "0"
+            },
+            {
+              "name": "sort",
+              "value": "6"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        240,
+        -208
+      ],
+      "id": "b82e24f7-a4c5-4fbc-8359-4e092f68197f",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        16,
+        -208
+      ],
+      "id": "61243ce9-8ef1-4ce8-b479-73e3f2c54927",
+      "name": "When clicking ‘Execute workflow’"
+    }
+  ],
+  "connections": {
+    "Webhook вход": {
+      "main": [
+        [
+          {
+            "node": "Нормализовать вход",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Нормализовать вход": {
+      "main": [
+        [
+          {
+            "node": "VK API: /groups/search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VK API: /groups/search": {
+      "main": [
+        []
+      ]
+    },
+    "Insert or update rows in a table": {
+      "main": [
+        [
+          {
+            "node": "Ответ клиенту",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

@@ -1,0 +1,514 @@
+{
+  "name": "Обновляем посты для мониторинга",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "MHgyxnT6ZHKNLLnL",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/MHgyxnT6ZHKNLLnL",
+          "cachedResultName": "Обновить данные слушателя"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "Server_account_3",
+            "webhook": "={{ $('Получаем id всех клиентов и их вебхуки').item.json.Webhook }}",
+            "walls": "={{ $json.Groups }}",
+            "post_count": 5,
+            "poll_interval": 60
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "webhook",
+              "displayName": "webhook",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "walls",
+              "displayName": "walls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array",
+              "removed": false
+            },
+            {
+              "id": "post_count",
+              "displayName": "post_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "poll_interval",
+              "displayName": "poll_interval",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        640,
+        -32
+      ],
+      "id": "dafb2ccf-c578-4566-890f-cb45312cea7a",
+      "name": "Call 'Обновить данные слушателя'",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "3kG2vmGLTHN9ACXs",
+          "mode": "list",
+          "cachedResultName": "Клиент->Вебхук",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/3kG2vmGLTHN9ACXs"
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -208,
+        -48
+      ],
+      "id": "79a88de7-3b61-495b-a89b-2480768bb5a7",
+      "name": "Получаем id всех клиентов и их вебхуки",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        0,
+        -48
+      ],
+      "id": "83b15bb1-23e6-4068-b99d-845eacd52f04",
+      "name": "Проходим по клиентам",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "z9maAvjRPMd4O3ik",
+          "mode": "list",
+          "cachedResultName": "Группы клиента",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/z9maAvjRPMd4O3ik"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Client_id",
+              "keyValue": "={{ $json.Client }}"
+            },
+            {
+              "keyName": "Active",
+              "condition": "isTrue"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        -32
+      ],
+      "id": "cebd8eeb-ab03-4404-b1b4-014b98c7c5ca",
+      "name": "Получаем список групп",
+      "alwaysOutputData": true,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst groups = items.map((item) => `-${String(item.json.Group)}`);\n\nconst clientId = items[0]?.json.Client_id;\n\nreturn [\n  {\n    json: {\n      Client_id: clientId,\n      Groups: groups,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        -32
+      ],
+      "id": "69af21e7-8fc7-48d3-b2fc-1505adbfd9db",
+      "name": "Code in JavaScript",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -416,
+        -48
+      ],
+      "id": "e87de2a8-36a1-4d56-b0d2-54693153b600",
+      "name": "Раз в час",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "limit": 5,
+        "where": {
+          "values": [
+            {
+              "column": "platform_id",
+              "value": "1"
+            },
+            {
+              "column": "is_active",
+              "value": "=True"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -144,
+        -272
+      ],
+      "id": "a14d2d3c-c9f3-424b-a9bd-ae557705942e",
+      "name": "Select rows from a table",
+      "credentials": {
+        "postgres": {
+          "id": "MT0DVs8fV57WNl5G",
+          "name": "Доступ_к_ядру"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst groups = items.map((item) => `${String(item.json.external_channel_id)}`);\n\nconst clientId = items[0]?.json.Client_id;\n\nreturn [\n  {\n    json: {\n      Client_id: clientId,\n      Groups: groups,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -272
+      ],
+      "id": "30ec5374-eb79-4e5a-a8ae-ee438050c901",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "3kG2vmGLTHN9ACXs",
+          "mode": "list",
+          "cachedResultName": "Клиент->Вебхук",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/3kG2vmGLTHN9ACXs"
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -352,
+        -272
+      ],
+      "id": "6948f068-f415-4d52-bb3a-645c6783b212",
+      "name": "Получаем id всех клиентов и их вебхуки1"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "MHgyxnT6ZHKNLLnL",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/MHgyxnT6ZHKNLLnL",
+          "cachedResultName": "Обновить данные слушателя"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "Server_account_3",
+            "webhook": "={{ $('Получаем id всех клиентов и их вебхуки1').item.json.Webhook }}",
+            "walls": "={{ $json.Groups }}",
+            "poll_interval": 60,
+            "post_count": 10
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "webhook",
+              "displayName": "webhook",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "walls",
+              "displayName": "walls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array",
+              "removed": false
+            },
+            {
+              "id": "post_count",
+              "displayName": "post_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "poll_interval",
+              "displayName": "poll_interval",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        464,
+        -272
+      ],
+      "id": "31fd4ffa-27ac-49ec-ae81-6588f49f8f98",
+      "name": "Call 'Обновить данные слушателя'1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -560,
+        -272
+      ],
+      "id": "78cab4c0-56af-4b6a-b479-5b9c69d0a860",
+      "name": "Раз в 20 минут"
+    }
+  ],
+  "connections": {
+    "Получаем id всех клиентов и их вебхуки": {
+      "main": [
+        [
+          {
+            "node": "Проходим по клиентам",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проходим по клиентам": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Получаем список групп",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем список групп": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'Обновить данные слушателя'": {
+      "main": [
+        [
+          {
+            "node": "Проходим по клиентам",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Call 'Обновить данные слушателя'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Раз в час": {
+      "main": [
+        [
+          {
+            "node": "Получаем id всех клиентов и их вебхуки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select rows from a table": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем id всех клиентов и их вебхуки1": {
+      "main": [
+        [
+          {
+            "node": "Select rows from a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Call 'Обновить данные слушателя'1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Раз в 20 минут": {
+      "main": [
+        [
+          {
+            "node": "Получаем id всех клиентов и их вебхуки1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:В полночь": {
+      "recurrenceRules": []
+    },
+    "node:Раз в час": {
+      "recurrenceRules": []
+    },
+    "node:Раз в 20 минут": {
+      "recurrenceRules": []
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

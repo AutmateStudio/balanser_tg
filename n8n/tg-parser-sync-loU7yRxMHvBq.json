@@ -1,0 +1,540 @@
+{
+  "name": "tg-parser-sync",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.addCount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "id": "84c763ef-609a-4801-aa41-f2d0a8d8fc69"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "69ac17e0-4987-44ce-9735-e8797422e442",
+      "name": "If has new",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        336,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.removeCount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "20e7fdb4-03b9-4758-b3fc-f5a046ea6afe",
+      "name": "If has removed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        336,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://194.156.117.160:8100/discovery-api/parser/{{ $json.parserId }}/remove-channels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($json.channelsToRemove) }}\n}",
+        "options": {}
+      },
+      "id": "5ff0a408-8a60-4d98-b904-11f2530a78c9",
+      "name": "Remove channels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        592,
+        432
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "7775abbb-4a9b-4f76-9b9d-ce512001fb7d",
+      "name": "Every 1m1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -768,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "platform_id",
+              "value": "2"
+            },
+            {
+              "column": "is_active",
+              "value": "True"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "077a7229-6d97-4af9-82d0-4c3ff6a9e864",
+      "name": "Get new channels1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -560,
+        352
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://194.156.117.160:8100/discovery-api/parser/list",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "9e84bd9e-4a4b-4e11-931c-090d7637b0f9",
+      "name": "List parsers1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        352
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "parserId",
+              "value": "={{ $json.parser_id }}",
+              "type": "string",
+              "id": "873f03c1-ce07-41d3-88f3-8a2e7a3da2eb"
+            },
+            {
+              "name": "channels",
+              "value": "={{ $json.channel_list }}",
+              "type": "array",
+              "id": "63347cda-8e5e-4c48-ac51-89a8905cc3f5"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1b4e64ea-1a20-43c8-ac64-b90154bb55ef",
+      "name": "Pick parser1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -96,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dbItems = $('Get new channels1').all();\nconst pick = $('Pick parser1').first().json;\n\nconst parserId = pick.parserId;\nconst listenedRaw = Array.isArray(pick.channels) ? pick.channels : [];\n\nconst norm = (raw) => String(raw || '').trim().replace(/^https?:\\/\\/t\\.me\\//i, '').replace(/^@/, '').toLowerCase();\n\nconst listenedSet = new Set(listenedRaw.map(norm));\nconst channelsToAdd = [];\nconst rowsToAdd = [];\nconst activeDbSet = new Set();\n\nfor (const item of dbItems) {\n  const ch = item.json || {};\n  if (ch.is_active === false) continue;\n  let username = ch?.metadata?.username;\n  if (!username && typeof ch.external_url === 'string') {\n    const m = ch.external_url.match(/t\\.me\\/(@?[A-Za-z0-9_]+)/i);\n    if (m) username = m[1];\n  }\n  if (!username) continue;\n  const key = norm(username);\n  activeDbSet.add(key);\n  if (!listenedSet.has(key)) {\n    const ref = '@' + username.replace(/^@/, '');\n    channelsToAdd.push(ref);\n    rowsToAdd.push({ id: ch.id, channel_ref: ref, username, external_url: ch.external_url, name: ch.name });\n  }\n}\n\nconst channelsToRemove = listenedRaw.filter(c => !activeDbSet.has(norm(c)));\n\nreturn [{ json: { parserId, channelsToAdd, addCount: channelsToAdd.length, rowsToAdd, channelsToRemove, removeCount: channelsToRemove.length } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        352
+      ],
+      "id": "72e6e46b-b1e4-43eb-ba84-0a35742cda3c",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://194.156.117.160:8100/discovery-api/parser/{{ $json.parserId }}/add-channels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($json.channelsToAdd) }}\n}",
+        "options": {}
+      },
+      "id": "5588b24d-cb2d-418e-8ed4-b3edb7c7e027",
+      "name": "Add channels1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        576,
+        256
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://194.156.117.160:8100/discovery-api/parser/stop/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -32,
+        -16
+      ],
+      "id": "64f02368-a76f-4581-95f1-c3a13c31615b",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://194.156.117.160:8100/discovery-api/parser/list",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "4affc866-726d-4427-8614-9ece1334f89f",
+      "name": "List parsers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -256,
+        -16
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://194.156.117.160:8100/discovery-api/parser/status/3dbd2ebb9cbd4e3b8207609af35a0806",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "dad46df5-89e7-463a-8979-5728dfb9dc51",
+      "name": "List parsers2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -464,
+        -16
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "http://194.156.117.160:8100/discovery-api/parser/506cbb8d033c47598e83cf9253f90eae",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "922ccabc-a284-41b9-b2a3-95f524a49c8a",
+      "name": "List parsers3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -464,
+        -144
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "http://194.156.117.160:8100/discovery-api/parser/7379303f2e4e4a6d9634516082fb0a67",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "843f7ac8-80a8-4df8-850b-f3171df15997",
+      "name": "List parsers4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -272,
+        -160
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://194.156.117.160:8100/discovery-api/parser/start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"session_name\": \"/app/sessions/Lidochka_main\",\n  \"webhook_url\": \"https://mokuegopasan.beget.app/webhook/telegram-messages\",\n  \"channel_list\": [\n    \"@pravoalpha\",\n    \"@grpolidotest\",\n    \"@balichat\"\n  ]\n}",
+        "options": {}
+      },
+      "id": "73d1abe3-f168-4477-b75a-332b2516dd4c",
+      "name": "List parsers5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -48,
+        -160
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://194.156.117.160:8100/discovery-api/parser/start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"session_name\": \"/app/sessions/Lidochka_main\",\n  \"webhook_url\": \"https://mokuegopasan.beget.app/webhook/telegram-messages\",\n  \"channel_list\": [\n    \"@pravoalpha\",\n    \"@grpolidotest\"\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -80,
+        192
+      ],
+      "id": "4379a09f-280d-43d0-ad04-1e7c7cf422c1",
+      "name": "HTTP Request1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "If has new": {
+      "main": [
+        [
+          {
+            "node": "Add channels1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If has removed": {
+      "main": [
+        [
+          {
+            "node": "Remove channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 1m1": {
+      "main": [
+        [
+          {
+            "node": "Get new channels1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get new channels1": {
+      "main": [
+        [
+          {
+            "node": "List parsers1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List parsers1": {
+      "main": [
+        [
+          {
+            "node": "Pick parser1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick parser1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If has new",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If has removed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Every 1m1": {
+      "recurrenceRules": []
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

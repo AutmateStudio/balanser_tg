@@ -1,0 +1,730 @@
+{
+  "name": "Добавление по ссылке ТГ (новый prod API)",
+  "nodes": [
+    {
+      "id": "c00070b2-28d2-4a30-a8ab-8e033f009289",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        -544,
+        -32
+      ],
+      "webhookId": "c4393189-dc24-4618-a7eb-1fb8ec57b057",
+      "parameters": {
+        "path": "tg-resolve-score",
+        "options": {},
+        "responseMode": "responseNode"
+      },
+      "typeVersion": 2.1
+    },
+    {
+      "id": "79264701-2276-4a73-ab1f-ea626081f53f",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -96,
+        -32
+      ],
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/add-channel-by-link",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "authentication": "genericCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_name",
+              "value": "/app/sessions/Client1"
+            },
+            {
+              "name": "link",
+              "value": "={{ $json.body.target }}"
+            }
+          ]
+        },
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      },
+      "retryOnFail": true,
+      "typeVersion": 4.4
+    },
+    {
+      "id": "9b6a2d54-2a2b-4756-b4af-de7afec898ec",
+      "name": "Is closed",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        128,
+        -32
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 3,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a2e6dd09-80cd-4de7-9d89-ecc15fe056a1",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.join_request }}",
+              "rightValue": "closed"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2.3
+    },
+    {
+      "id": "e011a59a-1da5-48ac-a7b1-a3ac8dc2377f",
+      "name": "Return full",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [
+        832,
+        96
+      ],
+      "parameters": {
+        "options": {},
+        "respondWith": "allIncomingItems"
+      },
+      "typeVersion": 1.5
+    },
+    {
+      "id": "ac0544f5-90aa-473d-9d49-dbcf3cee69b3",
+      "name": "Тестовый запуск",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -144,
+        -240
+      ],
+      "parameters": {
+        "url": "https://n8n-lidogen.web.oboyma.ai/webhook/tg-resolve-score",
+        "options": {},
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "лидотест_поисковый1"
+            }
+          ]
+        }
+      },
+      "typeVersion": 4.4
+    },
+    {
+      "id": "b34d90a9-66ff-42b3-9dd3-f7880e5707a3",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -304,
+        176
+      ],
+      "parameters": {
+        "mode": "raw",
+        "options": {},
+        "jsonOutput": "\n  {\n    \"headers\": {\n      \"host\": \"mokuegopasan.beget.app\",\n      \"user-agent\": \"axios/1.13.5\",\n      \"content-length\": \"36\",\n      \"accept\": \"application/json,text/html,application/xhtml+xml,application/xml,text/*;q=0.9, image/*;q=0.8, */*;q=0.7\",\n      \"accept-encoding\": \"gzip, compress, deflate, br\",\n      \"content-type\": \"application/json\",\n      \"x-forwarded-for\": \"172.18.0.1\",\n      \"x-forwarded-host\": \"mokuegopasan.beget.app\",\n      \"x-forwarded-port\": \"443\",\n      \"x-forwarded-proto\": \"https\",\n      \"x-forwarded-server\": \"ed84361b6596\",\n      \"x-real-ip\": \"172.18.0.1\"\n    },\n    \"params\": {},\n    \"query\": {},\n    \"body\": {\n      \"target\": \"https://t.me/pravoalpha\"\n    },\n    \"webhookUrl\": \"https://n8n-lidogen.web.oboyma.ai/webhook/tg-resolve-score\",\n    \"executionMode\": \"production\"\n  }\n"
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "58f9199d-dac4-447c-8c03-5f840e5934c6",
+      "name": "When clicking ‘Execute workflow’",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [
+        -544,
+        176
+      ],
+      "parameters": {},
+      "typeVersion": 1
+    },
+    {
+      "id": "db6794ce-b2bb-408d-8aaf-10a54cd7611f",
+      "name": "Апсертим значения в таблицу source_channels1",
+      "type": "n8n-nodes-base.postgres",
+      "onError": "continueRegularOutput",
+      "position": [
+        608,
+        96
+      ],
+      "parameters": {
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "source_channels",
+          "cachedResultName": "source_channels"
+        },
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "columns": {
+          "value": {
+            "name": "={{ $json.title }}",
+            "metadata": "={{\n  {\n    name: $json.title,\n    username: $json.username,\n    about: $json.about,\n    participants_count: $json.participants_count,\n    scam: $json.scam,\n    score: $json.score,\n    score_breakdown: $json.score_breakdown\n  }\n}}",
+            "created_at": "={{ $now }}",
+            "platform_id": "=2",
+            "external_url": "=https://t.me/{{ $json.username }}",
+            "external_channel_id": "={{ $json.peer_id.toString().replace('-100', '') }}"
+          },
+          "schema": [
+            {
+              "id": "id",
+              "type": "number",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "id",
+              "defaultMatch": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "platform_id",
+              "type": "number",
+              "display": true,
+              "required": true,
+              "displayName": "platform_id",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_channel_id",
+              "type": "string",
+              "display": true,
+              "required": true,
+              "displayName": "external_channel_id",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "name",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "type": "string",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "description",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_url",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "external_url",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_url",
+              "type": "string",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "image_url",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "metadata",
+              "type": "object",
+              "display": true,
+              "required": false,
+              "displayName": "metadata",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "linked_projects_count",
+              "type": "number",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "linked_projects_count",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "is_active",
+              "type": "boolean",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "is_active",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "type": "dateTime",
+              "display": true,
+              "required": false,
+              "displayName": "created_at",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "type": "dateTime",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "updated_at",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "id"
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      },
+      "typeVersion": 2.6
+    },
+    {
+      "id": "f8e8d50b-8675-4626-873c-dba1767d8435",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        256,
+        -480
+      ],
+      "parameters": {
+        "height": 208,
+        "content": "{{ $('Общие данные').item.json.telegram_message.chat_id.toString().replace('-100', '') }}"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "6caf9590-8b91-405a-b621-d674f028b310",
+      "name": "Edit Fields1",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -96,
+        176
+      ],
+      "parameters": {
+        "mode": "raw",
+        "options": {},
+        "jsonOutput": "\n  {\n    \"peer_id\": -1003693224864,\n    \"title\": \"тест лидоген 3\",\n    \"username\": \"grtetlidog\",\n    \"participants_count\": 2,\n    \"depth\": 0,\n    \"source\": \"search\",\n    \"recommended_by\": null,\n    \"score\": 19,\n    \"score_breakdown\": {\n      \"relevance\": 0.75,\n      \"liveness\": 0.03981067661402026,\n      \"audience_quality\": 0.5225,\n      \"reachability\": 0.4,\n      \"geom_core\": 0.202635383022888,\n      \"depth_factor\": 1,\n      \"source_factor\": 1,\n      \"size_boost\": 1.0647508747628576\n    },\n    \"score_signals\": {\n      \"query_overlap\": 1,\n      \"query_exact_in_title\": false,\n      \"query_exact_in_about\": false,\n      \"freshness\": 0.9999966138697884,\n      \"cadence_posts_30d\": 3,\n      \"engagement_proxy\": 0.25,\n      \"reactions_per_view\": 0,\n      \"comments_proxy\": 0,\n      \"online_ratio_pct\": 0,\n      \"views_cv\": 0,\n      \"reaction_dominant_posts_frac\": 0,\n      \"bots_ratio_sample\": null,\n      \"members_count\": 2,\n      \"posts_scanned\": 3,\n      \"depth\": 0,\n      \"source\": \"search\",\n      \"recent_posts_limit\": 30,\n      \"members_sample_limit\": 200,\n      \"dead_days_threshold\": 180,\n      \"days_since_last_post\": 0.0002031678126917945\n    },\n    \"score_hard_flags\": {\n      \"scam\": false,\n      \"fake\": false,\n      \"dead\": false,\n      \"tiny_audience\": false\n    },\n    \"access_hash\": -4054675844621925000,\n    \"verified\": false,\n    \"scam\": false,\n    \"fake\": false,\n    \"restricted\": false,\n    \"megagroup\": false,\n    \"gigagroup\": false,\n    \"broadcast\": true,\n    \"forum\": false,\n    \"signatures\": false,\n    \"noforwards\": false,\n    \"slowmode_enabled\": false,\n    \"creator\": false,\n    \"has_link\": true,\n    \"has_geo\": false,\n    \"join_to_send\": false,\n    \"join_request\": false,\n    \"created_at\": \"2026-05-24T10:11:54+00:00\",\n    \"restriction_reason\": null,\n    \"about\": \"\",\n    \"online_count\": 0,\n    \"admins_count\": null,\n    \"kicked_count\": null,\n    \"banned_count\": null,\n    \"linked_chat_id\": 3830692648,\n    \"slowmode_seconds\": null,\n    \"pinned_msg_id\": null,\n    \"read_inbox_max_id\": 1,\n    \"source_peer_id\": -1003693224864,\n    \"listen_chat_id\": -1003830692648,\n    \"entity_kind\": \"channel\",\n    \"listen_mode\": \"discussion\",\n    \"source_joined\": true,\n    \"listen_joined\": true,\n    \"has_listen_access\": true,\n    \"access_note\": \"участник\"\n  }\n"
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "273ef44d-5041-47c0-a2c9-9311c787d664",
+      "name": "Is channel",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        336,
+        -16
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 3,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "eb2350b9-f350-4db6-804c-cc7b8856dd44",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.entity_kind }}",
+              "rightValue": "channel"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2.3
+    },
+    {
+      "id": "4f382105-0339-4e55-b7e6-6f473b18265c",
+      "name": "Return full1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [
+        832,
+        -128
+      ],
+      "parameters": {
+        "options": {},
+        "respondWith": "allIncomingItems"
+      },
+      "typeVersion": 1.5
+    },
+    {
+      "id": "9c978ea7-5d3d-4433-81e3-d7f3263b40df",
+      "name": "Апсертим каналы",
+      "type": "n8n-nodes-base.postgres",
+      "onError": "continueRegularOutput",
+      "position": [
+        608,
+        -128
+      ],
+      "parameters": {
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "source_channels",
+          "cachedResultName": "source_channels"
+        },
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "columns": {
+          "value": {
+            "name": "={{ $json.title }}",
+            "metadata": "={{\n  {\n    name: $json.title,\n    username: $json.username,\n    about: $json.about,\n    participants_count: $json.participants_count,\n    scam: $json.scam,\n    score: $json.score,\n    score_breakdown: $json.score_breakdown\n  }\n}}",
+            "created_at": "={{ $now }}",
+            "platform_id": "=2",
+            "external_url": "=https://t.me/{{ $json.username }}",
+            "external_channel_id": "={{ $json.listen_chat_id.toString().replace('-100', '') }}"
+          },
+          "schema": [
+            {
+              "id": "id",
+              "type": "number",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "id",
+              "defaultMatch": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "platform_id",
+              "type": "number",
+              "display": true,
+              "required": true,
+              "displayName": "platform_id",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_channel_id",
+              "type": "string",
+              "display": true,
+              "required": true,
+              "displayName": "external_channel_id",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "name",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "type": "string",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "description",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_url",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "external_url",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_url",
+              "type": "string",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "image_url",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "metadata",
+              "type": "object",
+              "display": true,
+              "required": false,
+              "displayName": "metadata",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "linked_projects_count",
+              "type": "number",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "linked_projects_count",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "is_active",
+              "type": "boolean",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "is_active",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "type": "dateTime",
+              "display": true,
+              "required": false,
+              "displayName": "created_at",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "type": "dateTime",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "updated_at",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "id"
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      },
+      "typeVersion": 2.6
+    },
+    {
+      "id": "11450159-00c6-4305-bc12-5cc04f8def5b",
+      "name": "Execute a SQL query",
+      "type": "n8n-nodes-base.postgres",
+      "disabled": true,
+      "position": [
+        -320,
+        -32
+      ],
+      "parameters": {
+        "query": "-- scripts/pick_account_add_channel_by_link.sql\n-- psql \"$PGURL\" -v min_threshold=20 -f scripts/pick_account_add_channel_by_link.sql\n\nWITH params AS (\n  SELECT\n    :min_threshold::numeric AS min_available_percent,  -- default 20, как parser_add_channel\n    NULL::bigint          AS prefer_account_id,        -- опционально: конкретный accounts.id\n    ARRAY[]::bigint[]     AS exclude_account_ids       -- опционально: уже отвергнутые\n),\n\n-- Telethon ops для POST /add-channel-by-link (A9 §4, #6)\nrequired_ops AS (\n  SELECT * FROM (VALUES\n    ('get_entity',               2),  -- канал + linked discussion\n    ('channels.JoinChannel',     2),  -- source + discussion\n    ('channels.GetFullChannel',  1),\n    ('channels.GetParticipant',  1),  -- проверка доступа\n    ('channels.GetParticipants', 1)   -- lidgen-скоринг (megagroup / сигналы)\n  ) AS t(op_code, units_required)\n),\n\neligible AS (\n  SELECT\n    a.id,\n    a.session_name,\n    a.status,\n    a.last_used_at,\n    a.cooldown_until\n  FROM accounts a\n  CROSS JOIN params p\n  WHERE a.is_enabled = true\n    AND a.status IN ('active', 'cooldown')\n    AND a.current_task_id IS NULL\n    AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())\n    AND (p.prefer_account_id IS NULL OR a.id = p.prefer_account_id)\n    AND NOT (a.id = ANY (p.exclude_account_ids))\n),\n\n-- C5: у каждого required op available_resource_percent >= порога\nper_op AS (\n  SELECT\n    e.id AS account_id,\n    e.session_name,\n    e.last_used_at,\n    ro.op_code,\n    ro.units_required,\n    u.effective_rph,\n    u.used_last_hour,\n    u.available_resource,\n    u.available_resource_percent,\n    (u.available_resource >= ro.units_required) AS has_units_for_op\n  FROM eligible e\n  CROSS JOIN required_ops ro\n  JOIN resource_op_types rot\n    ON rot.code = ro.op_code AND rot.is_enabled = true\n  JOIN v_account_op_usage_last_hour u\n    ON u.account_id = e.id AND u.op_type_id = rot.id\n),\n\nqualified AS (\n  SELECT\n    po.account_id,\n    po.session_name,\n    po.last_used_at,\n    min(po.available_resource_percent) AS worst_available_percent,\n    bool_and(po.has_units_for_op)      AS all_ops_have_units,\n    jsonb_agg(\n      jsonb_build_object(\n        'op_code', po.op_code,\n        'units_required', po.units_required,\n        'effective_rph', po.effective_rph,\n        'used_last_hour', po.used_last_hour,\n        'available_resource', po.available_resource,\n        'available_percent', po.available_resource_percent\n      )\n      ORDER BY po.op_code\n    ) AS ops_snapshot\n  FROM per_op po\n  CROSS JOIN params p\n  GROUP BY po.account_id, po.session_name, po.last_used_at\n  HAVING min(po.available_resource_percent) >= p.min_available_percent\n     AND bool_and(po.has_units_for_op)\n)\n\nSELECT\n  q.account_id,\n  q.session_name,\n  q.worst_available_percent,\n  q.ops_snapshot\nFROM qualified q\nORDER BY q.last_used_at ASC NULLS FIRST, q.account_id ASC\nLIMIT 1;",
+        "options": {},
+        "operation": "executeQuery"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "nJLtOwEA1dAE4Pjt",
+          "name": "Postgres account"
+        }
+      },
+      "typeVersion": 2.6
+    },
+    {
+      "id": "a1b2c3d4-join-pending-respond",
+      "name": "Respond join_pending",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        -160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'join_pending', message: 'Заявка на вступление отправлена', join_request: true, peer_id: $json.peer_id, title: $json.title } }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is closed": {
+      "main": [
+        [
+          {
+            "node": "Respond join_pending",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Is closed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Апсертим значения в таблицу source_channels1": {
+      "main": [
+        [
+          {
+            "node": "Return full",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Is closed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is channel": {
+      "main": [
+        [
+          {
+            "node": "Апсертим каналы",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Апсертим значения в таблицу source_channels1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Апсертим каналы": {
+      "main": [
+        [
+          {
+            "node": "Return full1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

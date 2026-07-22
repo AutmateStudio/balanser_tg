@@ -33,17 +33,47 @@ dotenv.load_dotenv()
 
 log = logging.getLogger(__name__)
 
+
+def _log_resolve_error(
+    message: str,
+    *,
+    error_type: str,
+    exc: BaseException | None = None,
+) -> None:
+    try:
+        from app_balance.queue.task_error_log import log_task_error
+
+        log_task_error(
+            log,
+            message,
+            exc=exc,
+            error_type=error_type,
+            skip_if_queued=True,
+        )
+    except ImportError:
+        log.warning(message)
+
 _message_queue: asyncio.Queue[dict[str, Any]] | None = None
 _webhook_senders: dict[str, "AsyncSender"] = {}
 _worker_tasks: list[asyncio.Task[None]] = []
 
-_stats: dict[str, int] = {"enqueued": 0, "dropped": 0, "delivered": 0, "webhook_errors": 0}
+_stats: dict[str, int] = {
+    "enqueued": 0,
+    "dropped": 0,
+    "delivered": 0,
+    "webhook_errors": 0,
+    "retried": 0,
+    "failed": 0,
+}
 
 # In-memory кеш публичной информации об отправителях. Ключ — sender_id (int),
 # значение — (timestamp последнего обновления, словарь sender-полей).
 # TTL и включение GetFullUserRequest регулируются env-переменными
 # `PARSER_SENDER_CACHE_TTL` и `PARSER_RESOLVE_FULL_USER`.
 _sender_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+
+_WEBHOOK_MAX_ATTEMPTS = 3
+_WEBHOOK_BACKOFF_BASE_SECONDS = 1.0
 
 
 def _get_sender_cache_ttl_seconds() -> float:
@@ -90,13 +120,24 @@ class AsyncSender:
                 json=message,
                 headers=headers,
             ) as response:
+                body: Any
                 ct = response.headers.get("Content-Type", "")
                 if "application/json" in ct.lower():
                     try:
-                        return await response.json(content_type=None)
+                        body = await response.json(content_type=None)
                     except aiohttp.ContentTypeError:
-                        return await response.text()
-                return await response.text()
+                        body = await response.text()
+                else:
+                    body = await response.text()
+                if response.status >= 400:
+                    raise aiohttp.ClientResponseError(
+                        response.request_info,
+                        response.history,
+                        status=response.status,
+                        message=f"webhook HTTP {response.status}",
+                        headers=response.headers,
+                    )
+                return body
         except (aiohttp.ClientError, asyncio.TimeoutError):
             log.exception("Ошибка HTTP при отправке на webhook %s", self.webhook_url[:96])
             raise
@@ -124,6 +165,7 @@ async def send_message_to_webhook(message: dict[str, Any]) -> None:
     webhook_url = message.get("webhook_url")
     if not webhook_url:
         log.warning("Сообщение без webhook_url, пропускаем отправку")
+        _stats["failed"] += 1
         return
     sender = _webhook_senders.get(webhook_url)
     if sender is None:
@@ -139,13 +181,57 @@ async def _dispatch_queue_worker() -> None:
     while True:
         item = await _message_queue.get()
         try:
-            await send_message_to_webhook(item)
-            _stats["delivered"] += 1
-        except Exception:
-            _stats["webhook_errors"] += 1
-            log.exception("Ошибка при отправке сообщения на webhook")
+            last_exc: BaseException | None = None
+            for attempt in range(1, _WEBHOOK_MAX_ATTEMPTS + 1):
+                try:
+                    await send_message_to_webhook(item)
+                    _stats["delivered"] += 1
+                    last_exc = None
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    _stats["webhook_errors"] += 1
+                    if attempt < _WEBHOOK_MAX_ATTEMPTS:
+                        _stats["retried"] += 1
+                        delay = _WEBHOOK_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                        log.warning(
+                            "webhook retry attempt=%s/%s chat_id=%s delay=%.1fs: %s",
+                            attempt,
+                            _WEBHOOK_MAX_ATTEMPTS,
+                            item.get("chat_id"),
+                            delay,
+                            exc,
+                        )
+                        await asyncio.sleep(delay)
+            if last_exc is not None:
+                _stats["failed"] += 1
+                log.error(
+                    "webhook delivery failed permanently chat_id=%s message_id=%s: %s",
+                    item.get("chat_id"),
+                    item.get("message_id") or item.get("id"),
+                    last_exc,
+                    exc_info=last_exc,
+                )
         finally:
             _message_queue.task_done()
+
+
+async def shutdown_webhook_dispatch() -> None:
+    """Останавливает webhook-воркеры и закрывает aiohttp-сессии."""
+    global _message_queue
+    tasks = list(_worker_tasks)
+    _worker_tasks.clear()
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    for url, sender in list(_webhook_senders.items()):
+        try:
+            await sender.close()
+        except Exception:  # noqa: BLE001
+            log.debug("shutdown: ошибка close AsyncSender %s", url[:48], exc_info=True)
+    _webhook_senders.clear()
+    _message_queue = None
 
 
 def _ensure_dispatch_workers(n: int | None = None) -> None:
@@ -430,33 +516,41 @@ def _make_new_message_handler(
     on_event: Optional[Any] = None,
 ):
     async def handle_new_message(event: Any) -> None:
-        chat_id = getattr(event, "chat_id", None)
-        if chat_id is None or int(chat_id) not in allowed_chat_ids:
-            return
-
-        if on_event is not None:
-            try:
-                on_event()
-            except Exception:
-                log.debug("on_event callback бросил исключение", exc_info=True)
-
-        sender_info = await resolve_sender_info(event, client)
-
-        envelope = {
-            "webhook_url": webhook_url,
-            **_telegram_message_payload(
-                event.message, event, sender_info=sender_info
-            ),
-        }
         try:
-            queue.put_nowait(envelope)
-            _stats["enqueued"] += 1
-        except asyncio.QueueFull:
-            _stats["dropped"] += 1
-            log.warning(
-                "Очередь парсера переполнена, сообщение отброшено: chat_id=%s",
-                chat_id,
-            )
+            chat_id = getattr(event, "chat_id", None)
+            if chat_id is None or int(chat_id) not in allowed_chat_ids:
+                return
+
+            if on_event is not None:
+                try:
+                    on_event()
+                except Exception:
+                    log.debug("on_event callback бросил исключение", exc_info=True)
+
+            try:
+                sender_info = await resolve_sender_info(event, client)
+            except Exception:
+                log.debug("resolve_sender_info failed", exc_info=True)
+                sender_info = {}
+
+            envelope = {
+                "webhook_url": webhook_url,
+                **_telegram_message_payload(
+                    event.message, event, sender_info=sender_info
+                ),
+            }
+            try:
+                queue.put_nowait(envelope)
+                _stats["enqueued"] += 1
+            except asyncio.QueueFull:
+                _stats["dropped"] += 1
+                log.warning(
+                    "Очередь парсера переполнена, сообщение отброшено: chat_id=%s dropped=%s",
+                    chat_id,
+                    _stats["dropped"],
+                )
+        except Exception:
+            log.exception("ошибка в NewMessage handler")
 
     return handle_new_message
 
@@ -470,39 +564,76 @@ def _normalize_channel_ref(raw: str) -> str:
 
 
 async def resolve_channel_to_chat_id(
-    client: telethon.TelegramClient, raw: str
-) -> Tuple[Optional[int], Optional[str]]:
+    client: telethon.TelegramClient,
+    raw: str,
+    *,
+    join: bool = True,
+) -> Tuple[Optional[int], Optional[str], Optional[str]]:
     """Превращает `@username` / `t.me/...` / числовой id в `chat_id` (int).
 
-    Возвращает кортеж `(chat_id, error)`. Если `chat_id is None`, в `error`
-    лежит человекочитаемая причина (пустое значение, FloodWait, нет такого
-    канала и т.п.). По возможности результат resolve кешируется через
-    `entity_cache` — повторные вызовы для того же `@username` не дёргают
-    Telegram.
+    Возвращает кортеж `(chat_id, error, error_code)`. Если `chat_id is None`, в
+    `error` лежит человекочитаемая причина, а `error_code` — стабильный код
+    (если известен). По возможности результат resolve кешируется через
+    `entity_cache`. При cache hit доступ текущей сессии перепроверяется.
+    `join=False` — только resolve/проверка без JoinChannel (для remove).
     """
     normalized = _normalize_channel_ref(raw)
     if not normalized:
-        return None, f"Пустое или некорректное значение: '{raw}'"
+        return None, f"Пустое или некорректное значение: '{raw}'", "invalid_payload"
+
+    if not client.is_connected():
+        return (
+            None,
+            f"Telethon-клиент ещё не подключён, resolve '{normalized}' невозможен",
+            "transient_error",
+        )
 
     cached = get_cached_chat_ids([normalized])
     if normalized in cached:
         listen_peer_id = int(cached[normalized])
         log.info(
-            "parser resolve cache hit ref=%s listen_peer_id=%s (доступ не перепроверялся)",
+            "parser resolve cache hit ref=%s listen_peer_id=%s — перепроверка доступа",
             raw,
             listen_peer_id,
         )
-        return listen_peer_id, None
-
-    if not client.is_connected():
-        return None, (
-            f"Telethon-клиент ещё не подключён, resolve '{normalized}' невозможен"
-        )
+        try:
+            # Убеждаемся, что текущая сессия — участник (и при join=True вступаем).
+            target = await resolve_listen_target(client, raw, join=join)
+            listen_peer_id = int(target.listen_peer_id)
+            set_cached_chat_id(normalized, listen_peer_id)
+            return listen_peer_id, None, None
+        except ChatAccessError as e:
+            msg = str(e)
+            code = getattr(e, "code", None) or "join_pending"
+            _log_resolve_error(
+                f"parser resolve cache hit no access ref={raw}: {msg}",
+                error_type="RETRYABLE",
+            )
+            return None, msg, code
+        except ChannelHasNoDiscussionError as e:
+            msg = str(e)
+            _log_resolve_error(
+                f"parser resolve cache hit no discussion ref={raw}: {msg}",
+                error_type="FATAL",
+            )
+            return None, msg, getattr(e, "code", None) or "channel_has_no_discussion"
+        except FloodWaitError as e:
+            seconds = int(getattr(e, "seconds", 1) or 1)
+            msg = f"FloodWait {seconds}s при resolve '{normalized}'"
+            _log_resolve_error(msg, error_type="RETRYABLE", exc=e)
+            return None, msg, "flood_wait"
+        except Exception as e:
+            # Кеш устарел / entity недоступна — проваливаемся в полный resolve ниже.
+            log.warning(
+                "parser resolve cache hit recheck failed ref=%s: %s — полный resolve",
+                raw,
+                e,
+            )
 
     cache_key = _normalize_channel_ref(raw) or normalized
     try:
-        log.info("parser resolve_channel_to_chat_id: ref=%s", raw)
-        target = await resolve_listen_target(client, raw, join=True)
+        log.info("parser resolve_channel_to_chat_id: ref=%s join=%s", raw, join)
+        target = await resolve_listen_target(client, raw, join=join)
         listen_peer_id = int(target.listen_peer_id)
         set_cached_chat_id(cache_key, listen_peer_id)
         log.info(
@@ -516,23 +647,38 @@ async def resolve_channel_to_chat_id(
             target.listen_joined,
             target.has_listen_access,
         )
-        return listen_peer_id, None
+        return listen_peer_id, None, None
     except ChannelHasNoDiscussionError as e:
-        log.warning("parser resolve skip (no discussion) ref=%s: %s", raw, e)
-        return None, str(e)
+        msg = str(e)
+        _log_resolve_error(
+            f"parser resolve skip (no discussion) ref={raw}: {msg}",
+            error_type="FATAL",
+        )
+        return None, msg, getattr(e, "code", None) or "channel_has_no_discussion"
     except ChatAccessError as e:
-        log.warning("parser resolve skip (no access) ref=%s: %s", raw, e)
-        return None, str(e)
+        msg = str(e)
+        code = getattr(e, "code", None) or "join_pending"
+        _log_resolve_error(
+            f"parser resolve skip (no access) ref={raw}: {msg}",
+            error_type="RETRYABLE",
+        )
+        return None, msg, code
     except ValueError as e:
-        log.warning("parser resolve skip ref=%s: %s", raw, e)
-        return None, str(e)
+        msg = str(e)
+        _log_resolve_error(
+            f"parser resolve skip ref={raw}: {msg}",
+            error_type="FATAL",
+        )
+        return None, msg, "invalid_payload"
     except FloodWaitError as e:
         seconds = int(getattr(e, "seconds", 1) or 1)
-        return None, f"FloodWait {seconds}s при resolve '{normalized}'"
+        msg = f"FloodWait {seconds}s при resolve '{normalized}'"
+        _log_resolve_error(msg, error_type="RETRYABLE", exc=e)
+        return None, msg, "flood_wait"
     except asyncio.CancelledError:
         raise
     except Exception as e:
-        return None, f"Ошибка resolve '{normalized}': {e!s}"
+        return None, f"Ошибка resolve '{normalized}': {e!s}", "clump_error"
 
 
 async def _resolve_pending_usernames(
@@ -568,18 +714,52 @@ async def _resolve_pending_usernames(
                 target.listen_joined,
             )
         except ChannelHasNoDiscussionError as e:
-            log.warning("Пропуск канала без обсуждений %s: %s", raw_ref, e)
+            _log_resolve_error(
+                f"parser pending resolve skip (no discussion) ref={raw_ref}: {e}",
+                error_type="FATAL",
+            )
         except ChatAccessError as e:
-            log.warning("Пропуск: нет доступа %s: %s", raw_ref, e)
+            _log_resolve_error(
+                f"parser pending resolve skip (no access) ref={raw_ref}: {e}",
+                error_type="RETRYABLE",
+            )
         except FloodWaitError as e:
             seconds = int(getattr(e, "seconds", 1) or 1)
-            log.warning("FloodWait при resolve %s: %s сек", raw_ref, seconds)
+            _log_resolve_error(
+                f"FloodWait {seconds}s при pending resolve ref={raw_ref}",
+                error_type="RETRYABLE",
+                exc=e,
+            )
             await asyncio.sleep(seconds)
-            continue
+            try:
+                target = await resolve_listen_target(client, raw_ref, join=True)
+                allowed_chat_ids.add(int(target.listen_peer_id))
+                if cache_key:
+                    set_cached_chat_id(cache_key, int(target.listen_peer_id))
+                log.info(
+                    "parser pending OK after FloodWait ref=%s listen_peer_id=%s",
+                    raw_ref,
+                    target.listen_peer_id,
+                )
+            except FloodWaitError as e2:
+                seconds2 = int(getattr(e2, "seconds", 1) or 1)
+                _log_resolve_error(
+                    f"FloodWait {seconds2}s повторно при pending resolve ref={raw_ref} — пропуск",
+                    error_type="RETRYABLE",
+                    exc=e2,
+                )
+            except Exception as e2:
+                _log_resolve_error(
+                    f"parser pending resolve fail after FloodWait ref={raw_ref}: {e2!s}",
+                    error_type="UNEXPECTED",
+                )
         except asyncio.CancelledError:
             raise
-        except Exception:
-            log.exception("Не удалось resolve ref=%s", raw_ref)
+        except Exception as e:
+            _log_resolve_error(
+                f"parser pending resolve fail ref={raw_ref}: {e!s}",
+                error_type="UNEXPECTED",
+            )
         if delay > 0:
             await asyncio.sleep(delay)
 

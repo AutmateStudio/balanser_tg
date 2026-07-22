@@ -420,11 +420,44 @@ SELECT
   count(*) FILTER (WHERE "status" = 'failed')      AS "failed_tasks_count",
   count(*) FILTER (WHERE "status" IN ('scheduled', 'retry') AND "postpone_count" > 0) AS "postponed_tasks_count",
   count(*) FILTER (WHERE "status" = 'done' AND "finished_at" >= now() - interval '5 minutes') AS "done_tasks_last_5_min",
+  count(*) FILTER (WHERE "status" = 'done' AND "finished_at" >= now() - interval '10 minutes') AS "done_tasks_last_10_min",
+  count(*) FILTER (WHERE "status" = 'failed' AND "finished_at" >= now() - interval '5 minutes') AS "failed_tasks_last_5_min",
+  count(*) FILTER (WHERE "status" = 'failed' AND "finished_at" >= now() - interval '10 minutes') AS "failed_tasks_last_10_min",
+  count(*) FILTER (WHERE "created_at" >= now() - interval '5 minutes') AS "enqueued_last_5_min",
+  count(*) FILTER (WHERE "created_at" >= now() - interval '10 minutes') AS "enqueued_last_10_min",
+  count(*) FILTER (
+    WHERE "status" IN ('queued', 'scheduled', 'retry')
+      AND "run_after" <= now()
+  ) AS "pickable_now",
   COALESCE(
-    EXTRACT(EPOCH FROM (now() - min("created_at") FILTER (WHERE "status" = 'queued')))::bigint,
+    (SELECT count(*)::bigint FROM "task_attempts"
+     WHERE "started_at" >= now() - interval '5 minutes'),
+    0
+  ) AS "attempts_last_5_min",
+  COALESCE(
+    (SELECT count(*)::bigint FROM "task_attempts"
+     WHERE "started_at" >= now() - interval '10 minutes'),
+    0
+  ) AS "attempts_last_10_min",
+  -- G1 §26.2: возраст самой старой задачи, ожидающей выполнения (queued + scheduled).
+  COALESCE(
+    EXTRACT(EPOCH FROM (now() - min("created_at") FILTER (WHERE "status" IN ('queued', 'scheduled'))))::bigint,
     0
   ) AS "oldest_queued_task_age_seconds"
 FROM "task_queue";
+
+-- Heartbeats фоновых watchdog / queue-monitor (A19).
+CREATE TABLE IF NOT EXISTS "monitor_heartbeats" (
+  "name" text PRIMARY KEY,
+  "last_tick_at" timestamptz NOT NULL DEFAULT (now()),
+  "last_duration_ms" integer,
+  "last_result" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "last_error" text,
+  "interval_seconds" double precision,
+  "enabled" boolean NOT NULL DEFAULT true,
+  "process" text,
+  "updated_at" timestamptz NOT NULL DEFAULT (now())
+);
 
 -- --- §26.2: задачи с частым откладыванием (G4 alert high postpone_count) ---
 CREATE VIEW "v_high_postpone_tasks" AS
@@ -477,18 +510,26 @@ LEFT JOIN (
 WHERE "rot"."is_enabled" = true;
 
 -- --- §26.3: сводка ресурса по аккаунту (худший op = решение C5/G7★) ---
+-- effective_rph = 0 (op с rph_limit, который reserve_percent округляет в ноль)
+-- НЕ считается «исчерпанным»: у такой op нет полезного лимита, иначе аккаунт
+-- числился бы any_op_exhausted перманентно, независимо от часа.
 CREATE VIEW "v_account_resource_summary" AS
 SELECT
   "account_id",
   "session_name",
   "account_status",
-  min("available_resource_percent")              AS "worst_available_percent",
-  bool_or("available_resource" <= 0)             AS "any_op_exhausted",
-  count(*) FILTER (WHERE "available_resource" <= 0) AS "exhausted_ops_count"
+  min("available_resource_percent") FILTER (WHERE "effective_rph" > 0)
+                                                 AS "worst_available_percent",
+  COALESCE(
+    bool_or("available_resource" <= 0) FILTER (WHERE "effective_rph" > 0),
+    false
+  )                                              AS "any_op_exhausted",
+  count(*) FILTER (WHERE "available_resource" <= 0 AND "effective_rph" > 0)
+                                                 AS "exhausted_ops_count"
 FROM "v_account_op_usage_last_hour"
 GROUP BY "account_id", "session_name", "account_status";
 
--- --- §26.3: сводка по парку аккаунтов (active/cooldown/без ресурса) ---
+-- --- §26.3: сводка по парку аккаунтов (active/cooldown/без ресурса/locks) ---
 CREATE VIEW "v_accounts_overview" AS
 SELECT
   count(*) FILTER (WHERE "status" = 'active' AND "is_enabled" = true) AS "active_accounts_count",
@@ -499,10 +540,41 @@ SELECT
   (
     SELECT count(*) FROM "v_account_resource_summary"
     WHERE "any_op_exhausted" = true
-  ) AS "accounts_without_resource"
+  ) AS "accounts_without_resource",
+  count(*) FILTER (
+    WHERE "is_enabled" = true
+      AND "status" IN ('active', 'cooldown')
+      AND "current_task_id" IS NULL
+      AND ("cooldown_until" IS NULL OR "cooldown_until" <= now())
+  ) AS "pickable_accounts_count",
+  count(*) FILTER (WHERE "current_task_id" IS NOT NULL) AS "busy_accounts_count",
+  count(*) FILTER (
+    WHERE "current_task_id" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "task_queue" "t"
+        WHERE "t"."id" = "accounts"."current_task_id"
+          AND "t"."status" = 'in_progress'
+      )
+  ) AS "orphan_account_locks"
 FROM "accounts";
 
--- --- §26.3 / §26.4: частота ошибок аккаунта за последний час (G4 alert) ---
+-- --- §26.3 / G7★: загрузка каналов по парку (лимит per-session — в env MAX_CHANNELS_PER_SESSION) ---
+CREATE VIEW "v_channel_capacity_usage" AS
+SELECT
+  (
+    SELECT count(*) FROM "accounts"
+    WHERE "status" = 'active' AND "is_enabled" = true
+  ) AS "active_accounts_count",
+  COALESCE((
+    SELECT count(*)
+    FROM "source_channels" "sc"
+    INNER JOIN "accounts" "a" ON "a"."id" = "sc"."assigned_account_id"
+    WHERE "sc"."is_active" = true
+      AND "sc"."assigned_account_id" IS NOT NULL
+      AND "a"."status" = 'active' AND "a"."is_enabled" = true
+  ), 0)::bigint AS "assigned_channels_total";
+
+-- --- §26.3 / §26.4: частота ошибок аккаунта за последний hour (G4 alert) ---
 CREATE VIEW "v_account_error_rate_last_hour" AS
 SELECT
   "account_id",
@@ -537,3 +609,39 @@ SELECT
 FROM "task_attempts"
 WHERE "started_at" >= now() - interval '1 hour'
 GROUP BY "task_type_id";
+
+-- --- G6: audit авто-коррекции RPH per-op ---
+CREATE TABLE "resource_limit_adjustments" (
+  "id" BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  "error_code" text NOT NULL,
+  "op_code" text NOT NULL,
+  "op_type_id" integer NOT NULL REFERENCES "resource_op_types" ("id") DEFERRABLE,
+  "action" text NOT NULL,
+  "old_rph_limit" integer,
+  "new_rph_limit" integer,
+  "account_id" bigint REFERENCES "accounts" ("id") DEFERRABLE,
+  "error_count" integer NOT NULL DEFAULT 0,
+  "window_seconds" integer NOT NULL DEFAULT 3600,
+  "created_at" timestamptz NOT NULL DEFAULT (now())
+);
+
+CREATE INDEX "idx_resource_limit_adjustments_pattern"
+  ON "resource_limit_adjustments" ("error_code", "op_code", "created_at" DESC);
+
+-- --- G6: повторяющиеся ошибки (error_code + op) за последний час ---
+CREATE VIEW "v_recurring_errors_window" AS
+SELECT
+  ta."error_code",
+  rot."code" AS "op_code",
+  rot."id" AS "op_type_id",
+  rot."rph_limit" AS "current_rph_limit",
+  count(DISTINCT ta."id") AS "error_count",
+  max(ta."started_at") AS "last_error_at",
+  (array_agg(ta."account_id" ORDER BY ta."started_at" DESC))[1] AS "last_account_id"
+FROM "task_attempts" ta
+INNER JOIN "account_resource_usage" aru ON aru."task_attempt_id" = ta."id"
+INNER JOIN "resource_op_types" rot ON rot."id" = aru."op_type_id"
+WHERE ta."status" IN ('error', 'timeout')
+  AND ta."error_code" IS NOT NULL
+  AND ta."started_at" >= now() - interval '1 hour'
+GROUP BY ta."error_code", rot."code", rot."id", rot."rph_limit";

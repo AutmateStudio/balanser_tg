@@ -1,0 +1,10 @@
+﻿python : Traceback (most recent call last):
+C:\Users\LENOVO\AppData\Local\Temp\ps-script-fda34d16-6e2c-4193-b39f-b3ba89fdb5a5.ps1:87 знак:1
++ python "c:\Работа\LidogenMicroservises\Lidogen_telegram_balancer\n8n\ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "c:\╨рсюЄр\LidogenMicroservises\Lidogen_telegram_balancer\n8n\_dump_node_names.py", line 12, in <module>
+    nodes = [n.get("name", "") for n in data.get("nodes", [])]
+AttributeError: 'list' object has no attribute 'get'

@@ -22,6 +22,8 @@ from app_balance.queue.errors import (
     RetryableError,
 )
 from app_balance.queue.mock_adapter import TaskAdapter
+from app_balance.queue.ops_catalog import MULTI_OP_TASK_TYPES
+from app_balance.queue.pacing import AccountPacer, get_pacer
 from app_balance.queue.per_op_reading import TaskType, TaskTypesRepo
 
 from app_balance.queue.resource_check import ResourceCheckResult, ResourceChecker
@@ -30,14 +32,42 @@ from app_balance.queue.resource_usage import ResourceUsageRepo
 
 from app_balance.queue.task_attempts import AttemptFinishStatus, TaskAttemptsRepo
 
+from app_balance.queue.task_error_log import (
+    bind_task_error_context,
+    clear_task_error_context,
+    log_queue_task_error,
+    log_task_ok,
+    log_task_postpone,
+)
 from app_balance.queue.task_queue import ClaimedTask, TaskQueueRepo
 
 
 
 logger = logging.getLogger(__name__)
 
-
-
+# Аккаунт-зависимые retryable-коды: при auto-pick сбрасываем account_id,
+# чтобы следующая попытка выбрала другой аккаунт.
+_ACCOUNT_SCOPED_RETRY_CODES = frozenset(
+    {
+        ErrorCode.CHANNELS_TOO_MUCH,
+        ErrorCode.ACCOUNT_UNAUTHORIZED,
+    }
+)
+# collect/update тоже фиксируют account_id — при unauthorized нужно
+# сбросить привязку, иначе задача вечно бьётся о мёртвую сессию (test1).
+_AUTO_PICK_TASK_TYPES = frozenset(
+    {
+        "parser_add_channel",
+        "telegram_discover",
+        "telegram_discover_leads",
+        "discover_groups",
+        "collect_extra_data",
+        "update_channel",
+    }
+)
+# Типы задач, к которым применяется пейсинг join (минимальный интервал между
+# join на одном аккаунте, чтобы бурст не гнал аккаунты в FloodWait).
+_PACED_TASK_TYPES = frozenset({"parser_add_channel"})
 
 
 class DispatchResult(str, Enum):
@@ -80,6 +110,8 @@ class TaskDispatcher:
 
         attempts: TaskAttemptsRepo | None = None,
 
+        pacer: AccountPacer | None = None,
+
         postpone_delay_seconds: int = 300,
 
         retry_delay_seconds: int = 60,
@@ -99,6 +131,8 @@ class TaskDispatcher:
         self._attempts = attempts or TaskAttemptsRepo()
 
         self._resource_check = resource_check or ResourceChecker(self._usage)
+
+        self._pacer = pacer or get_pacer()
 
         self._postpone_delay_seconds = postpone_delay_seconds
 
@@ -174,7 +208,10 @@ class TaskDispatcher:
 
                 execute_account = account
 
-
+            bind_task_error_context(
+                task_id=task.id,
+                account=execute_account.session_name,
+            )
 
             attempt_number = await self._queue.begin_execution_attempt(task.id)
 
@@ -199,60 +236,91 @@ class TaskDispatcher:
                 target_account_id=target_account_id,
             )
 
-            await self._usage.record_for_task(
-                task_type=task_type,
-                task_id=task.id,
-                accounts_by_role=accounts_by_role,
-                task_attempt_id=attempt_id,
-            )
+            validate = getattr(self._adapter, "validate", None)
+            if validate is not None:
+                await validate(task)
 
-            await self._adapter.execute(task, account=execute_account)
+            is_multi_op = task_type.code in MULTI_OP_TASK_TYPES
+            if is_multi_op:
+                # Multi-op типы (collect/update) ведут учёт пошагово в adapter
+                # (execute_multi_op_pipeline → record_op), чтобы не задвоить.
+                await self._adapter.execute(
+                    task,
+                    account=execute_account,
+                    task_type=task_type,
+                    attempt_id=attempt_id,
+                )
+            else:
+                # Single-call типы: ресурс списывается разом до RPC (D5 §7.3).
+                await self._usage.record_for_task(
+                    task_type=task_type,
+                    task_id=task.id,
+                    accounts_by_role=accounts_by_role,
+                    task_attempt_id=attempt_id,
+                )
+                await self._adapter.execute(task, account=execute_account)
 
             await self._finish_attempt(attempt_id, status="success")
 
             if await self._queue.complete(task.id):
-
+                log_task_ok(
+                    logger,
+                    task.id,
+                    self._task_type_label(task, task_type),
+                    execute_account.session_name,
+                )
                 return DispatchResult.COMPLETED
 
             return DispatchResult.RETRIED
 
         except ResourceError as exc:
-            logger.warning(
-                "dispatch: недостаток ресурса задачи id=%s code=%s",
-                task.id,
-                exc.code,
+            account_name = execute_account.session_name if execute_account else "-"
+            log_queue_task_error(
+                logger,
+                exc,
+                task_id=task.id,
+                account=account_name,
             )
             await self._handle_execute_error(
-                task.id,
+                task,
+                task_type,
                 attempt_id,
                 exc,
                 queue_op="postpone",
                 postpone_reason=exc.postpone_reason(),
+                account=execute_account,
             )
             return DispatchResult.POSTPONED
 
         except PermanentError as exc:
-            logger.error(
-                "dispatch: permanent ошибка задачи id=%s code=%s",
-                task.id,
-                exc.code,
+            account_name = execute_account.session_name if execute_account else "-"
+            log_queue_task_error(
+                logger,
+                exc,
+                task_id=task.id,
+                account=account_name,
             )
             await self._sync_account_health_on_error(execute_account, exc)
             await self._handle_execute_error(
-                task.id,
+                task,
+                task_type,
                 attempt_id,
                 exc,
                 queue_op="fail",
+                account=execute_account,
             )
             return DispatchResult.FAILED
 
         except RetryableError as exc:
-            logger.warning(
-                "dispatch: retryable ошибка задачи id=%s code=%s",
-                task.id,
-                exc.code,
+            account_name = execute_account.session_name if execute_account else "-"
+            log_queue_task_error(
+                logger,
+                exc,
+                task_id=task.id,
+                account=account_name,
             )
             await self._sync_account_health_on_error(execute_account, exc)
+            await self._maybe_unassign_account_on_retry(task, task_type, exc)
             delay = (
                 exc.retry_after_seconds
                 if exc.retry_after_seconds is not None
@@ -262,20 +330,29 @@ class TaskDispatcher:
                 )
             )
             result = await self._handle_execute_error(
-                task.id,
+                task,
+                task_type,
                 attempt_id,
                 exc,
                 queue_op="retry",
                 retry_delay_seconds=delay,
+                account=execute_account,
             )
             return result
 
         except Exception as exc:  # noqa: BLE001 — фиксируем любую ошибку попытки
 
-            logger.exception("dispatch: ошибка задачи id=%s", task.id)
+            account_name = execute_account.session_name if execute_account else "-"
+            log_queue_task_error(
+                logger,
+                exc,
+                task_id=task.id,
+                account=account_name,
+            )
 
             result = await self._handle_execute_error(
-                task.id,
+                task,
+                task_type,
                 attempt_id,
                 exc,
                 queue_op="retry",
@@ -283,20 +360,24 @@ class TaskDispatcher:
                     task_type=task_type,
                     attempt_number=attempt_number,
                 ),
+                account=execute_account,
             )
             return result
 
         finally:
 
+            clear_task_error_context()
+
             for account_id in reserved_ids:
 
-                await self._accounts.release(account_id)
+                await self._accounts.release(account_id, task.id)
 
 
 
     async def _handle_execute_error(
         self,
-        task_id: int,
+        task: ClaimedTask,
+        task_type: TaskType | None,
         attempt_id: int | None,
         exc: Exception,
         *,
@@ -304,6 +385,7 @@ class TaskDispatcher:
         retry_delay_seconds: int | None = None,
         last_error: str | None = None,
         postpone_reason: str | None = None,
+        account: Account | None = None,
     ) -> DispatchResult:
         """E1: единая финализация попытки и перевод задачи в retry/fail/postpone."""
         attempt_status, error_code = self._classify_attempt_error(exc)
@@ -315,10 +397,11 @@ class TaskDispatcher:
         )
 
         if queue_op == "postpone":
-            await self._queue.postpone(
-                task_id,
-                self._postpone_delay_seconds,
-                postpone_reason or error_code,
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=postpone_reason or error_code,
+                account=account,
             )
             return DispatchResult.POSTPONED
 
@@ -329,14 +412,14 @@ class TaskDispatcher:
         )
 
         if queue_op == "fail":
-            status = await self._queue.fail(task_id, error_for_queue)
+            status = await self._queue.fail(task.id, error_for_queue)
             if status is None:
                 return DispatchResult.FAILED
             return DispatchResult.FAILED
 
         delay = retry_delay_seconds if retry_delay_seconds is not None else self._retry_delay_seconds
         status = await self._queue.reschedule_or_fail(
-            task_id,
+            task.id,
             error_for_queue,
             delay,
         )
@@ -347,6 +430,31 @@ class TaskDispatcher:
             if status == "failed"
             else DispatchResult.RETRIED
         )
+
+    @staticmethod
+    def _task_type_label(task: ClaimedTask, task_type: TaskType | None) -> str:
+        if task_type is not None and (task_type.name or "").strip():
+            return task_type.name.strip()
+        return task.task_type_code
+
+    async def _postpone_task(
+        self,
+        task: ClaimedTask,
+        *,
+        task_type: TaskType | None,
+        reason: str,
+        account: Account | None = None,
+        delay_seconds: int | None = None,
+    ) -> None:
+        delay = self._postpone_delay_seconds if delay_seconds is None else delay_seconds
+        log_task_postpone(
+            logger,
+            task.id,
+            self._task_type_label(task, task_type),
+            account.session_name if account is not None else None,
+            delay,
+        )
+        await self._queue.postpone(task.id, delay, reason)
 
     def _calc_retry_delay(
         self,
@@ -394,28 +502,20 @@ class TaskDispatcher:
 
         if source_id is None or target_id is None:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                ErrorCode.MISSING_DUAL_ACCOUNTS,
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=ErrorCode.MISSING_DUAL_ACCOUNTS,
             )
 
             return None
 
         if source_id == target_id:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                ErrorCode.DUAL_ACCOUNTS_SAME_ID,
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=ErrorCode.DUAL_ACCOUNTS_SAME_ID,
             )
 
             return None
@@ -430,14 +530,10 @@ class TaskDispatcher:
 
         if not source_check.ok:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                self._resource_postpone_reason(source_check),
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=self._resource_postpone_reason(source_check),
             )
 
             return None
@@ -452,14 +548,10 @@ class TaskDispatcher:
 
         if not target_check.ok:
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                self._resource_postpone_reason(target_check),
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=self._resource_postpone_reason(target_check),
             )
 
             return None
@@ -470,14 +562,12 @@ class TaskDispatcher:
 
         if dual is None:
 
-            await self._queue.postpone(
+            await self._maybe_unassign_on_reserve_fail(task, task_type)
 
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                f"{ErrorCode.DUAL_ACCOUNT_RESERVE_FAILED}:{source_id}:{target_id}",
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=f"{ErrorCode.DUAL_ACCOUNT_RESERVE_FAILED}:{source_id}:{target_id}",
             )
 
             return None
@@ -502,14 +592,12 @@ class TaskDispatcher:
 
         if not ok:
 
-            await self._queue.postpone(
+            await self._maybe_unassign_on_reserve_fail(task, task_type)
 
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                f"{ErrorCode.ACCOUNT_RESERVE_FAILED}:{account_id}",
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=f"{ErrorCode.ACCOUNT_RESERVE_FAILED}:{account_id}",
             )
 
             return None
@@ -520,16 +608,12 @@ class TaskDispatcher:
 
         if account is None:
 
-            await self._accounts.release(account_id)
+            await self._accounts.release(account_id, task.id)
 
-            await self._queue.postpone(
-
-                task.id,
-
-                self._postpone_delay_seconds,
-
-                f"{ErrorCode.ACCOUNT_NOT_FOUND}:{account_id}",
-
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=f"{ErrorCode.ACCOUNT_NOT_FOUND}:{account_id}",
             )
 
             return None
@@ -538,25 +622,42 @@ class TaskDispatcher:
 
         check = await self._resource_check.check_account(account.id, task_type)
 
-        if check.ok:
+        if not check.ok:
 
-            return account
+            await self._accounts.release(account.id, task.id)
 
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=self._resource_postpone_reason(check),
+                account=account,
+            )
 
+            return None
 
-        await self._accounts.release(account.id)
+        # Пейсинг для фиксированного аккаунта: ротации нет, поэтому если join
+        # слишком рано — откладываем задачу на остаток интервала.
+        if self._pacer.enabled and task_type.code in _PACED_TASK_TYPES:
 
-        await self._queue.postpone(
+            wait = self._pacer.try_acquire(account.id)
 
-            task.id,
+            if wait > 0:
 
-            self._postpone_delay_seconds,
+                await self._accounts.release(account.id, task.id)
 
-            self._resource_postpone_reason(check),
+                await self._postpone_task(
+                    task,
+                    task_type=task_type,
+                    reason=ErrorCode.PACING,
+                    account=account,
+                    delay_seconds=max(
+                        1, min(int(wait) + 1, self._postpone_delay_seconds)
+                    ),
+                )
 
-        )
+                return None
 
-        return None
+        return account
 
 
 
@@ -569,6 +670,11 @@ class TaskDispatcher:
         rejected_ids: set[int] = set()
 
         last_check: ResourceCheckResult | None = None
+        last_account: Account | None = None
+        # Пейсинг: сколько секунд ждать до следующего join, если весь доступный
+        # пул отклонён именно из-за интервала (а не из-за нехватки ресурса).
+        max_pacing_wait: float = 0.0
+        paced = self._pacer.enabled and task_type.code in _PACED_TASK_TYPES
 
         while True:
 
@@ -582,30 +688,41 @@ class TaskDispatcher:
 
             if account is None:
 
-                if rejected_ids:
+                if last_check is not None:
 
-                    reason = (
+                    reason = self._resource_postpone_reason(last_check)
 
-                        self._resource_postpone_reason(last_check)
+                elif max_pacing_wait > 0:
 
-                        if last_check is not None
+                    reason = ErrorCode.PACING
 
-                        else ErrorCode.INSUFFICIENT_RESOURCE
+                elif rejected_ids:
 
-                    )
+                    reason = ErrorCode.INSUFFICIENT_RESOURCE
 
                 else:
 
                     reason = ErrorCode.NO_AVAILABLE_ACCOUNT
 
-                await self._queue.postpone(
+                # Если задержал только пейсинг — откладываем на остаток интервала,
+                # а не на полный postpone-delay (задача вернётся, как только слот
+                # освободится). Иначе — стандартный postpone-delay.
+                pacing_delay: int | None = None
+                if reason == ErrorCode.PACING:
+                    pacing_delay = max(
+                        1,
+                        min(
+                            int(max_pacing_wait) + 1,
+                            self._postpone_delay_seconds,
+                        ),
+                    )
 
-                    task.id,
-
-                    self._postpone_delay_seconds,
-
-                    reason,
-
+                await self._postpone_task(
+                    task,
+                    task_type=task_type,
+                    reason=reason,
+                    account=last_account,
+                    delay_seconds=pacing_delay,
                 )
 
                 return None
@@ -614,17 +731,31 @@ class TaskDispatcher:
 
             check = await self._resource_check.check_account(account.id, task_type)
 
-            if check.ok:
+            if not check.ok:
 
-                return account
+                await self._accounts.release(account.id, task.id)
 
+                rejected_ids.add(account.id)
+                last_account = account
+                last_check = check
+                continue
 
+            if paced:
 
-            await self._accounts.release(account.id)
+                wait = self._pacer.try_acquire(account.id)
 
-            rejected_ids.add(account.id)
+                if wait > 0:
 
-            last_check = check
+                    # Аккаунт ресурсно готов, но join слишком рано — отклоняем и
+                    # пробуем следующий (как при нехватке ресурса).
+                    await self._accounts.release(account.id, task.id)
+
+                    rejected_ids.add(account.id)
+                    last_account = account
+                    max_pacing_wait = max(max_pacing_wait, wait)
+                    continue
+
+            return account
 
 
 
@@ -645,6 +776,63 @@ class TaskDispatcher:
             )
 
         return check.reason_code or ErrorCode.INSUFFICIENT_RESOURCE
+
+    async def _maybe_unassign_on_reserve_fail(
+        self,
+        task: ClaimedTask,
+        task_type: TaskType,
+    ) -> None:
+        """Сбрасывает account_id до postpone при reserve-fail для auto-pick типов.
+
+        Иначе задача навечно крутит account_reserve_failed на том же id.
+        Вызывать пока задача ещё in_progress (до postpone).
+        """
+        if task_type.code not in _AUTO_PICK_TASK_TYPES:
+            return
+        if task_type.uses_two_accounts:
+            return
+        try:
+            await self._queue.unassign_account(task.id)
+            logger.info(
+                "dispatch: unassign account_id после reserve_failed "
+                "task_id=%s (возврат в auto-pick)",
+                task.id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "dispatch: не удалось unassign_account после reserve_failed "
+                "task_id=%s",
+                task.id,
+                exc_info=True,
+            )
+
+    async def _maybe_unassign_account_on_retry(
+        self,
+        task: ClaimedTask,
+        task_type: TaskType | None,
+        exc: RetryableError,
+    ) -> None:
+        """Сбрасывает account_id при аккаунт-зависимой ошибке auto-pick задач."""
+        code = normalize_error_code(exc.code)
+        if code not in _ACCOUNT_SCOPED_RETRY_CODES:
+            return
+        if task_type is None or task_type.code not in _AUTO_PICK_TASK_TYPES:
+            return
+        if task_type.uses_two_accounts:
+            return
+        try:
+            await self._queue.unassign_account(task.id)
+            logger.info(
+                "dispatch: unassign account_id после %s task_id=%s (смена аккаунта на retry)",
+                code,
+                task.id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "dispatch: не удалось unassign_account task_id=%s",
+                task.id,
+                exc_info=True,
+            )
 
     async def _finish_attempt(
         self,
@@ -700,6 +888,7 @@ class TaskDispatcher:
                         exc_info=True,
                     )
         elif isinstance(exc, PermanentError) and code == ErrorCode.BANNED:
+            # Только глобальный бан аккаунта — не banned_in_channel.
             try:
                 await self._accounts.set_banned(
                     account.session_name,
@@ -708,6 +897,49 @@ class TaskDispatcher:
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "dispatch: не удалось set_banned для %s",
+                    account.session_name,
+                    exc_info=True,
+                )
+        elif code == ErrorCode.ACCOUNT_UNAUTHORIZED:
+            message = getattr(exc, "message", None) or str(exc)
+            try:
+                from discovery_api.session_registry import notify_session_unauthorized
+
+                await notify_session_unauthorized(account.session_name, message)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "dispatch: notify_session_unauthorized недоступен для %s, fallback PG",
+                    account.session_name,
+                    exc_info=True,
+                )
+                try:
+                    await self._accounts.set_account_error(
+                        account.session_name,
+                        reason=message,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "dispatch: не удалось set_account_error для %s",
+                        account.session_name,
+                        exc_info=True,
+                    )
+            # Иначе producer-collect снова поставит задачи на тот же мёртвый account_id.
+            try:
+                from app_balance.queue.source_channels import SourceChannelsRepo
+
+                cleared = await SourceChannelsRepo().clear_assignments_for_account(
+                    account.id
+                )
+                if cleared:
+                    logger.info(
+                        "dispatch: снято %d assigned_account_id с каналов "
+                        "после unauthorized session=%s",
+                        cleared,
+                        account.session_name,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "dispatch: не удалось clear_assignments_for_account для %s",
                     account.session_name,
                     exc_info=True,
                 )

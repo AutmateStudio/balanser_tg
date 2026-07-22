@@ -165,3 +165,15 @@ class TaskTypesRepo:
                 ops = await _fetch_ops(conn, row["id"])
                 result.append(_row_to_task_type(row, ops))
             return result
+
+    async def list_all(self) -> list[TaskType]:
+        """Все типы задач (включая disabled), для admin API task-types."""
+        async with acquire() as conn:
+            rows = await conn.fetch(
+                f"{_TASK_TYPE_SELECT} ORDER BY default_priority DESC, code ASC"
+            )
+            result: list[TaskType] = []
+            for row in rows:
+                ops = await _fetch_ops(conn, row["id"])
+                result.append(_row_to_task_type(row, ops))
+            return result

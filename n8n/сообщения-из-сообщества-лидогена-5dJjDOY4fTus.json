@@ -1,0 +1,30 @@
+{
+  "name": "Сообщения из сообщества лидогена",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "community-paid-messages",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "cca272a3-9d40-48c5-984e-3000d35cde45",
+      "name": "Webhook",
+      "webhookId": "ee968b5a-bc6d-46bd-a7de-0274920258a6"
+    }
+  ],
+  "connections": {},
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

@@ -1,0 +1,971 @@
+{
+  "name": "отправка сообщений из очереди",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        496,
+        -160
+      ],
+      "id": "5a53e8b4-076e-469c-b514-9152d2947610",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -528,
+        128
+      ],
+      "id": "7cf538f0-cac4-49bd-9dfe-e8698f8664a5",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"id\": \"210\",\n    \"monitoring_project_id\": \"5\",\n    \"source_message_id\": \"2608528\",\n    \"run_status\": \"completed\",\n    \"ai_model\": \"openai/gpt-oss-20b\",\n    \"prompt_version\": \"1.0\",\n    \"pipeline_version\": \"1.0\",\n    \"first_level_filter_data\": {\n      \"top1_label\": \"chat_misc\",\n      \"top1_score\": \"0.7578\",\n      \"top2_label\": \"info_content\",\n      \"top2_score\": \"0.1606\"\n    },\n    \"input_message_text\": \"Кто сможет помочь в одном деле ? По завершении 5500, в личные!\",\n    \"ai_result_text\": \"{\\n  \\\"тип_лида\\\": \\\"Косвенный лид\\\",\\n  \\\"username\\\": \\\"\\\",\\n  \\\"text\\\": \\\"Добрый день! Спасибо за обращение. Мы готовы помочь вам с юридическими вопросами. Пожалуйста, уточните детали вашего запроса.\\\"\\n}\",\n    \"ai_result_payload\": {\n      \"text\": \"Добрый день! Спасибо за обращение. Мы готовы помочь вам с юридическими вопросами. Пожалуйста, уточните детали вашего запроса.\",\n      \"username\": \"\",\n      \"_cost_usd\": 0.00022798,\n      \"_total_tokens\": 2746,\n      \"тип_лида\": \"Косвенный лид\"\n    },\n    \"is_match\": true,\n    \"matched_user_id\": null,\n    \"matched_contact_channel_id\": null,\n    \"match_confidence\": null,\n    \"match_reason_short\": \"Косвенный лид\",\n    \"delivery_status\": \"pending\",\n    \"delivery_platform_id\": null,\n    \"delivery_external_id\": null,\n    \"delivered_at\": null,\n    \"delivery_error_text\": null,\n    \"delivery_result_payload\": null,\n    \"client_feedback_status\": \"unknown\",\n    \"client_feedback_at\": null,\n    \"client_feedback_source_platform_id\": null,\n    \"client_feedback_comment\": null,\n    \"raw_message_payload_snapshot\": null,\n    \"sender_payload_snapshot\": {\n      \"id\": 8052138454,\n      \"bot\": false,\n      \"fake\": false,\n      \"scam\": false,\n      \"type\": \"user\",\n      \"about\": null,\n      \"phone\": null,\n      \"contact\": false,\n      \"deleted\": false,\n      \"is_self\": false,\n      \"premium\": false,\n      \"username\": \"Alisa_43ssl\",\n      \"verified\": false,\n      \"lang_code\": null,\n      \"last_name\": \"Андреюшкина\",\n      \"first_name\": \"Алиса\",\n      \"restricted\": false,\n      \"mutual_contact\": false,\n      \"common_chats_count\": 1,\n      \"restriction_reason\": null\n    },\n    \"error_text\": null,\n    \"processed_at\": \"2026-05-22T06:41:35.947Z\",\n    \"is_latest\": true,\n    \"created_at\": \"2026-05-22T06:41:35.950Z\",\n    \"updated_at\": \"2026-05-22T06:41:35.950Z\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -576,
+        464
+      ],
+      "id": "c46c7297-3a7a-4a26-8e42-29bbb025d447",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        464
+      ],
+      "id": "7d86cf84-136d-4012-b454-2c1f8c12c5eb",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "users",
+          "mode": "list",
+          "cachedResultName": "users"
+        },
+        "limit": 1,
+        "where": {
+          "values": [
+            {
+              "column": "id",
+              "value": "={{ $json.owner_user_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        384,
+        224
+      ],
+      "id": "4f88dae2-e31a-4485-87b5-40723a9aa940",
+      "name": "Получаем данные пользователя",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "17fe973c-c07c-475e-9996-28a84e998c87",
+              "name": "",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        -112
+      ],
+      "id": "4d34c5ea-923a-486b-b9d1-2342b67eba73",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "user_contact_channels",
+          "mode": "list",
+          "cachedResultName": "user_contact_channels"
+        },
+        "where": {
+          "values": [
+            {
+              "column": "user_id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        592,
+        224
+      ],
+      "id": "4de86aa7-f78d-4dde-831b-7f5ef03a858a",
+      "name": "Получаем данные о центер уведомлений",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        800,
+        224
+      ],
+      "id": "637a2e94-0e34-4cfd-8a1c-984e94142a76",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{$json}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -272,
+        224
+      ],
+      "id": "0ef6228b-f0a3-4784-9add-bd3d3a62d89c",
+      "name": "Общие данные"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7c347-a914-4732-bbe0-1898b54661e9",
+              "name": "text",
+              "value": "=Принят лид ✅ \n💬 Сообщение: \n{{ $('Общие данные').item.json.input_message_text }}\n📊 Тип лида: {{ $('Общие данные').item.json.match_reason_short }}\n🔗 Ссылка на сообщение: \n{{ $('Получаем данные сообщения').item.json.message_url }}\nПеременные: \n- Название чата: {{ $json.name }}\n- Проект: {{ $('Получаем данные проекта').item.json.name }}\n",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1696,
+        128
+      ],
+      "id": "8f9fc161-8ca4-4c0c-afe0-b517000c69dc",
+      "name": "Формируем текст"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_messages",
+          "mode": "list",
+          "cachedResultName": "source_messages"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "id",
+              "value": "={{ $('Общие данные').item.json.source_message_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1056,
+        240
+      ],
+      "id": "bb4b889c-0159-4405-93c3-a146642745cc",
+      "name": "Получаем данные сообщения",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "id",
+              "value": "={{ $('Получаем данные сообщения').item.json.source_channel_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1520,
+        128
+      ],
+      "id": "af4c4cbc-8ab1-4196-b07a-d4095a0feba5",
+      "name": "Получаем данные канала",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://194.156.117.160:8100/discovery-api/bot/send-message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": {{ $('Loop Over Items').item.json.external_recipient_id }},\n  \"text\": \"{{ $('Формируем текст1').item.json.text.replace(/\\n/g, '\\\\n') }}\",\n  \"layout\": \"inline\",\n  \"buttons\": [\n    [\n      {\n        \"text\": \"Открыть карточку на сайте\",\n        \"url\": \"https://gragipemuse.beget.app/leads?leadId={{ $('Общие данные').item.json.id }}\"\n      }\n    ]\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2080,
+        336
+      ],
+      "id": "19978edb-ea60-44e3-8436-39cd763d3302",
+      "name": "Отправка телеграм",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/messages/vk/send",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"client_id\": \"vk_get_start\",\n  \"chat_id\": {{ $('Loop Over Items').item.json.external_recipient_id }},\n  \"text\": \"{{ $('Формируем текст').item.json.text.replace(/\\n/g, '\\\\n') }}\",\n  \"keyboard\": {\n    \"inline\": true,\n    \"buttons\": [\n      [\n        {\n          \"action\": {\n            \"type\": \"open_link\",\n            \"label\": \"Открыть карточку на сайте\",\n            \"link\": \"https://gragipemuse.beget.app/leads?leadId={{ $('Общие данные').item.json.id }}\"\n          }\n        }\n      ]\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2080,
+        128
+      ],
+      "id": "330386a8-4db8-4155-b62d-a97d2934c62a",
+      "name": "Отправка ВК"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7c347-a914-4732-bbe0-1898b54661e9",
+              "name": "text",
+              "value": "=Принят лид ✅ \n💬 Сообщение: \n{{ $('Общие данные').item.json.input_message_text }}\n📊 Тип лида: {{ $('Общие данные').item.json.match_reason_short }}\n🔗 Ссылка на сообщение: \n{{ $('Получаем данные сообщения').item.json.message_url }}\nПеременные: \n- Название чата: {{ $json.name }}\n- Проект: {{ $('Получаем данные проекта').item.json.name }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1696,
+        336
+      ],
+      "id": "c09cc25d-e266-491e-8c41-d392727dead6",
+      "name": "Формируем текст1"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "id",
+              "value": "={{ $('Получаем данные сообщения').item.json.source_channel_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1520,
+        336
+      ],
+      "id": "c9d8ab14-3047-4c75-aba9-2b44f2f3f088",
+      "name": "Получаем данные канала1",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f820e457-8f32-4705-a9bd-caf7f0b87942",
+              "leftValue": "={{ $('Loop Over Items').item.json.platform_id }}",
+              "rightValue": "1",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1248,
+        240
+      ],
+      "id": "b2a03aa2-a277-4d30-b274-6e8d527ee0be",
+      "name": "is message VK?"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "in_app_notifications",
+          "mode": "list",
+          "cachedResultName": "in_app_notifications"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "entity_id",
+              "value": "={{ $('Общие данные').item.json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1040,
+        -192
+      ],
+      "id": "becdddee-b776-4acd-8f1f-2bd1f0c783a6",
+      "name": "Select rows from a table",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1248,
+        -192
+      ],
+      "id": "71b87878-8548-45f6-97b2-a3f76ba65329",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "in_app_notifications",
+          "mode": "list",
+          "cachedResultName": "in_app_notifications"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_read": true,
+            "entity_id": "={{ $json.entity_id }}"
+          },
+          "matchingColumns": [
+            "entity_id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "options",
+              "canBeUsedToMatch": true,
+              "options": [
+                {
+                  "name": "new_lead",
+                  "value": "new_lead"
+                },
+                {
+                  "name": "system_report",
+                  "value": "system_report"
+                },
+                {
+                  "name": "billing_paid",
+                  "value": "billing_paid"
+                },
+                {
+                  "name": "billing_failed",
+                  "value": "billing_failed"
+                },
+                {
+                  "name": "subscription_expiring",
+                  "value": "subscription_expiring"
+                },
+                {
+                  "name": "channel_request_approved",
+                  "value": "channel_request_approved"
+                },
+                {
+                  "name": "channel_request_rejected",
+                  "value": "channel_request_rejected"
+                },
+                {
+                  "name": "subscription_renewed",
+                  "value": "subscription_renewed"
+                },
+                {
+                  "name": "balance_topup_reminder",
+                  "value": "balance_topup_reminder"
+                }
+              ],
+              "removed": true
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "entity_type",
+              "displayName": "entity_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "entity_id",
+              "displayName": "entity_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "metadata",
+              "displayName": "metadata",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "is_read",
+              "displayName": "is_read",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "read_at",
+              "displayName": "read_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "project_id",
+              "displayName": "project_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1488,
+        -176
+      ],
+      "id": "e1e8c0fd-6855-4d5c-915d-454449ce1337",
+      "name": "Update rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "monitoring_projects",
+          "mode": "list",
+          "cachedResultName": "monitoring_projects"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -64,
+        16
+      ],
+      "id": "e654c24e-9022-4841-8ec9-93d275e50fc1",
+      "name": "Получаем данные проекта1",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM v_active_projects_within_limit WHERE id = {{ $('Общие данные').item.json.monitoring_project_id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        64,
+        224
+      ],
+      "id": "67e3fed2-f2dd-40ea-96cb-05001f9a7c08",
+      "name": "Получаем данные проекта",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем данные пользователя": {
+      "main": [
+        [
+          {
+            "node": "Получаем данные о центер уведомлений",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем данные о центер уведомлений": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Select rows from a table",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Получаем данные сообщения",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Общие данные": {
+      "main": [
+        [
+          {
+            "node": "Получаем данные проекта",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем данные сообщения": {
+      "main": [
+        [
+          {
+            "node": "is message VK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем данные канала": {
+      "main": [
+        [
+          {
+            "node": "Формируем текст",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Формируем текст": {
+      "main": [
+        [
+          {
+            "node": "Отправка ВК",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправка ВК": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправка телеграм": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем данные канала1": {
+      "main": [
+        [
+          {
+            "node": "Формируем текст1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Формируем текст1": {
+      "main": [
+        [
+          {
+            "node": "Отправка телеграм",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "is message VK?": {
+      "main": [
+        [
+          {
+            "node": "Получаем данные канала",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Получаем данные канала1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select rows from a table": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Update rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update rows in a table": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем данные проекта1": {
+      "main": [
+        []
+      ]
+    },
+    "Получаем данные проекта": {
+      "main": [
+        [
+          {
+            "node": "Получаем данные пользователя",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

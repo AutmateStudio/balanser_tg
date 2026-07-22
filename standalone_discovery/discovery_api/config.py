@@ -149,6 +149,53 @@ def get_session_auto_migrate() -> bool:
     return _get_bool_env("SESSION_AUTO_MIGRATE", True)
 
 
+def get_account_auth_recheck_enabled() -> bool:
+    """Account-auth watchdog: периодически пробовать реавторизовать ERROR-сессии."""
+    return _get_bool_env("ACCOUNT_AUTH_RECHECK_ENABLED", True)
+
+
+def get_account_auth_recheck_interval_seconds() -> float:
+    """Интервал (сек) между повторными попытками восстановить авторизацию ERROR-сессии.
+
+    Отдельно от SESSION_HEALTH_CHECK_INTERVAL, т.к. реальный RPC
+    `is_user_authorized()` дороже обычного health-тика и не должен дёргаться
+    так же часто — иначе постоянно неавторизованная сессия будет спамить
+    Telegram и логи каждые SESSION_HEALTH_CHECK_INTERVAL секунд.
+    """
+    return max(30.0, _get_float_env("ACCOUNT_AUTH_RECHECK_INTERVAL_SECONDS", 300.0))
+
+
+def get_channel_count_refresh_enabled() -> bool:
+    """Периодически сверять honest-число каналов в Telegram (iter_dialogs)."""
+    return _get_bool_env("CHANNEL_COUNT_REFRESH_ENABLED", True)
+
+
+def get_channel_count_refresh_interval_seconds() -> float:
+    """Интервал (сек) между проходами по всем connected-сессиям для honest channel-count.
+
+    `iter_dialogs` — дорогой RPC (может вернуть сотни диалогов), поэтому
+    интервал по умолчанию заметно больше SESSION_HEALTH_CHECK_INTERVAL —
+    иначе это будет постоянно грузить Telegram и течь во флуд-лимиты.
+    """
+    return max(60.0, _get_float_env("CHANNEL_COUNT_REFRESH_INTERVAL_SECONDS", 1800.0))
+
+
+def get_channel_count_refresh_stagger_seconds() -> float:
+    """Пауза (сек) между сессиями внутри одного прохода — не бить Telegram пачкой."""
+    return max(0.0, _get_float_env("CHANNEL_COUNT_REFRESH_STAGGER_SECONDS", 2.0))
+
+
+def get_channel_count_refresh_initial_delay_seconds() -> float:
+    """Задержка (сек) перед первым проходом после старта процесса.
+
+    Без неё после каждого деплоя/рестарта telegram_channel_count был бы
+    null на /accounts/all до истечения полного CHANNEL_COUNT_REFRESH_INTERVAL_SECONDS
+    (по умолчанию 30 мин) — тик приходил только "после" сна на interval.
+    Небольшая, а не нулевая задержка — чтобы clump успел restore/connect сессии.
+    """
+    return max(0.0, _get_float_env("CHANNEL_COUNT_REFRESH_INITIAL_DELAY_SECONDS", 30.0))
+
+
 def get_add_channels_per_hour() -> int:
     """Лимит успешных добавлений каналов на сессию в час (0 = без лимита)."""
     return max(0, _get_int_env("ADD_CHANNELS_PER_HOUR", 0))
@@ -168,6 +215,18 @@ def get_inprocess_worker() -> bool:
     discovery API видеть результат add-channels. Требует USE_PG_QUEUE=true.
     """
     return _get_bool_env("DISCOVERY_INPROCESS_WORKER", False)
+
+
+def get_inprocess_worker_count() -> int:
+    """Сколько параллельных in-process worker'ов поднимать (INPROCESS_WORKER_COUNT).
+
+    Каждый worker — отдельная asyncio-задача с независимым claim_next.
+    PG-уровень (FOR UPDATE SKIP LOCKED + pick_and_reserve) гарантирует, что
+    разные воркеры захватывают разные задачи и разные аккаунты.
+    Рекомендуется = числу active-аккаунтов в clump (по умолчанию 4).
+    """
+    _ensure_env_loaded()
+    return max(1, _get_int_env("INPROCESS_WORKER_COUNT", 4))
 
 
 def get_rebalance_enabled() -> bool:
@@ -232,4 +291,9 @@ def get_lidgen_min_score_total() -> int:
     if ratio_raw:
         return max(0, min(100, int(float(ratio_raw) * 100)))
     return 40
+
+
+def get_session_archive_max_mb() -> int:
+    """Лимит размера ZIP при enroll-session-from-archive (MiB). Default: 25."""
+    return max(1, min(200, _get_int_env("SESSION_ARCHIVE_MAX_MB", 25)))
 

@@ -16,7 +16,13 @@ from typing import Any, Literal, Optional, Tuple
 
 import telethon.errors as te
 
-ErrorKind = Literal["flood", "banned", "transient", "fatal"]
+ErrorKind = Literal["flood", "banned", "transient", "fatal", "unauthorized"]
+
+_UNAUTHORIZED_MESSAGE_MARKERS = (
+    "не авторизована",
+    "not authorized",
+    "session not authorized",
+)
 
 # Текст FloodWait-ошибок из resolve-пути выглядит как "FloodWait 42s ...".
 _FLOOD_WAIT_RE = re.compile(r"FloodWait\s+(\d+)\s*s", re.IGNORECASE)
@@ -49,10 +55,13 @@ class SessionStatus:
     FLOOD_WAIT = "flood_wait"
     DISCONNECTED = "disconnected"
     BANNED = "banned"
+    ERROR = "error"
 
 
 # Ошибки, означающие, что аккаунт заблокирован/сессия отозвана — миграция каналов
 # на здоровые сессии и остановка listener'а.
+# UnauthorizedError сюда НЕ входит: это часто временная/иная auth-ошибка,
+# классифицируется отдельно как kind=unauthorized.
 _BANNED_ERRORS: Tuple[type[BaseException], ...] = (
     te.UserDeactivatedBanError,
     te.UserDeactivatedError,
@@ -61,7 +70,6 @@ _BANNED_ERRORS: Tuple[type[BaseException], ...] = (
     te.SessionRevokedError,
     te.SessionExpiredError,
     te.PhoneNumberBannedError,
-    te.UnauthorizedError,
 )
 
 # Временные ошибки сети/сервера — переподключение с backoff.
@@ -77,12 +85,23 @@ _TRANSIENT_ERRORS: Tuple[type[BaseException], ...] = (
 )
 
 
+def is_session_unauthorized_error(exc: BaseException) -> bool:
+    """True, если .session есть, но login отсутствует (не путать с ban/revoke)."""
+    if isinstance(exc, _BANNED_ERRORS):
+        return False
+    if isinstance(exc, te.UnauthorizedError):
+        return True
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _UNAUTHORIZED_MESSAGE_MARKERS)
+
+
 def classify_telethon_error(exc: BaseException) -> Tuple[ErrorKind, Optional[int]]:
     """Классифицирует исключение Telethon/сети.
 
     Возвращает кортеж `(kind, seconds)`, где `kind`:
     - `flood` — `FloodWaitError`/`FloodError`; `seconds` = время ожидания;
     - `banned` — аккаунт заблокирован/сессия отозвана; `seconds` = None;
+    - `unauthorized` — сессия без login / UnauthorizedError; `seconds` = None;
     - `transient` — временная ошибка сети/сервера, нужен reconnect; `seconds` = None;
     - `fatal` — всё остальное (неизвестная ошибка); `seconds` = None.
 
@@ -94,6 +113,8 @@ def classify_telethon_error(exc: BaseException) -> Tuple[ErrorKind, Optional[int
         return "flood", seconds
     if isinstance(exc, _BANNED_ERRORS):
         return "banned", None
+    if isinstance(exc, te.UnauthorizedError) or is_session_unauthorized_error(exc):
+        return "unauthorized", None
     if isinstance(exc, _TRANSIENT_ERRORS):
         return "transient", None
     return "fatal", None
@@ -116,6 +137,8 @@ class SessionHealth:
     reconnect_count: int = 0
     banned: bool = False
     ban_reason: Optional[str] = None
+    last_reauth_attempt_at: Optional[float] = None
+    reauth_attempt_count: int = 0
 
     def touch_event(self) -> None:
         """Отметить, что сессия только что получила сообщение/апдейт."""
@@ -159,6 +182,65 @@ class SessionHealth:
         self.status = SessionStatus.BANNED
         self.connected = False
 
+    def mark_unauthorized(self, reason: str) -> None:
+        """Сессия на диске есть, но login отсутствует — нужен QR/auth."""
+        self.connected = False
+        self.status = SessionStatus.ERROR
+        self.last_error = reason
+        self.last_error_at = time.time()
+        self.error_count += 1
+
+    def mark_reauthorized(self) -> bool:
+        """Снимает unauthorized-ERROR после успешной re-auth (не трогает banned/flood)."""
+        if self.banned:
+            return False
+        unauthorized_error = (
+            self.status == SessionStatus.ERROR
+            and is_session_unauthorized_error(RuntimeError(self.last_error or ""))
+        )
+        recoverable_disconnected = self.status in (
+            SessionStatus.STARTING,
+            SessionStatus.DISCONNECTED,
+        )
+        if not unauthorized_error and not recoverable_disconnected:
+            return False
+        self.connected = True
+        self.status = SessionStatus.HEALTHY
+        if unauthorized_error:
+            self.last_error = None
+            self.last_error_at = None
+        return True
+
+    def should_attempt_reauth(
+        self,
+        min_interval_seconds: float,
+        *,
+        allow_starting: bool = False,
+    ) -> bool:
+        """Account-auth watchdog: пора ли повторить проверку авторизации.
+
+        По умолчанию только unauthorized (status=ERROR, не banned) — на бан/ревок
+        повторная попытка бессмысленна, нужен новый .session-файл.
+
+        ``allow_starting=True`` — также для STARTING без Telethon-клиента
+        (зачисленная сессия без каналов / после рестарта до первого listener).
+        """
+        if self.banned:
+            return False
+        if self.status == SessionStatus.ERROR:
+            pass
+        elif allow_starting and self.status == SessionStatus.STARTING:
+            pass
+        else:
+            return False
+        if self.last_reauth_attempt_at is None:
+            return True
+        return (time.time() - self.last_reauth_attempt_at) >= max(0.0, min_interval_seconds)
+
+    def record_reauth_attempt(self) -> None:
+        self.last_reauth_attempt_at = time.time()
+        self.reauth_attempt_count += 1
+
     def record_error(self, message: str) -> None:
         self.error_count += 1
         self.last_error = message
@@ -174,7 +256,7 @@ class SessionHealth:
         """Доступна ли сессия для приёма новых каналов (балансировка)."""
         if self.banned:
             return False
-        if self.status == SessionStatus.DISCONNECTED:
+        if self.status in (SessionStatus.DISCONNECTED, SessionStatus.ERROR):
             return False
         return not self.in_flood()
 
@@ -197,4 +279,6 @@ class SessionHealth:
             "reconnect_count": self.reconnect_count,
             "banned": self.banned,
             "ban_reason": self.ban_reason,
+            "last_reauth_attempt_at": self.last_reauth_attempt_at,
+            "reauth_attempt_count": self.reauth_attempt_count,
         }

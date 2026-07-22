@@ -1,0 +1,2465 @@
+{
+  "name": "Обработка очереди. Поиск Лидов",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "1i7LftS6sv85Bfo5",
+          "mode": "list",
+          "cachedResultName": "Клиенты",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/1i7LftS6sv85Bfo5"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $json.client_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -2352,
+        208
+      ],
+      "id": "6368467c-9240-4837-be6e-b1b68f9c360c",
+      "name": "Получаем клиента"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (\n  SELECT\n    COALESCE({{ $('Получаем клиента').item.json.last_message_id }}, 0)::bigint AS last_id,\n\n    NULLIF(\n      NULLIF(\n        regexp_replace('{{ $('Получаем клиента').item.json.chat_find_ids }}', '[[:space:]]+', '', 'g'),\n        ''\n      ),\n      'null'\n    ) AS chan_list,\n\n    NULLIF(\n      NULLIF(trim('{{ $('Получаем клиента').item.json.felter }}'), ''),\n      'null'\n    ) AS filters_txt\n),\nflt AS (\n  SELECT CASE\n           WHEN filters_txt IS NULL OR filters_txt = '[]' THEN NULL\n           ELSE filters_txt::jsonb\n         END AS filters_json\n  FROM p\n)\nSELECT m.*\nFROM public.channel_messages m\nCROSS JOIN p\nCROSS JOIN flt\nWHERE m.id::bigint > p.last_id\n  AND (\n    p.chan_list IS NULL\n    OR m.chenal_id::bigint = ANY (string_to_array(p.chan_list, ',')::bigint[])\n  )\n  AND (\n    flt.filters_json IS NULL\n    OR EXISTS (\n      SELECT 1\n      FROM jsonb_to_recordset(flt.filters_json) AS f(label text, min_prob double precision)\n      WHERE\n        (m.top1_label = f.label AND m.top1_prob >= f.min_prob)\n        OR\n        (m.top2_label = f.label AND m.top2_prob >= f.min_prob)\n    )\n  )\nORDER BY m.id::bigint ASC\nLIMIT 100;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1328,
+        176
+      ],
+      "id": "347834d8-1540-4443-8fd3-735a4bee27b7",
+      "name": "Сообщения на обработку",
+      "credentials": {
+        "postgres": {
+          "id": "nJLtOwEA1dAE4Pjt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (\n  SELECT NULLIF(\n           regexp_replace('{{ $json.chat_find_ids }}', '[[:space:]]+', '', 'g'),\n           ''\n         ) AS list_txt\n),\nids AS (\n  SELECT CASE\n           WHEN list_txt IS NULL THEN NULL\n           ELSE ARRAY(\n             SELECT x::bigint\n             FROM unnest(string_to_array(list_txt, ',')) AS x\n             WHERE x <> ''\n           )\n         END AS chenal_ids\n  FROM p\n)\nSELECT m.id::integer AS last_id\nFROM public.channel_messages m\nCROSS JOIN ids\nWHERE ids.chenal_ids IS NULL\n   OR m.chenal_id::bigint = ANY(ids.chenal_ids)\nORDER BY m.id::bigint DESC\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2160,
+        208
+      ],
+      "id": "f4d51c04-ef51-4cc3-bdf9-ccf7830bb509",
+      "name": "Сообщения на обработку последнее",
+      "credentials": {
+        "postgres": {
+          "id": "nJLtOwEA1dAE4Pjt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "06a5abd1-660f-491f-8a66-def4fdc413fb",
+              "leftValue": "={{ $('Сообщения на обработку последнее').item.json.last_id}}",
+              "rightValue": "={{ $('Получаем клиента').item.json.last_message_id }}",
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1744,
+        192
+      ],
+      "id": "ff732ddf-7b2b-4ae2-a3b5-83de805ea803",
+      "name": "Есть ли новые строки"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -944,
+        176
+      ],
+      "id": "7cf2c4e1-781d-4998-b9fc-353613d5ee3c",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "aGNQafeUefK4GkkK",
+          "mode": "list",
+          "cachedResultName": "Данные клиентов",
+          "cachedResultUrl": "/projects/EKaUKFrgDyvh4Djz/datatables/aGNQafeUefK4GkkK"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "=1"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "last_message_id": 1
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "send_chat_id",
+              "displayName": "send_chat_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "promt_des",
+              "displayName": "promt_des",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "is_activ",
+              "displayName": "is_activ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "chat_find_ids",
+              "displayName": "chat_find_ids",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "last_message_id",
+              "displayName": "last_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "felter",
+              "displayName": "felter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1888,
+        -240
+      ],
+      "id": "e1c24d64-8127-4d9f-97b8-04390c881dd3",
+      "name": "Обновляем последнюю обработку клиента1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Получаем клиента').item.json.send_chat_id }}",
+        "text": "={{ $json.text }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "СООБЩЕНИЕ",
+                    "additionalFields": {
+                      "url": "={{ $('Loop Over Items').item.json.message_url }}"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Отправить шаблон",
+                    "additionalFields": {
+                      "url": "={{ $json.tg_link }}"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ Хороший лид",
+                    "additionalFields": {
+                      "callback_data": "=l_v_{{ $('Сохраняем результат').item.json.id }}"
+                    }
+                  },
+                  {
+                    "text": "❌ Плохой лид",
+                    "additionalFields": {
+                      "callback_data": "=l_i_{{ $('Сохраняем результат').item.json.id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "message_thread_id": "={{ $('Получаем клиента').item.json.thread_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1056,
+        336
+      ],
+      "id": "6a85b180-b076-44b0-8cb3-227cf2f59c61",
+      "name": "Send a text message",
+      "webhookId": "7f17cbac-f2fb-4125-8dce-3910e4b9a214",
+      "credentials": {
+        "telegramApi": {
+          "id": "9zJx8YwRVWgAmAEJ",
+          "name": "Лидо Находки"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=ПОЛЯ СООБЩЕНИЯ:\n1) text: {{ $('Loop Over Items').item.json.message_text }}\n2) chat_title: {{ $('Loop Over Items').item.json.chenal_name }}\n3) sender_name: {{ $('Loop Over Items').item.json.sender_name }}\n4) sender_username: {{ $('Loop Over Items').item.json.sender_username }}\n5) message_link: {{ $('Loop Over Items').item.json.message_url }}\n6) sender_phone: {{ $('Loop Over Items').item.json.sender_phone }}\n",
+        "options": {
+          "systemMessage": "=Ты — AI-квалификатор лидов и помощник по подготовке ответа в Telegram.\n\nТвоя задача:\n1) По входящему сообщению определить, является ли написавший лидом по критериям из блока «ПРОФИЛЬ КОМПАНИИ».\n2) Если это лид — вернуть тип лида, username для ответа и текст ответа.\n3) Текст ответа нужно формировать НЕ с нуля, а только через минимальную адаптацию «Дефолтного сообщения».\n4) Если это не лид — вернуть только PASS и процент совпадения.\n\nПРОФИЛЬ КОМПАНИИ:\n'''\n{{ $('Получаем клиента').item.json.promt_des }}\n'''\n\nДЕФОЛТНОЕ СООБЩЕНИЕ В ОТВЕТ (ШАБЛОН, ОСНОВА ДЛЯ АДАПТАЦИИ):\n\"\"\"\n{{ $('Получаем клиента').item.json.sample_text }}\n\"\"\"\n\nВХОД:\n* «ПРОФИЛЬ КОМПАНИИ» (главные правила — что считать лидом и что отсеивать)\n* данные входящего сообщения (text, chat_title, sender_name, sender_username, message_link, sender_phone, и др.)\n* username отправителя (с которого пришло сообщение)\n* контакты/username, если они указаны прямо в тексте сообщения\n\nГЛАВНОЕ ПРАВИЛО:\nКритерии «что является лидом» и «что не является лидом» нужно брать ТОЛЬКО из текста «ПРОФИЛЬ КОМПАНИИ».\nНельзя использовать внешние знания, догадки и допущения.\nЕсли ощущение, что процент совпадения больше 60%, то это наш лид.\n\nПРАВИЛО ПО USERNAME:\nНужно вернуть поле «username».\nЕсли во входящем сообщении явно указан контакт/username, кому писать (например, @username в тексте, контакт для связи, «пишите сюда») — используй его.\nЕсли НЕ указано, кому писать — используй sender_username (username отправителя), который передан во входе.\nНе выдумывай username.\nЕсли username найден в тексте в формате @name, верни в том же виде, как нужен вашему процессу (желательно без лишних пробелов).\n\nКРИТИЧЕСКОЕ ПРАВИЛО ПО ТЕКСТУ (ОЧЕНЬ ВАЖНО):\nПоле «text» нужно делать на основе «ДЕФОЛТНОГО СООБЩЕНИЯ В ОТВЕТ».\nНельзя писать новый текст с нуля, если это не требуется.\n\nНужно выполнить МИНИМАЛЬНЫЕ правки под запрос/контекст входящего сообщения:\n* сохранить структуру, тон, смысл и основную формулировку шаблона\n* менять только отдельные слова/фразы, которые делают ответ уместным под конкретный запрос\n* если шаблон уже подходит — вернуть его почти без изменений\n* не переписывать целиком\n* не добавлять новые блоки, преимущества, офферы, ссылки, кейсы, которых нет в шаблоне\n* не добавлять выдуманные детали о клиенте/задаче\n* если данных мало — сделать нейтральную минимальную адаптацию (или оставить шаблон почти без изменений)\n\nПРИОРИТЕТЫ АДАПТАЦИИ ТЕКСТА (по убыванию важности):\n1) Уместность под запрос (например, упомянуть релевантную услугу/формулировку из сообщения)\n2) Сохранение исходного шаблона\n3) Минимум изменений\n\nЧТО СЧИТАЕТСЯ \"МИНИМАЛЬНЫМИ ПРАВКАМИ\":\n* заменить 1–3 фразы в шаблоне под контекст запроса\n* добавить короткое уточнение по теме запроса (если это прямо следует из сообщения)\n* слегка изменить приветствие/обращение (по необходимости)\nНе считается минимальными правками:\n* полностью новый текст\n* полная перестройка структуры\n* добавление длинных объяснений, которых нет в шаблоне\n\nФОРМАТ ВЫВОДА:\n1) Если сообщение НЕ подходит под «ПРОФИЛЬ КОМПАНИИ» — ответ строго:\nPASS + процент совпадения\nНапример: PASS 20% / PASS 57%\nТолько это, без JSON, без пояснений, без дополнительных символов.\n\n2) Если сообщение подходит — ответ строго валидный JSON.\nБез Markdown, без код-блоков, без пояснений вне JSON, без эмодзи, без тегов и украшений.\nВ JSON возвращай только 3 поля: «тип_лида», «username», «text».\n\nТИП ЛИДА (только если подходит):\n* \"Прямой лид\" — явно просит то, что соответствует профилю.\n* \"Косвенный лид\" — потенциально подходит под профиль, но формулировка размыта / мало деталей / неясно, что это точно ваша зона (но похоже на профиль).\n\nСТРОГАЯ СХЕМА JSON (только если подходит):\n{\n  \"тип_лида\": \"Прямой лид | Косвенный лид\",\n  \"username\": \"username кому написать (из текста сообщения, если указан; иначе sender_username)\",\n  \"text\": \"дефолтное сообщение с минимальными правками под запрос\"\n}\n\nЗАПРЕЩЕНО:\n* Обрабатывать или возвращать поля: «ии_анализ», «готовность_платить», «валидность_клиента»\n* Добавлять любые другие поля в JSON\n* Писать что-либо кроме строго указанного формата ответа\n* Выдумывать данные, которых нет во входе\n* Генерировать новый текст вместо минимальной адаптации дефолтного сообщения (без необходимости)\n\nНичего лишнего в ответ отправлять запрещено."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -1376,
+        608
+      ],
+      "id": "46bb5721-af20-4f6e-93f5-d59862db2056",
+      "name": "Проверка текста1",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a6008532-6699-4974-ae4d-c4cfb772d13e",
+              "leftValue": "={{$('Ответ нейросети').item.json.response}}",
+              "rightValue": "PASS",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -240,
+        192
+      ],
+      "id": "d9924e8c-7662-4b17-82d7-49d7e8af7dd5",
+      "name": "Пропускаем1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Получаем клиента').item.json.send_chat_id }}",
+        "text": "={{ $json.output.replace(/<br\\s*\\/?>/gi, \"\") }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "СООБЩЕНИЕ",
+                    "additionalFields": {
+                      "url": "={{ $('Loop Over Items').item.json.message_url }}"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Отправить шаблон",
+                    "additionalFields": {
+                      "url": "={{ $('Формируем текст').item.json.tg_link }}"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ Хороший лид",
+                    "additionalFields": {
+                      "callback_data": "=l_v_{{ $('Сохраняем результат').item.json.id }}"
+                    }
+                  },
+                  {
+                    "text": "❌ Плохой лид",
+                    "additionalFields": {
+                      "callback_data": "=l_i_{{ $('Сохраняем результат').item.json.id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "message_thread_id": "={{ $('Получаем клиента').item.json.thread_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1088,
+        608
+      ],
+      "id": "41b00b45-bdb0-4605-8a74-9cecbd854686",
+      "name": "Текст1",
+      "webhookId": "8945c9db-60d4-4032-9527-30360c3eb775",
+      "credentials": {
+        "telegramApi": {
+          "id": "9zJx8YwRVWgAmAEJ",
+          "name": "Лидо Находки"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Реши ошибку и проблему и ответь только исправленным текстом.\n\nТекст: \n\"\"\"\n{{ $json.text }}\n\"\"\"\n\nОшибка: \n\"\"\"\n{{ $json.error }}\n\"\"\"\n\n\n\nВ ответе должен быть только текст c правками.\n\nНе ломай HTML разметку, которая не даёт ошибку!\n\nЕсли ошибка в том, что текст слишком длиннй, не меняя суть, постарайся немного его сократить. В ответ напиши только сокращённый текст.",
+        "options": {
+          "systemMessage": "=Реши ошибку и проблему и ответь только исправленным текстом."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        800,
+        608
+      ],
+      "id": "f6b4a532-3c87-414f-af53-2972f7a88ef8",
+      "name": "Исправление сообщения"
+    },
+    {
+      "parameters": {
+        "errorMessage": "2 уровень"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        0
+      ],
+      "id": "3ad9b2e4-a34c-49d2-844e-95e7858a037b",
+      "name": "Stop and Error2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Функция для очистки от Markdown (обратных кавычек)\nfunction stripCodeFences(s) {\n  s = s.trim();\n  s = s.replace(/^`{3}(?:json)?\\s*/i, '');\n  s = s.replace(/`{3}$/i, '');\n  return s.trim();\n}\n\n// Функция безопасного парсинга JSON\nfunction tryParseJson(raw) {\n  try { return JSON.parse(raw); } catch (_) {}\n  \n  let fixed = raw.replace(/\\uFEFF/g, '');\n  fixed = fixed.replace(/,\\s*([}\\]])/g, '$1');\n  \n  try { return JSON.parse(fixed); } \n  catch (e) { return { error: 'invalid_json', message: e.message, raw: raw }; }\n}\n\n// Берем данные строго из указанного узла\nconst inputItems = $('Проверка сообщения в AI').all();\n\nreturn inputItems.map((item) => {\n  const j = item.json || {};\n  \n  // 1. Достаем сам текст ответа строго из структуры OpenRouter (или фолбэк для других)\n  let rawContent = '';\n  if (j.choices && j.choices[0] && j.choices[0].message) {\n    rawContent = j.choices[0].message.content || '';\n  } else if (typeof j.text === 'string') {\n    rawContent = j.text;\n  } else if (typeof j.message === 'string') {\n    rawContent = j.message;\n  }\n  \n  // 2. Автоматически забираем токены и деньги для статистики\n  const usage = j.usage || {};\n  const metaData = {\n    _total_tokens: usage.total_tokens || 0,\n    _cost_usd: usage.cost || 0\n  };\n\n  rawContent = String(rawContent).trim();\n\n  if (!rawContent) {\n    return { json: { error: 'empty_ai_output', raw: '', ...metaData } };\n  }\n\n  // Нормализуем переносы\n  const normalized = rawContent.replace(/\\r\\n/g, '\\n').trim();\n\n  // 3. ПРАВИЛЬНАЯ ПРОВЕРКА НА PASS\n  // Если ответ начинается с \"PASS\" (например, \"PASS 0%\" или \"PASS 57%\")\n  if (normalized.startsWith('PASS')) {\n    return { \n      json: { \n        тип_лида: 'PASS',\n        совпадение: normalized.replace('PASS', '').trim(), \n        ...metaData\n      } \n    };\n  }\n\n  // 4. Если это не PASS, значит ИИ должен был вернуть JSON\n  let candidate = stripCodeFences(normalized);\n  const first = candidate.search(/[{[]/);\n  if (first > 0) candidate = candidate.slice(first).trim();\n\n  const parsed = tryParseJson(candidate);\n\n  // Если ИИ выдал кривой JSON, передаем ошибку дальше, не ломая воркфлоу\n  if (parsed.error) {\n    return { json: { ...parsed, ...metaData } };\n  }\n\n  // 5. Успех! Возвращаем чистый распарсенный JSON + данные по токенам и стоимости\n  return { json: { ...parsed, ...metaData } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        224
+      ],
+      "id": "43412e88-a629-4e7d-af6e-3836afcf9a13",
+      "name": "Из текста в JSON"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Получаем клиента').item.json.send_chat_id }}",
+        "text": "={{$json.output.replace(/<br\\s*\\/?>/gi, \"\")}}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -1520,
+        -16
+      ],
+      "id": "baf36238-9723-49e0-96a2-5187511aff42",
+      "name": "Send a text message1",
+      "webhookId": "7f17cbac-f2fb-4125-8dce-3910e4b9a214",
+      "credentials": {
+        "telegramApi": {
+          "id": "9zJx8YwRVWgAmAEJ",
+          "name": "Лидо Находки"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "06a5abd1-660f-491f-8a66-def4fdc413fb",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": "={{ $('Получаем клиента').item.json.last_message_id }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1152,
+        160
+      ],
+      "id": "034f17bc-4fc2-4f10-b3c8-dd4df240b5b3",
+      "name": "Есть ли SUCSESS"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -1360,
+        768
+      ],
+      "id": "b27b1a80-6cb3-4e4b-82e1-aa2e0e75c27e",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "hwaDdGPn5HFuYp7N",
+          "name": "Лидоген ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-5-nano",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        800,
+        864
+      ],
+      "id": "2318ad31-53dc-4c22-8c56-ac24d72f3136",
+      "name": "OpenRouter Chat Model2",
+      "credentials": {
+        "openRouterApi": {
+          "id": "hwaDdGPn5HFuYp7N",
+          "name": "Лидоген ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7c347-a914-4732-bbe0-1898b54661e9",
+              "name": "text",
+              "value": "=Принят лид ✅ \n💬 Сообщение: \n<pre>\n{{ $('Loop Over Items').item.json.message_text }}\n</pre>\n\n📊 Тип лида: {{ $json[\"тип_лида\"] }}\n\n🔗 Ссылка на сообщение: {{ $('Loop Over Items').item.json.message_url }}\n\nПеременные: \n- Название чата: {{ $('Loop Over Items').item.json.chenal_name }}\n- Имя отправителя: {{ $('Loop Over Items').item.json.sender_name }}\n- Username отправителя: @{{ $('Loop Over Items').item.json.sender_username }}\n- Телефон: {{ $('Loop Over Items').item.json.sender_phone }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        640,
+        240
+      ],
+      "id": "f0f12b42-2861-4fc7-9b87-f5aeb0ea4798",
+      "name": "Формируем текст"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a6008532-6699-4974-ae4d-c4cfb772d13e",
+              "leftValue": "={{ $json[\"тип_лида\"] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        304,
+        224
+      ],
+      "id": "8ed24a17-03a1-46f6-9c2f-0f30b4467389",
+      "name": "Пропускаем"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d93c63d9-8d0f-4218-a289-59083a16b41a",
+              "leftValue": "={{$('Ответ нейросети').item.json.response}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -32,
+        208
+      ],
+      "id": "b5b68d38-ad0c-4c62-a793-2c8393cd1ece",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=ПОЛЯ СООБЩЕНИЯ:\n1) text: {{ $('Loop Over Items').item.json.message_text }}\n2) chat_title: {{ $('Loop Over Items').item.json.chenal_name }}\n3) sender_name: {{ $('Loop Over Items').item.json.sender_name }}\n4) sender_username: {{ $('Loop Over Items').item.json.sender_username }}\n5) message_link: {{ $('Loop Over Items').item.json.message_url }}\n6) sender_phone: {{ $('Loop Over Items').item.json.sender_phone }}\n",
+        "options": {
+          "systemMessage": "=Ты — AI-квалификатор лидов. Твоя задача: по входящему сообщению из Telegram определить, является ли написавший лидом по критериям из блока «ПРОФИЛЬ КОМПАНИИ».\n\nПРОФИЛЬ КОМПАНИИ:\n'''\n{{ $('Получаем клиента').item.json.promt_des }}\n'''\n\nВХОД:\n* «ПРОФИЛЬ КОМПАНИИ» (главные правила — что считать лидом и что отсеивать)\n* данные сообщения (текст, чат, отправитель, ссылка/IDs)\n\nГЛАВНОЕ ПРАВИЛО:\nКритерии «что является лидом» и «что не является лидом» нужно брать ТОЛЬКО из текста «ПРОФИЛЬ КОМПАНИИ».\nНельзя использовать внешние знания, догадки и допущения.\nЕcсли ощущение, что процент совпадения больше 60%, то это наш лид!\n\nФОРМАТ ВЫВОДА:\n1) Если сообщение НЕ подходит под «ПРОФИЛЬ КОМПАНИИ» — ответ строго:\nPASS + процент сопвпадения \nНапример: (PASS 20%)(PASS 57%) \nТолько это слова, без JSON, без пояснений, без дополнительных символов.\n2) Если сообщение подходит — ответ строго валидный JSON.\nБез Markdown, без код-блоков, без пояснений вне JSON, без эмодзи, без тегов и украшений.\nВ JSON возвращай только 3 поля: «тип_лида», «ии_анализ», «оценка».\n\nТИП ЛИДА (только если подходит):\n* \"Прямой лид\" — явно просит то что соответствует профилю.\n* \"Косвенный лид\" — потенциально подходит под профиль, но формулировка размыта/мало деталей/неясно, что это точно ваша зона (но похоже на профиль).\n\nИИ_АНАЛИЗ:\n* 3–6 коротких строк по делу: почему подходит под профиль и что нужно уточнить.\n* Не выдумывай факты. Если данных не хватает — прямо укажи это и что уточнить.\n* Формат поля: массив строк (каждая строка — отдельный пункт).\n\nОЦЕНКА:\nОцени:\n1) готовность_платить: \"Низкая\" | \"Средняя\" | \"Высокая\" | \"Неизвестно\" + короткая причина\n2) валидность_клиента: \"Низкая\" | \"Средняя\" | \"Высокая\" | \"Неизвестно\" + короткая причина\nЕсли данных недостаточно — используй \"Неизвестно\" и объясни почему.\n\nСТРОГАЯ СХЕМА JSON (только если подходит):\n{\n\"тип_лида\": \"Прямой лид | Косвенный лид\",\n\"ии_анализ\": [\"строка 1\", \"строка 2\", \"строка 3\"],\n\"оценка\": {\n\"готовность_платить\": { \"уровень\": \"Низкая|Средняя|Высокая|Неизвестно\", \"почему\": \"...\" },\n\"валидность_клиента\": { \"уровень\": \"Низкая|Средняя|Высокая|Неизвестно\", \"почему\": \"...\" }\n}\n}\n\nНичего в ответ отправлять запрещено."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -992,
+        -128
+      ],
+      "id": "faa21406-788a-4127-b8fd-7e97774e9b19",
+      "name": "Проверка текста",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7c347-a914-4732-bbe0-1898b54661e9",
+              "name": "retry",
+              "value": "={{ $json.retry - 1 || 3 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        640,
+        608
+      ],
+      "id": "fe37272e-cec4-4227-b827-f5659c8e6c19",
+      "name": "Попытки"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a6008532-6699-4974-ae4d-c4cfb772d13e",
+              "leftValue": "={{ $('Попытки').item.json.retry }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1392,
+        560
+      ],
+      "id": "eb1409eb-a100-440b-b61c-cff44ec4b893",
+      "name": "Пропускаем2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7c347-a914-4732-bbe0-1898b54661e9",
+              "name": "retry",
+              "value": "={{ $('Попытки').item.json.retry - 1 }}",
+              "type": "number"
+            },
+            {
+              "id": "52ac7738-f9aa-42c7-8b16-c08b565b378f",
+              "name": "text",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        560
+      ],
+      "id": "cd5f2056-3e6f-4c5d-8f2b-41724da3f221",
+      "name": "Попытки1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (JavaScript)\n// Ожидает во входном item поля:\n// - text: текст сообщения\n// - username: username в Telegram (можно с @ или без)\n\nconst items = $input.all();\n\nreturn items.map((item) => {\n  const text = (item.json.text ?? '').toString();\n  let username = (item.json.username ?? '').toString().trim();\n\n  // Убираем @ в начале, если есть\n  username = username.replace(/^@/, '');\n\n  // Кодируем текст для URL\n  const encodedText = encodeURIComponent(text);\n\n  // Собираем ссылку\n  const tgLink = `https://t.me/${username}?text=${encodedText}`;\n\n  return {\n    json: {\n      ...item.json,\n      tg_link: tgLink,\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        240
+      ],
+      "id": "aa2be14c-8b5d-4bb1-b234-40c7551df661",
+      "name": "Из текста в JSON1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7c347-a914-4732-bbe0-1898b54661e9",
+              "name": "text",
+              "value": "=Принят лид ✅ \n💬 Сообщение: \n<pre>\n{{ $('Loop Over Items').item.json.message_text }}\n</pre>\n\n📊 Тип лида: {{ $json[\"тип_лида\"] }}\n\n🧠 AI-анализ:\n{{ $json[\"ии_анализ\"] }}\n\n💸 Оценка: \n- Готовность платить: \n  {{ $json[\"оценка\"][\"готовность_платить\"][\"уровень\"] }} ({{ $json[\"оценка\"][\"готовность_платить\"][\"почему\"] }})\n- Валидность клиента: \n  {{ $json[\"оценка\"][\"валидность_клиента\"][\"уровень\"] }} ({{ $json[\"оценка\"][\"валидность_клиента\"][\"почему\"] }})\n\n🔗 Ссылка на сообщение: {{ $('Loop Over Items').item.json.message_url }}\n\nПеременные: \n- Название чата: {{ $('Loop Over Items').item.json.chenal_name }}\n- Имя отправителя: {{ $('Loop Over Items').item.json.sender_name }}\n- Username отправителя: @{{ $('Loop Over Items').item.json.sender_username }}\n- Телефон: {{ $('Loop Over Items').item.json.sender_phone }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        528,
+        32
+      ],
+      "id": "e0e3f322-0a39-4a62-bdf2-d91b013f2a0c",
+      "name": "Формируем текст1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d93c63d9-8d0f-4218-a289-59083a16b41a",
+              "leftValue": "={{ $('Получаем клиента').item.json.test }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -112,
+        -32
+      ],
+      "id": "be1c3c03-c421-4589-9fec-9cf82acd6b7a",
+      "name": "Тестим ли клиента"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Получаем клиента').item.json.send_chat_id }}",
+        "text": "=TEST!\n\n<pre>\n{{ $('Loop Over Items').item.json.message_text }}\n</pre>\n\n{{$('Ответ нейросети').item.json.response.replace(/<br\\s*\\/?>/gi, \"\")}}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        96,
+        -32
+      ],
+      "id": "04ed7bcd-c325-409d-8848-b9f925c010d4",
+      "name": "Send a text message2",
+      "webhookId": "7f17cbac-f2fb-4125-8dce-3910e4b9a214",
+      "credentials": {
+        "telegramApi": {
+          "id": "9zJx8YwRVWgAmAEJ",
+          "name": "Лидо Находки"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7c347-a914-4732-bbe0-1898b54661e9",
+              "name": "response",
+              "value": "={{ $json.choices[0].message.content }}",
+              "type": "string"
+            },
+            {
+              "id": "9eb3fc0b-d576-4e60-a13f-9bbcbd7ae2cb",
+              "name": "token_request",
+              "value": "={{ $json.usage.prompt_tokens }}",
+              "type": "number"
+            },
+            {
+              "id": "efd481ff-a1af-4924-acf9-c9efa1beb47f",
+              "name": "token_response",
+              "value": "={{ $json.usage.completion_tokens }}",
+              "type": "number"
+            },
+            {
+              "id": "365123be-44ad-45ec-af13-99aa9d761593",
+              "name": "cost",
+              "value": "={{ $json.usage.cost }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -544,
+        192
+      ],
+      "id": "925a9b43-2fdc-4903-8dbb-546cced5504a",
+      "name": "Ответ нейросети"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"openai/gpt-oss-20b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Ты — AI-квалификатор лидов и помощник по подготовке ответа в Telegram.\\n\\nТвоя задача:\\n1) По входящему сообщению определить, является ли написавший лидом по критериям из блока «ПРОФИЛЬ КОМПАНИИ».\\n2) Если это лид — вернуть тип лида, username для ответа и текст ответа.\\n3) Текст ответа нужно формировать НЕ с нуля, а только через минимальную адаптацию «Дефолтного сообщения».\\n4) Если это не лид — вернуть только PASS и процент совпадения.\\n\\nПРОФИЛЬ КОМПАНИИ:\\n'''\\n{{ $('Получаем клиента').item.json.promt_des }}\\n'''\\n\\nДЕФОЛТНОЕ СООБЩЕНИЕ В ОТВЕТ (ШАБЛОН, ОСНОВА ДЛЯ АДАПТАЦИИ):\\n\\\"\\\"\\\"\\n{{ $('Получаем клиента').item.json.sample_text }}\\n\\\"\\\"\\\"\\n\\nВХОД:\\n* «ПРОФИЛЬ КОМПАНИИ» (главные правила — что считать лидом и что отсеивать)\\n* данные входящего сообщения (text, chat_title, sender_name, sender_username, message_link, sender_phone, и др.)\\n* username отправителя (с которого пришло сообщение)\\n* контакты/username, если они указаны прямо в тексте сообщения\\n\\nГЛАВНОЕ ПРАВИЛО:\\nКритерии «что является лидом» и «что не является лидом» нужно брать ТОЛЬКО из текста «ПРОФИЛЬ КОМПАНИИ».\\nНельзя использовать внешние знания, догадки и допущения.\\nЕсли ощущение, что процент совпадения больше 60%, то это наш лид.\\n\\nПРАВИЛО ПО USERNAME:\\nНужно вернуть поле «username».\\nЕсли во входящем сообщении явно указан контакт/username, кому писать (например, @username в тексте, контакт для связи, «пишите сюда») — используй его.\\nЕсли НЕ указано, кому писать — используй sender_username (username отправителя), который передан во входе.\\nНе выдумывай username.\\nЕсли username найден в тексте в формате @name, верни в том же виде, как нужен вашему процессу (желательно без лишних пробелов).\\n\\nКРИТИЧЕСКОЕ ПРАВИЛО ПО ТЕКСТУ (ОЧЕНЬ ВАЖНО):\\nПоле «text» нужно делать на основе «ДЕФОЛТНОГО СООБЩЕНИЯ В ОТВЕТ».\\nНельзя писать новый текст с нуля, если это не требуется.\\n\\nНужно выполнить МИНИМАЛЬНЫЕ правки под запрос/контекст входящего сообщения:\\n* сохранить структуру, тон, смысл и основную формулировку шаблона\\n* менять только отдельные слова/фразы, которые делают ответ уместным под конкретный запрос\\n* если шаблон уже подходит — вернуть его почти без изменений\\n* не переписывать целиком\\n* не добавлять новые блоки, преимущества, офферы, ссылки, кейсы, которых нет в шаблоне\\n* не добавлять выдуманные детали о клиенте/задаче\\n* если данных мало — сделать нейтральную минимальную адаптацию (или оставить шаблон почти без изменений)\\n\\nПРИОРИТЕТЫ АДАПТАЦИИ ТЕКСТА (по убыванию важности):\\n1) Уместность под запрос (например, упомянуть релевантную услугу/формулировку из сообщения)\\n2) Сохранение исходного шаблона\\n3) Минимум изменений\\n\\nЧТО СЧИТАЕТСЯ \\\"МИНИМАЛЬНЫМИ ПРАВКАМИ\\\":\\n* заменить 1–3 фразы в шаблоне под контекст запроса\\n* добавить короткое уточнение по теме запроса (если это прямо следует из сообщения)\\n* слегка изменить приветствие/обращение (по необходимости)\\nНе считается минимальными правками:\\n* полностью новый текст\\n* полная перестройка структуры\\n* добавление длинных объяснений, которых нет в шаблоне\\n\\nФОРМАТ ВЫВОДА:\\n1) Если сообщение НЕ подходит под «ПРОФИЛЬ КОМПАНИИ» — ответ строго:\\nPASS + процент совпадения\\nНапример: PASS 20% / PASS 57%\\nТолько это, без JSON, без пояснений, без дополнительных символов.\\n\\n2) Если сообщение подходит — ответ строго валидный JSON.\\nБез Markdown, без код-блоков, без пояснений вне JSON, без эмодзи, без тегов и украшений.\\nВ JSON возвращай только 3 поля: «тип_лида», «username», «text».\\n\\nТИП ЛИДА (только если подходит):\\n* \\\"Прямой лид\\\" — явно просит то, что соответствует профилю.\\n* \\\"Косвенный лид\\\" — потенциально подходит под профиль, но формулировка размыта / мало деталей / неясно, что это точно ваша зона (но похоже на профиль).\\n\\nСТРОГАЯ СХЕМА JSON (только если подходит):\\n{\\n  \\\"тип_лида\\\": \\\"Прямой лид | Косвенный лид\\\",\\n  \\\"username\\\": \\\"username кому написать (из текста сообщения, если указан; иначе sender_username)\\\",\\n  \\\"text\\\": \\\"дефолтное сообщение с минимальными правками под запрос\\\"\\n}\\n\\nЗАПРЕЩЕНО:\\n* Обрабатывать или возвращать поля: «ии_анализ», «готовность_платить», «валидность_клиента»\\n* Добавлять любые другие поля в JSON\\n* Писать что-либо кроме строго указанного формата ответа\\n* Выдумывать данные, которых нет во входе\\n* Генерировать новый текст вместо минимальной адаптации дефолтного сообщения (без необходимости)\\n\\nНичего лишнего в ответ отправлять запрещено.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"ПОЛЯ СООБЩЕНИЯ:\\n1) text: {{ $('Loop Over Items').item.json.message_text }}\\n2) chat_title: {{ $('Loop Over Items').item.json.chenal_name }}\\n3) sender_name: {{ $('Loop Over Items').item.json.sender_name }}\\n4) sender_username: {{ $('Loop Over Items').item.json.sender_username }}\\n5) message_link: {{ $('Loop Over Items').item.json.message_url }}\\n6) sender_phone: {{ $('Loop Over Items').item.json.sender_phone }}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1184,
+        816
+      ],
+      "id": "832f7af4-96d4-47d5-bd53-6687e8d937e3",
+      "name": "Проверка сообщения в AI2",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  (() => {\n    const client = $('Получаем клиента').item.json ?? {};\n    const msg = $('Loop Over Items').item.json ?? {};\n\n    const systemPrompt = `Ты — AI-квалификатор лидов и помощник по подготовке ответа в Telegram.\n\nТвоя задача:\n1) По входящему сообщению определить, является ли написавший лидом по критериям из блока «ПРОФИЛЬ КОМПАНИИ».\n2) Если это лид — вернуть тип лида, username для ответа и текст ответа.\n3) Текст ответа нужно формировать НЕ с нуля, а только через минимальную адаптацию «Дефолтного сообщения».\n4) Если это не лид — вернуть только PASS и процент совпадения.\n\nПРОФИЛЬ КОМПАНИИ:\n'''\n${client.promt_des ?? ''}\n'''\n\nДЕФОЛТНОЕ СООБЩЕНИЕ В ОТВЕТ (ШАБЛОН, ОСНОВА ДЛЯ АДАПТАЦИИ):\n\"\"\"\n${client.sample_text ?? ''}\n\"\"\"\n\nВХОД:\n* «ПРОФИЛЬ КОМПАНИИ» (главные правила — что считать лидом и что отсеивать)\n* данные входящего сообщения (text, chat_title, sender_name, sender_username, message_link, sender_phone, и др.)\n* username отправителя (с которого пришло сообщение)\n* контакты/username, если они указаны прямо в тексте сообщения\n\nГЛАВНОЕ ПРАВИЛО:\nКритерии «что является лидом» и «что не является лидом» нужно брать ТОЛЬКО из текста «ПРОФИЛЬ КОМПАНИИ».\nНельзя использовать внешние знания, догадки и допущения.\nЕсли ощущение, что процент совпадения больше 60%, то это наш лид.\n\nПРАВИЛО ПО USERNAME:\nНужно вернуть поле «username».\nЕсли во входящем сообщении явно указан контакт/username, кому писать (например, @username в тексте, контакт для связи, «пишите сюда») — используй его.\nЕсли НЕ указано, кому писать — используй sender_username (username отправителя), который передан во входе.\nНе выдумывай username.\nЕсли username найден в тексте в формате @name, верни в том же виде, как нужен вашему процессу (желательно без лишних пробелов).\n\nКРИТИЧЕСКОЕ ПРАВИЛО ПО ТЕКСТУ (ОЧЕНЬ ВАЖНО):\nПоле «text» нужно делать на основе «ДЕФОЛТНОГО СООБЩЕНИЯ В ОТВЕТ».\nНельзя писать новый текст с нуля, если это не требуется.\n\nНужно выполнить МИНИМАЛЬНЫЕ правки под запрос/контекст входящего сообщения:\n* сохранить структуру, тон, смысл и основную формулировку шаблона\n* менять только отдельные слова/фразы, которые делают ответ уместным под конкретный запрос\n* если шаблон уже подходит — вернуть его почти без изменений\n* не переписывать целиком\n* не добавлять новые блоки, преимущества, офферы, ссылки, кейсы, которых нет в шаблоне\n* не добавлять выдуманные детали о клиенте/задаче\n* если данных мало — сделать нейтральную минимальную адаптацию (или оставить шаблон почти без изменений)\n\nПРИОРИТЕТЫ АДАПТАЦИИ ТЕКСТА (по убыванию важности):\n1) Уместность под запрос (например, упомянуть релевантную услугу/формулировку из сообщения)\n2) Сохранение исходного шаблона\n3) Минимум изменений\n\nЧТО СЧИТАЕТСЯ \"МИНИМАЛЬНЫМИ ПРАВКАМИ\":\n* заменить 1–3 фразы в шаблоне под контекст запроса\n* добавить короткое уточнение по теме запроса (если это прямо следует из сообщения)\n* слегка изменить приветствие/обращение (по необходимости)\nНе считается минимальными правками:\n* полностью новый текст\n* полная перестройка структуры\n* добавление длинных объяснений, которых нет в шаблоне\n\nФОРМАТ ВЫВОДА:\n1) Если сообщение НЕ подходит под «ПРОФИЛЬ КОМПАНИИ» — ответ строго:\nPASS + процент совпадения\nНапример: PASS 20% / PASS 57%\nТолько это, без JSON, без пояснений, без дополнительных символов.\n\n2) Если сообщение подходит — ответ строго валидный JSON.\nБез Markdown, без код-блоков, без пояснений вне JSON, без эмодзи, без тегов и украшений.\nВ JSON возвращай только 3 поля: «тип_лида», «username», «text».\n\nТИП ЛИДА (только если подходит):\n* \"Прямой лид\" — явно просит то, что соответствует профилю.\n* \"Косвенный лид\" — потенциально подходит под профиль, но формулировка размыта / мало деталей / неясно, что это точно ваша зона (но похоже на профиль).\n\nСТРОГАЯ СХЕМА JSON (только если подходит):\n{\n  \"тип_лида\": \"Прямой лид | Косвенный лид\",\n  \"username\": \"username кому написать (из текста сообщения, если указан; иначе sender_username)\",\n  \"text\": \"дефолтное сообщение с минимальными правками под запрос\"\n}\n\nЗАПРЕЩЕНО:\n* Обрабатывать или возвращать поля: «ии_анализ», «готовность_платить», «валидность_клиента»\n* Добавлять любые другие поля в JSON\n* Писать что-либо кроме строго указанного формата ответа\n* Выдумывать данные, которых нет во входе\n* Генерировать новый текст вместо минимальной адаптации дефолтного сообщения (без необходимости)\n\nНичего лишнего в ответ отправлять запрещено.`;\n\n    const userPrompt = `ПОЛЯ СООБЩЕНИЯ:\n1) text: ${msg.message_text ?? ''}\n2) chat_title: ${msg.chenal_name ?? ''}\n3) sender_name: ${msg.sender_name ?? ''}\n4) sender_username: ${msg.sender_username ?? ''}\n5) message_link: ${msg.message_url ?? ''}\n6) sender_phone: ${msg.sender_phone ?? ''}`;\n\n    return {\n      model: 'openai/gpt-oss-20b',\n      messages: [\n        {\n          role: 'system',\n          content: systemPrompt,\n        },\n        {\n          role: 'user',\n          content: userPrompt,\n        }\n      ]\n    };\n  })()\n}}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -736,
+        192
+      ],
+      "id": "5dc7ffe4-926b-491d-89eb-b53f50d337d3",
+      "name": "Проверка сообщения в AI",
+      "retryOnFail": true,
+      "credentials": {
+        "openRouterApi": {
+          "id": "hwaDdGPn5HFuYp7N",
+          "name": "Лидоген ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "IRkITXERCpM2sskB",
+          "mode": "list",
+          "cachedResultName": "Результат ответа",
+          "cachedResultUrl": "/projects/EKaUKFrgDyvh4Djz/datatables/IRkITXERCpM2sskB"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "system_valid": false
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "channel_messages_id",
+              "displayName": "channel_messages_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "result_type",
+              "displayName": "result_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "chenal_id",
+              "displayName": "chenal_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "resipment_name",
+              "displayName": "resipment_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "user_score",
+              "displayName": "user_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "system_valid",
+              "displayName": "system_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "token_request",
+              "displayName": "token_request",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "token_response",
+              "displayName": "token_response",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "cost",
+              "displayName": "cost",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -96,
+        1056
+      ],
+      "id": "27e9df45-31bd-4d68-9cde-0fd1e5ae95a5",
+      "name": "Сохраняем результат2"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2848,
+        432
+      ],
+      "id": "5fab148a-95e1-42f5-9c3b-aacaf1327e88",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -336,
+        1040
+      ],
+      "id": "1826204b-183c-454e-8c70-e2b159b0f61f",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "IRkITXERCpM2sskB",
+          "mode": "list",
+          "cachedResultName": "Результат ответа",
+          "cachedResultUrl": "/projects/EKaUKFrgDyvh4Djz/datatables/IRkITXERCpM2sskB"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "system_valid",
+              "keyValue": "true"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -592,
+        1040
+      ],
+      "id": "36f3a59f-6eda-492d-8e2a-39809c2d88fb",
+      "name": "Сохраняем результат1"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "client_id",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2752,
+        208
+      ],
+      "id": "f0a7689c-a7ad-4226-9480-aef7c0efb6b5",
+      "name": "Запуск"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "channel_messages",
+          "mode": "list",
+          "cachedResultName": "channel_messages"
+        },
+        "where": {
+          "values": [
+            {
+              "column": "chenal_id",
+              "value": "-213365873"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1968,
+        416
+      ],
+      "id": "a77f142b-3960-41db-b524-6808f92447d7",
+      "name": "Сообщения на обработку последнее1",
+      "credentials": {
+        "postgres": {
+          "id": "nJLtOwEA1dAE4Pjt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": []
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2512,
+        208
+      ],
+      "id": "62e9f4d8-e4bd-4dbb-a297-39279213312c",
+      "name": "Общие данные"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b3a8df2d-f128-4899-96b7-20b2219ce059",
+              "name": "client_id",
+              "value": 1,
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2688,
+        432
+      ],
+      "id": "3da16716-8ac1-4573-a83a-2b49bfe80ea3",
+      "name": "Общие данные1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "06a5abd1-660f-491f-8a66-def4fdc413fb",
+              "leftValue": "={{ $json.last_id }}",
+              "rightValue": "=",
+              "operator": {
+                "type": "number",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1968,
+        208
+      ],
+      "id": "fc69ed23-518e-40d1-ba24-eabfc2667504",
+      "name": "Есть ли вообще строки по этому клиенту"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "1i7LftS6sv85Bfo5",
+          "mode": "list",
+          "cachedResultName": "Клиенты",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/1i7LftS6sv85Bfo5"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $('Получаем клиента').item.json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "last_message_id": "={{ $('Сообщения на обработку последнее').item.json.last_id}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "promt_des",
+              "displayName": "promt_des",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "last_message_id",
+              "displayName": "last_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "chat_find_ids",
+              "displayName": "chat_find_ids",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "is_activ",
+              "displayName": "is_activ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "felter",
+              "displayName": "felter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "send_chat_id",
+              "displayName": "send_chat_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "thread_id",
+              "displayName": "thread_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "sample_text",
+              "displayName": "sample_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1520,
+        176
+      ],
+      "id": "e6233dbe-657d-4db8-b96f-e14e1fdc9d48",
+      "name": "Указываем, что заметили новое сообщение у клиента"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.221.16:8000/classify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "Всем привет! Я ищу ассистента таргетолога в  международное агентство по лидогенерации в сфере недвижимости.  Задачи: писать офферы и тексты для рекламы, собирать кампании под руководством, писать ТЗ для дизайнеров/видеографов, согласование и контроль задач  Ищу человека с опытом в сфере маркетинга, с хорошей насмотренностью, который круто чувствует себя в условиях многозадачности  Удалёнка, 4+ ч/день (на связи 9:00–18:00 CET, 5/2), $90–110 за проект (5-10 проектов/мес). Есть тестовое  Если интересно, заполняйте анкету: https://docs.google.com/forms/d/e/1FAIpQLSdlbwp2FjDztjP4IwjADmqeNuF0grxjYRiCGhF20jHr-DDZtQ/viewform"
+            },
+            {
+              "name": "k",
+              "value": "2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1456,
+        -256
+      ],
+      "id": "3823e8fb-d48d-4291-a5dc-a699ee9ffcff",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "byN2WpQidQrEAKPk",
+          "name": "Фильтр 1 Уровня"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (\n  SELECT\n    COALESCE({{ $('Получаем клиента').item.json.last_message_id }}, 0)::bigint AS last_id,\n\n    NULLIF(\n      NULLIF(\n        regexp_replace('{{ $('Получаем клиента').item.json.chat_find_ids }}', '[[:space:]]+', '', 'g'),\n        ''\n      ),\n      'null'\n    ) AS chan_list,\n\n    NULLIF(\n      NULLIF(trim('{{ $('Получаем клиента').item.json.felter }}'), ''),\n      'null'\n    ) AS filters_txt\n),\nflt AS (\n  SELECT CASE\n           WHEN filters_txt IS NULL OR filters_txt = '[]' THEN NULL\n           ELSE filters_txt::jsonb\n         END AS filters_json\n  FROM p\n)\nSELECT m.*\nFROM public.channel_messages m\nCROSS JOIN p\nCROSS JOIN flt\nWHERE m.id > p.last_id\n  AND (\n    p.chan_list IS NULL\n    OR m.chenal_id = ANY (string_to_array(p.chan_list, ',')::bigint[])\n  )\n  AND (\n    flt.filters_json IS NULL\n    OR EXISTS (\n      SELECT 1\n      FROM jsonb_to_recordset(flt.filters_json) AS f(label text, min_prob double precision)\n      WHERE\n        (m.top1_label = f.label AND m.top1_prob >= f.min_prob)\n        OR\n        (m.top2_label = f.label AND m.top2_prob >= f.min_prob)\n    )\n  )\nORDER BY m.id ASC\nLIMIT 100;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1328,
+        352
+      ],
+      "id": "117e3c9d-49aa-493f-acf1-f9e42f51403d",
+      "name": "Сообщения на обработку1",
+      "credentials": {
+        "postgres": {
+          "id": "nJLtOwEA1dAE4Pjt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "IRkITXERCpM2sskB",
+          "mode": "list",
+          "cachedResultName": "Результат ответа",
+          "cachedResultUrl": "/projects/EKaUKFrgDyvh4Djz/datatables/IRkITXERCpM2sskB"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "text": "={{ $('Loop Over Items').item.json.message_text }}",
+            "result_type": "={{$('Ответ нейросети').item.json.response}}",
+            "chenal_id": "={{ $('Loop Over Items').item.json.chenal_id }}",
+            "resipment_name": "={{ $('Получаем клиента').item.json.name }}",
+            "channel_messages_id": "={{ $('Loop Over Items').item.json.id }}",
+            "system_valid": "={{ !($json.response?.includes('PASS')) }}",
+            "token_response": "={{ $json.token_response }}",
+            "cost": "={{ $json.cost }}",
+            "token_request": "={{ $json.token_request }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "channel_messages_id",
+              "displayName": "channel_messages_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "result_type",
+              "displayName": "result_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "chenal_id",
+              "displayName": "chenal_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "resipment_name",
+              "displayName": "resipment_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "user_score",
+              "displayName": "user_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "system_valid",
+              "displayName": "system_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "token_request",
+              "displayName": "token_request",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "token_response",
+              "displayName": "token_response",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cost",
+              "displayName": "cost",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -416,
+        512
+      ],
+      "id": "61c80597-15b6-4708-a29d-d7a776a1f8d4",
+      "name": "Сохраняем результат3"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "EopqWPgZwo9sgMnp",
+          "mode": "list",
+          "cachedResultName": "Результат Фильтра 2",
+          "cachedResultUrl": "/projects/EKaUKFrgDyvh4Djz/datatables/EopqWPgZwo9sgMnp"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "text": "={{ $('Loop Over Items').item.json.message_text }}",
+            "result_type": "={{$('Ответ нейросети').item.json.response}}",
+            "chenal_id": "={{ $('Loop Over Items').item.json.chenal_id }}",
+            "resipment_name": "={{ $('Получаем клиента').item.json.name }}",
+            "channel_messages_id": "={{ $('Loop Over Items').item.json.id }}",
+            "system_valid": "={{ !($json.response?.includes('PASS')) }}",
+            "token_response": "={{ $json.token_response }}",
+            "cost": "={{ $json.cost }}",
+            "token_request": "={{ $json.token_request }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "channel_messages_id",
+              "displayName": "channel_messages_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "result_type",
+              "displayName": "result_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "chenal_id",
+              "displayName": "chenal_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "resipment_name",
+              "displayName": "resipment_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "user_score",
+              "displayName": "user_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "system_valid",
+              "displayName": "system_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "token_request",
+              "displayName": "token_request",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "token_response",
+              "displayName": "token_response",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cost",
+              "displayName": "cost",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -384,
+        192
+      ],
+      "id": "c094cdd2-3f43-4152-9952-953d1bbbdf88",
+      "name": "Сохраняем результат"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\": \"openai/gpt-oss-20b\", \"messages\": [{\"role\": \"system\", \"content\": \"Ты — AI-квалификатор лидов и помощник по подготовке ответа в Telegram.\\n\\nТвоя задача:\\n1) По входящему сообщению определить, является ли написавший лидом по критериям из блока «ПРОФИЛЬ КОМПАНИИ».\\n2) Если это лид — вернуть тип лида, username для ответа и текст ответа.\\n3) Текст ответа нужно формировать НЕ с нуля, а только через минимальную адаптацию «Дефолтного сообщения».\\n4) Если это не лид — вернуть только PASS и процент совпадения.\\n\\nПРОФИЛЬ КОМПАНИИ:\\n'''\\n Нам нужны вообще все сообщения!\\n'''\\n\\nДЕФОЛТНОЕ СООБЩЕНИЕ В ОТВЕТ (ШАБЛОН, ОСНОВА ДЛЯ АДАПТАЦИИ):\\n\\\"\\\"\\\"\\n Да пусть так будет\\n\\\"\\\"\\\"\\n\\nВХОД:\\n* «ПРОФИЛЬ КОМПАНИИ» (главные правила — что считать лидом и что отсеивать)\\n* данные входящего сообщения (text, chat_title, sender_name, sender_username, message_link, sender_phone, и др.)\\n* username отправителя (с которого пришло сообщение)\\n* контакты/username, если они указаны прямо в тексте сообщения\\n\\nГЛАВНОЕ ПРАВИЛО:\\nКритерии «что является лидом» и «что не является лидом» нужно брать ТОЛЬКО из текста «ПРОФИЛЬ КОМПАНИИ».\\nНельзя использовать внешние знания, догадки и допущения.\\nЕсли ощущение, что процент совпадения больше 60%, то это наш лид.\\n\\nПРАВИЛО ПО USERNAME:\\nНужно вернуть поле «username».\\nЕсли во входящем сообщении явно указан контакт/username, кому писать (например, @username в тексте, контакт для связи, «пишите сюда») — используй его.\\nЕсли НЕ указано, кому писать — используй sender_username (username отправителя), который передан во входе.\\nНе выдумывай username.\\nЕсли username найден в тексте в формате @name, верни в том же виде, как нужен вашему процессу (желательно без лишних пробелов).\\n\\nКРИТИЧЕСКОЕ ПРАВИЛО ПО ТЕКСТУ (ОЧЕНЬ ВАЖНО):\\nПоле «text» нужно делать на основе «ДЕФОЛТНОГО СООБЩЕНИЯ В ОТВЕТ».\\nНельзя писать новый текст с нуля, если это не требуется.\\n\\nНужно выполнить МИНИМАЛЬНЫЕ правки под запрос/контекст входящего сообщения:\\n* сохранить структуру, тон, смысл и основную формулировку шаблона\\n* менять только отдельные слова/фразы, которые делают ответ уместным под конкретный запрос\\n* если шаблон уже подходит — вернуть его почти без изменений\\n* не переписывать целиком\\n* не добавлять новые блоки, преимущества, офферы, ссылки, кейсы, которых нет в шаблоне\\n* не добавлять выдуманные детали о клиенте/задаче\\n* если данных мало — сделать нейтральную минимальную адаптацию (или оставить шаблон почти без изменений)\\n\\nПРИОРИТЕТЫ АДАПТАЦИИ ТЕКСТА (по убыванию важности):\\n1) Уместность под запрос (например, упомянуть релевантную услугу/формулировку из сообщения)\\n2) Сохранение исходного шаблона\\n3) Минимум изменений\\n\\nЧТО СЧИТАЕТСЯ \\\"МИНИМАЛЬНЫМИ ПРАВКАМИ\\\": \\n* заменить 1–3 фразы в шаблоне под контекст запроса\\n* добавить короткое уточнение по теме запроса (если это прямо следует из сообщения)\\n* слегка изменить приветствие/обращение (по необходимости)\\nНе считается минимальными правками:\\n* полностью новый текст\\n* полная перестройка структуры\\n* добавление длинных объяснений, которых нет в шаблоне\\n\\nФОРМАТ ВЫВОДА:\\n1) Если сообщение НЕ подходит под «ПРОФИЛЬ КОМПАНИИ» — ответ строго:\\nPASS + процент совпадения\\nНапример: PASS 20% / PASS 57%\\nТолько это, без JSON, без пояснений, без дополнительных символов.\\n\\n2) Если сообщение подходит — ответ строго валидный JSON.\\nБез Markdown, без код-блоков, без пояснений вне JSON, без эмодзи, без тегов и украшений.\\nВ JSON возвращай только 3 поля: «тип_лида», «username», «text».\\n\\nТИП ЛИДА (только если подходит):\\n* \\\"Прямой лид\\\" — явно просит то, что соответствует профилю.\\n* \\\"Косвенный лид\\\" — потенциально подходит под профиль, но формулировка размыта / мало деталей / неясно, что это точно ваша зона (но похоже на профиль).\\n\\nСТРОГАЯ СХЕМА JSON (только если подходит):\\n{\\n  \\\"тип_лида\\\":  \\\"Прямой лид | Косвенный лид\\\",\\n  \\\"username\\\":  \\\"username кому написать (из текста сообщения, если указан; иначе sender_username)\\\",\\n  \\\"text\\\":  \\\"дефолтное сообщение с минимальными правками под запрос\\\"\\n}\\n\\nЗАПРЕЩЕНО:\\n* Обрабатывать или возвращать поля: «ии_анализ», «готовность_платить», «валидность_клиента»\\n* Добавлять любые другие поля в JSON\\n* Писать что-либо кроме строго указанного формата ответа\\n* Выдумывать данные, которых нет во входе\\n* Генерировать новый текст вместо минимальной адаптации дефолтного сообщения (без необходимости)\\n\\nНичего лишнего в ответ отправлять запрещено.\"},{\"role\": \"user\", \"content\": \"ПОЛЯ СООБЩЕНИЯ:\\n1) text: \\n2) chat_title: \\n3) sender_name: \\n4) sender_username: \\n5) message_link: \\n6) sender_phone: \"}]}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -640,
+        -336
+      ],
+      "id": "f6b3c721-a9f5-4930-8a74-e72570a883ee",
+      "name": "Проверка сообщения в AI1",
+      "retryOnFail": true,
+      "credentials": {
+        "openRouterApi": {
+          "id": "hwaDdGPn5HFuYp7N",
+          "name": "Лидоген ВК"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "1i7LftS6sv85Bfo5",
+          "mode": "list",
+          "cachedResultName": "Клиенты",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/1i7LftS6sv85Bfo5"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "=1"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "last_message_id": 1
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "promt_des",
+              "displayName": "promt_des",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "last_message_id",
+              "displayName": "last_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "chat_find_ids",
+              "displayName": "chat_find_ids",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "is_activ",
+              "displayName": "is_activ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "felter",
+              "displayName": "felter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "send_chat_id",
+              "displayName": "send_chat_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "thread_id",
+              "displayName": "thread_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "sample_text",
+              "displayName": "sample_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -2336,
+        48
+      ],
+      "id": "75d94d9c-fa48-4072-9dab-7a9168fad01b",
+      "name": "Обнуляем клиента 1"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "NTfeVCens3JhtPF8",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/NTfeVCens3JhtPF8",
+          "cachedResultName": "Сообщение в ВК опционально с кнопками"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $('Получаем клиента').item.json.send_chat_id }}",
+            "text": "={{ $json.text }}",
+            "buttons": "=[\n    { \"link\": \"{{ $('Loop Over Items').item.json.message_url }}\", \"label\": \"Перейти к сообщению\" },\n    { \"link\": \"https://pay.example.com/order2\", \"label\": \"Оплатить заказ 2\" },\n    { \"link\": \"https://pay.example.com/order3\", \"label\": \"Оплатить заказ 3\" }\n  ]",
+            "group_id": "237079234"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "group_id",
+              "displayName": "group_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "buttons",
+              "displayName": "buttons",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        832,
+        240
+      ],
+      "id": "a73ba097-7220-4223-a4a3-ef84dfab7f69",
+      "name": "Отправить сообщение!"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/vk/user/Server_account_2/messages/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "peer_id",
+              "value": "2000000003"
+            },
+            {
+              "name": "text",
+              "value": "Привет!"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1056,
+        128
+      ],
+      "id": "b1e0e2db-39a0-4de4-8d6b-00dd3b98665d",
+      "name": "HTTP Request1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Получаем клиента": {
+      "main": [
+        [
+          {
+            "node": "Сообщения на обработку последнее",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сообщения на обработку": {
+      "main": [
+        [
+          {
+            "node": "Есть ли SUCSESS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сообщения на обработку последнее": {
+      "main": [
+        [
+          {
+            "node": "Есть ли вообще строки по этому клиенту",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Есть ли новые строки": {
+      "main": [
+        [
+          {
+            "node": "Указываем, что заметили новое сообщение у клиента",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Проверка сообщения в AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Попытки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Пропускаем1": {
+      "main": [
+        [
+          {
+            "node": "Тестим ли клиента",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Текст1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Попытки1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Исправление сообщения": {
+      "main": [
+        [
+          {
+            "node": "Текст1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Из текста в JSON": {
+      "main": [
+        [
+          {
+            "node": "Пропускаем",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Есть ли SUCSESS": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Проверка текста1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Исправление сообщения",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Формируем текст": {
+      "main": [
+        [
+          {
+            "node": "Отправить сообщение!",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Пропускаем": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Из текста в JSON1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Проверка сообщения в AI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Из текста в JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Попытки": {
+      "main": [
+        [
+          {
+            "node": "Исправление сообщения",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Пропускаем2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Попытки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Попытки1": {
+      "main": [
+        [
+          {
+            "node": "Пропускаем2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Из текста в JSON1": {
+      "main": [
+        [
+          {
+            "node": "Формируем текст",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Тестим ли клиента": {
+      "main": [
+        [
+          {
+            "node": "Send a text message2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ответ нейросети": {
+      "main": [
+        [
+          {
+            "node": "Сохраняем результат",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверка сообщения в AI": {
+      "main": [
+        [
+          {
+            "node": "Ответ нейросети",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сохраняем результат2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Общие данные1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Сохраняем результат2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запуск": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Общие данные": {
+      "main": [
+        [
+          {
+            "node": "Получаем клиента",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Общие данные1": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Есть ли вообще строки по этому клиенту": {
+      "main": [
+        [
+          {
+            "node": "Есть ли новые строки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Указываем, что заметили новое сообщение у клиента": {
+      "main": [
+        [
+          {
+            "node": "Сообщения на обработку",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сохраняем результат": {
+      "main": [
+        [
+          {
+            "node": "Пропускаем1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправить сообщение!": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

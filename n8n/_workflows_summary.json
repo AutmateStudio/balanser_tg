@@ -1,0 +1,821 @@
+[
+  {
+    "file_name": "callback_vk_test-wvl1yXoTIsoL.json",
+    "display_name": "Callback_vk_test",
+    "purpose": "Тестовый VK Callback API: принимает GET-запрос подтверждения сообщества (type=confirmation) и отвечает строкой подтверждения.",
+    "trigger_type": "webhook",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "chron-собрать-данные-по-промптам-и-определить-направления-zvaHc686EYmd.json",
+    "display_name": "Chron-собрать данные по промптам и определить направления",
+    "purpose": "Раз в неделю читает активные проекты из БД, LLM-агентом группирует промпты по направлениям и запускает общий поиск по каждому направлению.",
+    "trigger_type": "schedule (раз в неделю)",
+    "calls_other_workflows": ["Поиск по направлениям общий"],
+    "called_by": [],
+    "external_apis": {
+      "postgresql": ["monitoring_projects (select)"],
+      "llm": ["OpenRouter (z-ai/glm-4.7-flash)"]
+    }
+  },
+  {
+    "file_name": "l-EuysCucseBd5.json",
+    "display_name": "L",
+    "purpose": "Пустой черновик workflow без узлов — заготовка, не реализует бизнес-процесс.",
+    "trigger_type": "без триггера",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "l-в-цикле-запускаем-обработку-каждого-клиента-6s6bsnEb1XF4.json",
+    "display_name": "L В цикле запускаем обработку каждого клиента",
+    "purpose": "Каждые 10 секунд перебирает клиентов из Data Table «Клиенты» и для каждого запускает обработку очереди поиска лидов.",
+    "trigger_type": "schedule (каждые 10 сек)",
+    "calls_other_workflows": ["Обработка очереди. Поиск Лидов"],
+    "called_by": [],
+    "external_apis": {
+      "n8n_data_tables": ["Клиенты"]
+    }
+  },
+  {
+    "file_name": "lidogen-discovery-vps-108-https-2GmwA9pkiGgu.json",
+    "display_name": "Lidogen Discovery — vps-108 (HTTPS)",
+    "purpose": "Ручной тестовый свитчер HTTP-эндпойнтов Discovery API на vps-108 (HTTPS): парсеры, QR-авторизация, discover, bot/send-message, health.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["vps-108.web.oboyma.ai/discovery-api/* (add-channel-by-link, auth/qr, discover, discover-groups, parser/*, bot/send-message, health)"]
+    }
+  },
+  {
+    "file_name": "lidogen-vk-поиск-и-добавление-по-ссылкам-uxvHrHncQjFG.json",
+    "display_name": "Lidogen VK — поиск и добавление по ссылкам",
+    "purpose": "Production-эндпойнты VK: POST /vk/search, /vk/resolve, /vk/add-by-link — поиск групп, резолв ссылки, скоринг и upsert в source_channels.",
+    "trigger_type": "webhook (/vk/search, /vk/resolve, /vk/add-by-link)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "vk_scoring_service": ["217.26.24.119:8000/groups/search", "217.26.24.119:8000/groups/resolve", "217.26.24.119:8000/groups/{id}/score"],
+      "postgresql": ["source_channels (upsert)"]
+    }
+  },
+  {
+    "file_name": "monitor-payments-expirations-DBRjzEwv28nB.json",
+    "display_name": "Monitor payments expirations",
+    "purpose": "Ежедневно в 8:00 находит проекты с истекающей оплатой, собирает контакты владельцев и отправляет им уведомления об истечении подписки.",
+    "trigger_type": "schedule (ежедневно 8:00)",
+    "calls_other_workflows": ["отправка уведомления"],
+    "called_by": [],
+    "external_apis": {
+      "postgresql": ["monitoring_projects", "user_contact_channels", "in_app_notifications"]
+    }
+  },
+  {
+    "file_name": "my-workflow-2-s1cKaoxOfWRs.json",
+    "display_name": "My workflow 2",
+    "purpose": "Ручной тест VK API: запрос wall.getCommentsForPosts для получения комментариев под постами.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "vk_api": ["api.vk.com/method/wall.getCommentsForPosts"]
+    }
+  },
+  {
+    "file_name": "my-workflow-3-FNxUvj23SQ2U.json",
+    "display_name": "My workflow 3",
+    "purpose": "Sub-workflow: отправка тестового VK-сообщения с inline-кнопками через omni-parser messages/send.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/vk/user/{session}/messages/send"]
+    }
+  },
+  {
+    "file_name": "my-workflow-4-g4jiARKkY3Vu.json",
+    "display_name": "My workflow 4",
+    "purpose": "Пустой ручной тест: один HTTP Request без настроенного URL — черновик для экспериментов.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "my-workflow-5-BCqDY5gSloPq.json",
+    "display_name": "My workflow 5",
+    "purpose": "Пустой ручной тест: один HTTP Request без настроенного URL — черновик для экспериментов.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "my-workflow-6-4v0ajwC8J0BL.json",
+    "display_name": "My workflow 6",
+    "purpose": "Ручной тест VK user-listener API: завершение OAuth-авторизации клиента, остановка слушателя, пробный POST в webhook comment-reciever.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/clients/vk-user/auth/complete", "217.26.24.119:3000/listeners/vk-user/{session}/stop"],
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/comment-reciever"],
+      "vk_oauth": ["oauth.vk.com/blank.html (страница получения токена)"]
+    }
+  },
+  {
+    "file_name": "my-workflow-7-eRBHcSoU5Fa9.json",
+    "display_name": "My workflow 7",
+    "purpose": "Ручной тест Instagram API: обмен short-lived access token на long-lived через кастомный Instagram-узел.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "instagram_api": ["Instagram Graph — exchangeAccessToken"]
+    }
+  },
+  {
+    "file_name": "my-workflow-8FH9hNV5xAns.json",
+    "display_name": "My workflow",
+    "purpose": "Ручной тест ML-классификатора: перебирает записи Data Table «Результат Фильтра 2» и отправляет их на /classify.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["159.194.221.16:8000/classify"],
+      "n8n_data_tables": ["Результат Фильтра 2"]
+    }
+  },
+  {
+    "file_name": "runseedgeneration-ejj4SsLhqLbG.json",
+    "display_name": "RunSeedGeneration",
+    "purpose": "Sub-workflow: LLM-агент генерирует ~100 поисковых сидов (seed-фраз) для Telegram/VK по описанию ниши, парсит теги <seed> и сохраняет в PostgreSQL.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": ["Поиск по направлению", "Поиск по направлению ТГ"],
+    "external_apis": {
+      "llm": ["OpenRouter (openai/gpt-oss-120b)"],
+      "postgresql": ["executeQuery — сохранение сидов"]
+    }
+  },
+  {
+    "file_name": "telegram-clump-N76MbYCibCwa.json",
+    "display_name": "telegram clump",
+    "purpose": "Фрагмент без триггера: проверка health и list парсеров Discovery API на vps-106/web.oboyma.ai — тестовый clump узлов.",
+    "trigger_type": "без триггера",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["vps-106.web.oboyma.ai:8100/health", "web.oboyma.ai:8100/discovery-api/parser/list"]
+    }
+  },
+  {
+    "file_name": "test-YKkxGkQVZwWe.json",
+    "display_name": "test",
+    "purpose": "Минимальный тестовый webhook: принимает GET и возвращает set-данные через Respond to Webhook.",
+    "trigger_type": "webhook",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "tg-parser-sync-loU7yRxMHvBq.json",
+    "display_name": "tg-parser-sync",
+    "purpose": "Каждую минуту синхронизирует Telegram-каналы из PostgreSQL с Discovery-парсером: добавляет/удаляет каналы, стартует/стопит парсеры; webhook telegram-messages для входящих.",
+    "trigger_type": "schedule (каждую минуту)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/parser/* (list, start, stop, add-channels, remove-channels)"],
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/telegram-messages"],
+      "postgresql": ["source_channels (select новых каналов)"]
+    }
+  },
+  {
+    "file_name": "tiktok_entrypoint-hvSIO0WCkO82.json",
+    "display_name": "TikTok_entrypoint",
+    "purpose": "Webhook-заглушка TikTok entrypoint (POST /TikTok-entrypoint): принимает payload и нормализует через Set — без дальнейшей обработки.",
+    "trigger_type": "webhook (/TikTok-entrypoint)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "vk-parser-sync-fQEfGT5fec6h.json",
+    "display_name": "vk-parser-sync",
+    "purpose": "Каждую минуту синхронизирует VK-группы из БД с VK user-listener: добавляет/удаляет walls для мониторинга комментариев, проверяет status.",
+    "trigger_type": "schedule (каждую минуту)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/listeners/vk-user/{session}/comments/walls/add|remove|status"],
+      "postgresql": ["source_channels (select новых каналов)"]
+    }
+  },
+  {
+    "file_name": "vk-parser-sync-YU1b2Ze7pi1Q.json",
+    "display_name": "vk-parser-sync (комбинированный)",
+    "purpose": "Комбинированная минутная синхронизация: VK-каналы через Discovery API (add/remove channels) и VK user-listener (start, walls/add, status).",
+    "trigger_type": "schedule (каждую минуту)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/parser/*"],
+      "custom_servers": ["217.26.24.119:3000/listeners/vk-user/{session}/*"],
+      "postgresql": ["source_channels (select)"]
+    }
+  },
+  {
+    "file_name": "vk-добпавление-по-ссылке-oaXx0WiiHjCS.json",
+    "display_name": "VK добпавление по ссылке",
+    "purpose": "Webhook GET /vk-resolve-score: резолвит VK-ссылку, считает score группы, upsert в source_channels; возвращает полные или сокращённые данные.",
+    "trigger_type": "webhook (/vk-resolve-score)",
+    "calls_other_workflows": [],
+    "called_by": ["Общий вебхук для добавления по ссылке"],
+    "external_apis": {
+      "vk_scoring_service": ["{apiBase}/groups/resolve", "{apiBase}/groups/{vk_id}/score"],
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/vk-resolve-score"],
+      "postgresql": ["source_channels (upsert)"]
+    }
+  },
+  {
+    "file_name": "vk-поиск-и-запись-с-метаданными-и-скором-ikGTpQHNxjD8.json",
+    "display_name": "VK поиск и запись с метаданными и скором",
+    "purpose": "Webhook POST /vk/search-with-score: ищет VK-группы по запросу, записывает с метаданными и скором в PostgreSQL (upsert/insert).",
+    "trigger_type": "webhook (/vk/search-with-score)",
+    "calls_other_workflows": [],
+    "called_by": ["Поиск по направлению"],
+    "external_apis": {
+      "vk_scoring_service": ["217.26.24.119:8000/groups/search", "217.26.26.32:8000/groups/search"],
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/vk/search-with-score"],
+      "postgresql": ["source_channels (upsert, insert)"]
+    }
+  },
+  {
+    "file_name": "vk-поиск-через-webhook-без-метаданных-и-скора-d0zQoirLtg7A.json",
+    "display_name": "VK — поиск (через webhook)(Без метаданных и скора)",
+    "purpose": "Webhook POST /vk/search: упрощённый поиск VK-групп без скоринга, upsert результатов в source_channels.",
+    "trigger_type": "webhook (/vk/search)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "vk_scoring_service": ["217.26.24.119:8000/groups/search"],
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/vk/search"],
+      "postgresql": ["source_channels (upsert)"]
+    }
+  },
+  {
+    "file_name": "vk_entrypoint-ExMuCtt8Pr7n.json",
+    "display_name": "VK_entrypoint",
+    "purpose": "Webhook POST /vk-entrypoint: принимает события от VK user-listener (wall_comment и др.), фильтрует и записывает в source_messages / проксирует в comment-reciever.",
+    "trigger_type": "webhook (/vk-entrypoint)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/comment-reciever"],
+      "postgresql": ["source_messages (insert)"]
+    }
+  },
+  {
+    "file_name": "вебхук-принимаем-изменения-в-message_ai_screening-Gjbc9tJxs9Go.json",
+    "display_name": "Вебхук принимаем изменения в message_ai_screening",
+    "purpose": "Webhook GET /ai-runs-reciever — заглушка для приёма изменений AI-screening runs (только узел Webhook, без downstream-логики).",
+    "trigger_type": "webhook (/ai-runs-reciever)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "включаем-слушатель-группы-TzVNnyflmLD5.json",
+    "display_name": "Включаем слушатель группы",
+    "purpose": "Sub-workflow: стартует VK user-listener (Server_account_2) для мониторинга группы через POST /listeners/vk-user/{session}/start.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": ["Запуск мониторинга групп"],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/listeners/vk-user/{session}/start"]
+    }
+  },
+  {
+    "file_name": "добавление-по-ссылке-тг-0oNNOhP8DcOP.json",
+    "display_name": "Добавление по ссылке ТГ",
+    "purpose": "Webhook GET /tg-resolve-score: добавляет Telegram-канал по ссылке через Discovery API, upsert в source_channels, возвращает метаданные.",
+    "trigger_type": "webhook (/tg-resolve-score)",
+    "calls_other_workflows": [],
+    "called_by": ["Общий вебхук для добавления по ссылке"],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/add-channel-by-link"],
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/tg-resolve-score"],
+      "postgresql": ["source_channels (upsert)"]
+    }
+  },
+  {
+    "file_name": "дописать-в-таблицу-найденные-группы-B7N6Q2kwnPz5.json",
+    "display_name": "Дописать в таблицу найденные группы",
+    "purpose": "Sub-workflow: обогащает найденные VK-группы через groups.getById и записывает в Data Table «Группы клиента».",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": ["Поиск по set"],
+    "external_apis": {
+      "vk_api": ["api.vk.com/method/groups.getById"],
+      "n8n_data_tables": ["Группы клиента", "Поиск"]
+    }
+  },
+  {
+    "file_name": "запуск-мониторинга-групп-Cc0vkUubiJJg.json",
+    "display_name": "Запуск мониторинга групп",
+    "purpose": "Sub-workflow: по client_id читает группы клиента из Data Table, для каждой включает VK-слушатель и рекурсивно запускает себя для следующих групп.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": ["Включаем слушатель группы", "Запуск мониторинга групп"],
+    "called_by": ["Запуск мониторинга групп"],
+    "external_apis": {
+      "n8n_data_tables": ["Группы клиента", "Клиент->Вебхук"]
+    }
+  },
+  {
+    "file_name": "запуск-обработки-сообщений-FfXByAZO1oF2.json",
+    "display_name": "Запуск обработки сообщений",
+    "purpose": "Каждую минуту выбирает необработанные записи source_messages из PostgreSQL и запускает workflow AI-обработки сообщений.",
+    "trigger_type": "schedule (каждую минуту)",
+    "calls_other_workflows": ["Обработка Сообщений из source_messages"],
+    "called_by": [],
+    "external_apis": {
+      "postgresql": ["source_messages (executeQuery — выборка на обработку)"]
+    }
+  },
+  {
+    "file_name": "зарегистрировать-сообщество-в-api-вручную-yQNoJdzecQ4I.json",
+    "display_name": "Зарегистрировать сообщество в API (вручную)",
+    "purpose": "Ручная регистрация VK-сообщества в omni-parser: очистка clients, регистрация vk-клиента и старт VK-listener.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/clients/clear", "217.26.24.119:3000/clients/vk", "217.26.24.119:3000/listeners/vk/start"]
+    }
+  },
+  {
+    "file_name": "зарегистрировать-центр-уведомлений-вк-BZeaygtH4wDe.json",
+    "display_name": "Зарегистрировать центр уведомлений ВК",
+    "purpose": "Webhook POST /register_username_notification_centre: регистрирует VK-пользователя как канал уведомлений (user_notification_channels) по vk.com/id.",
+    "trigger_type": "webhook (/register_username_notification_centre)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/register_username_notification_centre"],
+      "postgresql": ["user_notification_channels (insert)"]
+    }
+  },
+  {
+    "file_name": "мониторим-новые-лиды-rfwZP2B8DuZy.json",
+    "display_name": "Мониторим новые лиды",
+    "purpose": "Раз в минуту ищет новые AI-screening runs со статусом lead и запускает отправку сообщений из очереди уведомлений.",
+    "trigger_type": "schedule (каждую минуту)",
+    "calls_other_workflows": ["отправка сообщений из очереди"],
+    "called_by": [],
+    "external_apis": {
+      "postgresql": ["message_ai_screening_runs", "in_app_notifications"]
+    }
+  },
+  {
+    "file_name": "новая-регистрация-и-мониторинг-в-работе-DwwHiFt7GoLb.json",
+    "display_name": "Новая регистрация и мониторинг (в работе)",
+    "purpose": "Sub-workflow (WIP): по параметрам клиента регистрирует VK-слушатель, добавляет посты для мониторинга комментариев через omni-parser API.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/listeners/vk-user/{client}/start", "217.26.24.119:3000/listeners/vk-user/{client}/comments/add"],
+      "n8n_data_tables": ["Клиент->Вебхук", "Группы клиента"]
+    }
+  },
+  {
+    "file_name": "новый-тг-парсер-эндпойнты-4xVsFkW1pH1O.json",
+    "display_name": "Новый ТГ парсер эндпойнты",
+    "purpose": "Ручной тестовый свитчер всех основных Discovery API эндпойнтов Telegram-парсера (health, parser, auth/qr, discover, bot/send-message).",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["{baseUrl}/discovery-api/* (полный набор parser/auth/discover/bot эндпойнтов)"]
+    }
+  },
+  {
+    "file_name": "обновить-данные-слушателя-MHgyxnT6ZHKN.json",
+    "display_name": "Обновить данные слушателя",
+    "purpose": "Sub-workflow: перезапускает VK user-listener — stop → wait → start для указанной сессии; проверяет status.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": ["Обновляем посты для мониторинга"],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/listeners/vk-user/{session}/status|stop|start"]
+    }
+  },
+  {
+    "file_name": "обновляем-посты-для-мониторинга-SVrI5HbHcOo1.json",
+    "display_name": "Обновляем посты для мониторинга",
+    "purpose": "По расписанию (раз в час и раз в 20 мин): читает группы/каналы клиентов, обновляет список постов для мониторинга и перезапускает VK-слушатели.",
+    "trigger_type": "schedule (раз в час / раз в 20 мин)",
+    "calls_other_workflows": ["Обновить данные слушателя"],
+    "called_by": [],
+    "external_apis": {
+      "postgresql": ["source_channels (select)"],
+      "n8n_data_tables": ["Группы клиента", "Клиент->Вебхук"]
+    }
+  },
+  {
+    "file_name": "обработка-очереди-поиск-лидов-KGEiMOOXkIYk.json",
+    "display_name": "Обработка очереди. Поиск Лидов",
+    "purpose": "Главный pipeline поиска лидов для клиента: читает channel_messages по фильтрам, классифицирует (ML + LLM-агенты), отправляет ответы в VK/TG, при необходимости вызывает sub-workflow сообщений с кнопками.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": ["Сообщение в ВК опционально с кнопками"],
+    "called_by": ["L В цикле запускаем обработку каждого клиента"],
+    "external_apis": {
+      "custom_servers": ["159.194.221.16:8000/classify", "217.26.24.119:3000/vk/user/{session}/messages/send"],
+      "llm": ["OpenRouter (chat/completions)"],
+      "telegram": ["n8n Telegram node — отправка в TG"],
+      "postgresql": ["channel_messages (executeQuery/select)"],
+      "google_forms": ["docs.google.com/forms (ссылка в сообщениях)"],
+      "n8n_data_tables": ["Клиенты", "Данные клиентов", "Результат ответа", "Результат Фильтра 2"]
+    }
+  },
+  {
+    "file_name": "обработка-сообщений-из-source_messages-aV0SMUfgejD9.json",
+    "display_name": "Обработка Сообщений из source_messages",
+    "purpose": "AI-обработка входящих source_messages: LLM-скрининг, запись message_ai_screening_runs, создание in_app_notifications и запуск отправки из очереди для лидов.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": ["отправка сообщений из очереди"],
+    "called_by": ["Запуск обработки сообщений"],
+    "external_apis": {
+      "llm": ["OpenRouter (chat/completions)"],
+      "postgresql": ["source_messages", "message_ai_screening_runs", "monitoring_projects", "in_app_notifications"]
+    }
+  },
+  {
+    "file_name": "общий-вебхук-для-добавления-по-ссылке-K6XZZtoEByt8.json",
+    "display_name": "Общий вебхук для добавления по ссылке",
+    "purpose": "Webhook GET /common_by_link: определяет тип ссылки (TG/VK) и проксирует в tg-resolve-score или vk-resolve-score.",
+    "trigger_type": "webhook (/common_by_link)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/common_by_link", "mokuegopasan.beget.app/webhook/tg-resolve-score", "mokuegopasan.beget.app/webhook/vk-resolve-score"],
+      "telegram": ["t.me (проверка ссылок)"]
+    }
+  },
+  {
+    "file_name": "отключить-слушатели-ZguARVx0pxW0.json",
+    "display_name": "Отключить слушатели",
+    "purpose": "Sub-workflow: останавливает VK user-listener (Server_account_2) через POST /listeners/vk-user/{session}/stop.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/listeners/vk-user/{session}/stop"]
+    }
+  },
+  {
+    "file_name": "отправка-в-vk-или-телеграм-Edan2OUlje5w.json",
+    "display_name": "Отправка в VK или телеграм",
+    "purpose": "Sub-workflow: принимает text/buttons/user_id/group_id, собирает VK inline-keyboard и отправляет через messages/vk/send.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/messages/vk/send"]
+    }
+  },
+  {
+    "file_name": "отправка-простого-текстового-сообщения-5lnVpGfm217N.json",
+    "display_name": "отправка простого текстового сообщения",
+    "purpose": "Sub-workflow: отправляет простое текстовое VK-сообщение через omni-parser messages/vk/send.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/messages/vk/send"]
+    }
+  },
+  {
+    "file_name": "отправка-сообщений-вк-телеграм-с-кнопками-и-медиа-финал-ZwUEgzdZpzov.json",
+    "display_name": "Отправка сообщений ВК/ТЕЛЕГРАМ с кнопками и медиа (финал)",
+    "purpose": "Sub-workflow: универсальная отправка rich-сообщений — VK send или Telegram send_rich в зависимости от канала.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/messages/vk/send", "217.26.24.119:3000/messages/telegram/send_rich"]
+    }
+  },
+  {
+    "file_name": "отправка-сообщений-из-очереди-RyoJ2daiN7LB.json",
+    "display_name": "отправка сообщений из очереди",
+    "purpose": "Sub-workflow: читает in_app_notifications, подтягивает данные user/project/message/channel и отправляет уведомление в VK, TG (Discovery bot) или помечает прочитанным.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": ["Мониторим новые лиды", "Обработка Сообщений из source_messages"],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/bot/send-message"],
+      "custom_servers": ["217.26.24.119:3000/messages/vk/send"],
+      "lidogen_site": ["gragipemuse.beget.app/leads?leadId=..."],
+      "postgresql": ["users", "user_contact_channels", "source_messages", "source_channels", "monitoring_projects", "in_app_notifications"]
+    }
+  },
+  {
+    "file_name": "отправка-сообщения-тг-бот-u0lLfinbjX4L.json",
+    "display_name": "отправка сообщения ТГ Бот",
+    "purpose": "Sub-workflow: отправляет текстовое сообщение через Discovery API bot/send-message.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/bot/send-message"]
+    }
+  },
+  {
+    "file_name": "отправка-уведомления-Ww3Hhp19xo2y.json",
+    "display_name": "отправка уведомления",
+    "purpose": "Sub-workflow: отправляет payment/системное уведомление пользователю в VK или Telegram и обновляет статус in_app_notifications.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": ["Monitor payments expirations"],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/bot/send-message"],
+      "custom_servers": ["217.26.24.119:3000/messages/vk/send"],
+      "postgresql": ["in_app_notifications (update)"]
+    }
+  },
+  {
+    "file_name": "поиск-из-промптов-37rVWrJKd364.json",
+    "display_name": "Поиск из промптов",
+    "purpose": "Ручной запуск: разбивает список промптов и для каждого вызывает «Поиск по направлению».",
+    "trigger_type": "manual",
+    "calls_other_workflows": ["Поиск по направлению"],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "поиск-по-set-iAxgzkT9YJZI.json",
+    "display_name": "Поиск по set",
+    "purpose": "Ручной поиск VK-групп по заданному set запросов (groups.search + omni-parser search/groups), затем запись результатов через sub-workflow.",
+    "trigger_type": "manual",
+    "calls_other_workflows": ["Дописать в таблицу найденные группы"],
+    "called_by": [],
+    "external_apis": {
+      "vk_api": ["api.vk.com/method/groups.search"],
+      "custom_servers": ["217.26.24.119:3000/vk/user/{session}/search/groups"],
+      "n8n_data_tables": ["Поиск", "Группы клиента"]
+    }
+  },
+  {
+    "file_name": "поиск-по-направлению-C3ZX5ZdFqhqH.json",
+    "display_name": "Поиск по направлению",
+    "purpose": "Sub-workflow: генерирует сиды (RunSeedGeneration), ищет VK-группы через webhook search-with-score и Telegram-каналы через «Телеграм поиск», upsert в source_channels.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": ["RunSeedGeneration", "Телеграм поиск"],
+    "called_by": ["Поиск из промптов", "Поиск по направлениям общий"],
+    "external_apis": {
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/vk/search-with-score"],
+      "postgresql": ["source_channels (select)"]
+    }
+  },
+  {
+    "file_name": "поиск-по-направлению-тг-2ObVjDauzM2Z.json",
+    "display_name": "Поиск по направлению ТГ",
+    "purpose": "Sub-workflow: только Telegram-ветка — RunSeedGeneration + «Телеграм поиск» по описанию направления.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": ["RunSeedGeneration", "Телеграм поиск"],
+    "called_by": ["Поиск по направлениям общий", "Поиск по промптам ТГ"],
+    "external_apis": {}
+  },
+  {
+    "file_name": "поиск-по-направлениям-общий-t3x1YhyaMXqA.json",
+    "display_name": "Поиск по направлениям общий",
+    "purpose": "Sub-workflow-оркестратор: для каждого направления запускает VK-поиск («Поиск по направлению») и TG-поиск («Поиск по направлению ТГ»).",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": ["Поиск по направлению ТГ", "Поиск по направлению"],
+    "called_by": ["Chron-собрать данные по промптам и определить направления"],
+    "external_apis": {}
+  },
+  {
+    "file_name": "поиск-по-промптам-тг-AFWu5Xq6sOoZ.json",
+    "display_name": "Поиск по промптам ТГ",
+    "purpose": "Ручной запуск Telegram-поиска: разбивает промпты и для каждого вызывает «Поиск по направлению ТГ».",
+    "trigger_type": "manual",
+    "calls_other_workflows": ["Поиск по направлению ТГ"],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "прием-комментариев-под-постами-группы-xnqt0824z9Er.json",
+    "display_name": "Прием комментариев под постами группы",
+    "purpose": "Webhook POST /comment-reciever: принимает VK-комментарии, классифицирует (/classify), создаёт channel_messages и ставит в очередь обработки.",
+    "trigger_type": "webhook (/comment-reciever)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["159.194.221.16:8000/classify", "217.26.24.119:3000/clients/vk-user/{session}"],
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/comment-reciever"],
+      "google_forms": ["docs.google.com/forms (ссылка в ответах)"],
+      "postgresql": ["source_messages", "source_channels", "channel_messages (insert/create)"]
+    }
+  },
+  {
+    "file_name": "принимаем-сообщение-что-пользователь-нажал-на-старт-в-боте-вк-ERSWyrKTUvzn.json",
+    "display_name": "Принимаем сообщение что пользователь нажал на старт в боте ВК",
+    "purpose": "Webhook POST /vk_callback: обрабатывает нажатие Start в VK-боте — bind контакта, welcome-сообщение, старт listener, уведомление на сайт.",
+    "trigger_type": "webhook (/vk_callback)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "vk_api": ["api.vk.com/method/users.get"],
+      "custom_servers": ["217.26.24.119:3000/listeners/vk/start", "217.26.24.119:3000/messages/vk/send"],
+      "lidogen_site": ["gragipemuse.beget.app/api/internal/contact-bind/consume", "gragipemuse.beget.app/notifications"]
+    }
+  },
+  {
+    "file_name": "принимаем-сообщения-о-том-что-пользователь-нажал-start-в-тг-боте-D9rAabNCbTtH.json",
+    "display_name": "Принимаем сообщения о том что пользователь нажал start в ТГ боте",
+    "purpose": "Webhook POST /recieve_message_start_tg: обрабатывает /start в Telegram-боте — bind контакта, welcome через Discovery bot, уведомление на сайт.",
+    "trigger_type": "webhook (/recieve_message_start_tg)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/bot/send-message"],
+      "lidogen_site": ["gragipemuse.beget.app/api/internal/contact-bind/consume", "gragipemuse.beget.app/notifications"]
+    }
+  },
+  {
+    "file_name": "промты-после-прохождения-опроса-irw14sVTJguA.json",
+    "display_name": "Промты после прохождения опроса",
+    "purpose": "Webhooks /project-new-data и /project-update-data: после опроса LLM-агентами генерирует/обновляет lead_search_prompt и поля monitoring_projects в PostgreSQL.",
+    "trigger_type": "webhook (/project-new-data, /project-update-data)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "llm": ["OpenRouter (2 агента)"],
+      "postgresql": ["monitoring_projects (executeQuery, update)"]
+    }
+  },
+  {
+    "file_name": "регистрация-каналов-ZVPpskUjyfFd.json",
+    "display_name": "регистрация каналов",
+    "purpose": "Ручная миграция: читает группы из Data Table «Группы клиента» и insert в PostgreSQL source_channels.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "n8n_data_tables": ["Группы клиента"],
+      "postgresql": ["source_channels (insert)"]
+    }
+  },
+  {
+    "file_name": "создать-слушатель-телеграм-IiV06ftOjux7.json",
+    "display_name": "Создать слушатель телеграм",
+    "purpose": "Sub-workflow: для Telegram-канала из source_channels находит/стартует Discovery-парсер и привязывает канал.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/parser/list|start|{parserId}"],
+      "postgresql": ["source_channels (select)"]
+    }
+  },
+  {
+    "file_name": "сообщение-в-вк-опционально-с-кнопками-NTfeVCens3Jh.json",
+    "display_name": "Сообщение в ВК опционально с кнопками",
+    "purpose": "Sub-workflow: формирует VK или Telegram rich-сообщение с опциональной inline-клавиатурой и отправляет через messages API.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": ["Обработка очереди. Поиск Лидов"],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/messages/vk/send", "217.26.24.119:3000/messages/telegram/send_rich"]
+    }
+  },
+  {
+    "file_name": "сообщения-из-сообщества-лидогена-5dJjDOY4fTus.json",
+    "display_name": "Сообщения из сообщества лидогена",
+    "purpose": "Webhook POST /community-paid-messages — заглушка для приёма платных сообщений из VK-сообщества Lidogen (без downstream-логики).",
+    "trigger_type": "webhook (/community-paid-messages)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "телеграм-поиск-Cno7xg0nQg8D.json",
+    "display_name": "Телеграм поиск",
+    "purpose": "Sub-workflow: по seed-фразам ищет Telegram-каналы/группы через Discovery API (discover, discover-groups, add-channel-by-link), upsert в source_channels.",
+    "trigger_type": "sub-workflow",
+    "calls_other_workflows": [],
+    "called_by": ["Поиск по направлению", "Поиск по направлению ТГ"],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/discover", "discover-groups", "add-channel-by-link", "auth/qr"],
+      "telegram": ["t.me"],
+      "postgresql": ["source_channels (upsert, select)"]
+    }
+  },
+  {
+    "file_name": "телеграм-принимаем-и-записываем-NgUhSbXVyFBq.json",
+    "display_name": "Телеграм принимаем и записываем",
+    "purpose": "Webhook POST /telegram-messages: принимает сообщения из TG-парсера, классифицирует, пишет source_messages и создаёт задачу в очереди.",
+    "trigger_type": "webhook (/telegram-messages)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["159.194.221.16:8000/classify"],
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/telegram-messages"],
+      "postgresql": ["source_messages", "source_channels (insert/select)"]
+    }
+  },
+  {
+    "file_name": "тест-получение-комментариев-hTh3CvCkwRW0.json",
+    "display_name": "Тест получение комментариев",
+    "purpose": "Пустой черновик workflow без узлов — заготовка для теста получения VK-комментариев.",
+    "trigger_type": "без триггера",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "тест-создаём-сообщение-eTh5ndm300k1.json",
+    "display_name": "Тест Создаём сообщение",
+    "purpose": "Ручной тест: отправляет фиктивный комментарий в webhook comment-reciever.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/comment-reciever"]
+    }
+  },
+  {
+    "file_name": "тест-эндпойнты-EbX94BxYbtpW.json",
+    "display_name": "Тест эндпойнты",
+    "purpose": "Ручной тестовый свитчер omni-parser VK user/listener API: health, auth, search/groups, wall/posts, comments, board/topics.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["217.26.24.119:3000/health", "217.26.24.119:3000/status", "217.26.24.119:3000/clients/vk-user/*", "217.26.24.119:3000/listeners/vk-user/*", "217.26.24.119:3000/vk/user/*"],
+      "n8n_data_tables": ["Группы клиента"]
+    }
+  },
+  {
+    "file_name": "тиктоктествебхук-O0LDRYmL7lIB.json",
+    "display_name": "ТикТокТестВебхук",
+    "purpose": "Тестовый webhook POST /tiktoktest — принимает payload без обработки.",
+    "trigger_type": "webhook (/tiktoktest)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {}
+  },
+  {
+    "file_name": "тиктокэндпойнты-cBMwZx9V7a4I.json",
+    "display_name": "ТикТокЭндпойнты",
+    "purpose": "Ручной тестовый свитчер TikTok microservice API: sessions, search, listeners, watches на 159.194.216.75:2000 и 217.26.24.119:2000.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "custom_servers": ["159.194.216.75:2000/health|search|sessions|listeners|watches", "217.26.24.119:2000/health|search|sessions"]
+    }
+  },
+  {
+    "file_name": "читаем-старые-сообщения-SS21fOFcrvtz.json",
+    "display_name": "Читаем старые сообщения",
+    "purpose": "Раз в день помечает старые непрочитанные in_app_notifications как прочитанные (cleanup).",
+    "trigger_type": "schedule (раз в день)",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "postgresql": ["in_app_notifications (executeQuery select + update)"]
+    }
+  },
+  {
+    "file_name": "эндпойнты-clumps-новый-сервер-3Tdw4BDO0eLz.json",
+    "display_name": "Эндпойнты clumps новый сервер",
+    "purpose": "Ручной тест QR-авторизации Telegram-сессии на vps-108 Discovery API и проверка каналов в source_channels.",
+    "trigger_type": "manual",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["vps-108.web.oboyma.ai/discovery-api/auth/qr", "auth/qr/{session_id}/status"],
+      "postgresql": ["source_channels (select)"]
+    }
+  },
+  {
+    "file_name": "эндпойнты-тг-парсер-S5KjfoTGkare.json",
+    "display_name": "Эндпойнты ТГ парсер",
+    "purpose": "Фрагмент без триггера: набор HTTP-узлов для тестирования Discovery parser/auth на 194.156.117.160:8100 и webhook telegram-messages.",
+    "trigger_type": "без триггера",
+    "calls_other_workflows": [],
+    "called_by": [],
+    "external_apis": {
+      "discovery_api": ["194.156.117.160:8100/discovery-api/auth/qr", "parser/list|start|stop|status"],
+      "internal_n8n_webhooks": ["mokuegopasan.beget.app/webhook/telegram-messages"]
+    }
+  }
+]

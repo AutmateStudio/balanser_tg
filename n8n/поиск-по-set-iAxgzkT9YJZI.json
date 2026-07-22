@@ -1,0 +1,338 @@
+{
+  "name": "Поиск по set",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "=http://217.26.24.119:3000/vk/user/Server_account_2/search/groups",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.Query }}"
+            },
+            {
+              "name": "count",
+              "value": "=40"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -48,
+        320
+      ],
+      "id": "8f81cfc6-6d2f-4ec9-90ec-d108c48d9503",
+      "name": "VK: поиск сообществ",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        304
+      ],
+      "id": "ab7f0ffa-23de-4123-a425-27a640710b5b"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -304,
+        304
+      ],
+      "id": "907dbed4-250a-485e-b66c-98768bb59a89"
+    },
+    {
+      "parameters": {
+        "url": "https://api.vk.com/method/groups.search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json[\"queries\"][$json[\"index\"]] }}"
+            },
+            {
+              "name": "type",
+              "value": "group"
+            },
+            {
+              "name": "count",
+              "value": "20"
+            },
+            {
+              "name": "v",
+              "value": "5.131"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.VK_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "VK API Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -288,
+        32
+      ],
+      "id": "0bc8cdf9-ffbb-4c2b-8c87-61f32eba9019"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "z4BA1WJqqws876Cl",
+          "mode": "list",
+          "cachedResultName": "Поиск",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/z4BA1WJqqws876Cl"
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -576,
+        304
+      ],
+      "id": "845fcea1-5933-49d2-bbc9-e337374f6e4a",
+      "name": "Get row(s)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "93f872b1-0a72-4f95-9884-3977feda79b2",
+              "name": "items",
+              "value": "={{ $json.items }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        192,
+        320
+      ],
+      "id": "44e310e3-e65a-4228-bc8e-ee80e0828ec9",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $input.first().json;\nconst block = Array.isArray(root) ? root[0] : root;\nconst items = block.items ?? [];\n\nreturn [\n  {\n    json: {\n      ids: items.map((item) => item.id),\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        320
+      ],
+      "id": "42e51e8c-4847-4860-9d73-e8626110cd6a",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "value": "z9maAvjRPMd4O3ik",
+          "mode": "list",
+          "cachedResultName": "Группы клиента",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/z9maAvjRPMd4O3ik"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Client_id",
+              "keyValue": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        48
+      ],
+      "id": "fa792a96-ccb5-4534-a6fe-eaa68215701f",
+      "name": "Delete row(s)"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "B7N6Q2kwnPz5usNd",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/B7N6Q2kwnPz5usNd",
+          "cachedResultName": "Дописать в таблицу найденные группы"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Groups": "={{ $json.ids }}",
+            "Client_id": 2
+          },
+          "matchingColumns": [
+            "Groups"
+          ],
+          "schema": [
+            {
+              "id": "Groups",
+              "displayName": "Groups",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array",
+              "removed": false
+            },
+            {
+              "id": "Client_id",
+              "displayName": "Client_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        608,
+        320
+      ],
+      "id": "d8510db9-d31c-4471-a69f-7674123d164f",
+      "name": "Call 'Дописать в таблицу найденные группы'"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [],
+        [
+          {
+            "node": "VK: поиск сообществ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VK API Search": {
+      "main": [
+        []
+      ]
+    },
+    "VK: поиск сообществ": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s)": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Call 'Дописать в таблицу найденные группы'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'Дописать в таблицу найденные группы'": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

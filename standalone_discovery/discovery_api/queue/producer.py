@@ -1,8 +1,8 @@
-"""D8/D9 — продюсер задач parser_add_channel / parser_remove_channel в PostgreSQL."""
+"""D8/D9 — продюсер задач parser_add_channel / parser_remove_channel / telegram_discover."""
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app_balance.queue.accounts import AccountsRepo
@@ -14,19 +14,34 @@ log = logging.getLogger(__name__)
 
 PARSER_ADD_CHANNEL = "parser_add_channel"
 PARSER_REMOVE_CHANNEL = "parser_remove_channel"
+TELEGRAM_DISCOVER = "telegram_discover"
 CREATED_BY_ADD = "discovery_api:add-channels"
 CREATED_BY_REMOVE = "discovery_api:remove-channels"
+CREATED_BY_DISCOVER = "discovery_api:discover"
 
 
 @dataclass(frozen=True, slots=True)
 class EnqueueAddChannelsResult:
     task_ids: list[int]
     action_id: str
+    # B12: канал -> код фатальной ошибки прошлой попытки; новая задача НЕ
+    # создана (dedup_key ранее terminal failed с постоянной причиной).
+    skipped_fatal: dict[str, str] = field(default_factory=dict)
+    # Канал уже слушается active+enabled аккаунтом того же clump — задача не
+    # создаётся (цель уже достигнута), иначе воркер уводит её в бесконечный
+    # RETRYABLE «Канал уже на другой сессии».
+    skipped_in_clump: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class EnqueueRemoveChannelsResult:
     task_ids: list[int]
+    action_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class EnqueueTelegramDiscoverResult:
+    task_id: int | None
     action_id: str
 
 
@@ -77,16 +92,71 @@ def _resolve_owner_session_name(clump: Any, channel_ref: str) -> str | None:
     return None
 
 
+async def _active_owner_in_clump(
+    clump: Any,
+    accounts_repo: AccountsRepo,
+    channel_ref: str,
+) -> str | None:
+    """session_name владельца канала, если это active+enabled аккаунт того же clump.
+
+    Возвращает None, если канала нет в clump, либо владелец не активен (тогда
+    задачу нужно поставить как обычно — воркер её переисполнит/перенесёт).
+    Используется для enqueue-time dedup: не плодим parser_add_channel на канал,
+    который уже слушается живым аккаунтом clump (иначе бесконечный RETRYABLE
+    «Канал уже на другой сессии»).
+    """
+    if clump is None:
+        return None
+    owner_session = _resolve_owner_session_name(clump, channel_ref)
+    if not owner_session:
+        return None
+    try:
+        account_id = await accounts_repo.get_id_by_session_name(owner_session)
+        if account_id is None:
+            return None
+        account = await accounts_repo.get_by_id(account_id)
+    except Exception:  # noqa: BLE001 — PG недоступен → не блокируем enqueue
+        log.warning(
+            "enqueue dedup: не удалось проверить статус владельца session=%s",
+            owner_session,
+            exc_info=True,
+        )
+        return None
+    if account is None:
+        return None
+    if account.status == "active" and account.is_enabled:
+        return owner_session
+    return None
+
+
 async def enqueue_parser_add_channels(
     *,
     parser_id: str,
     channel_list: list[str],
     webhook_url: str | None = None,
     action_id: str,
+    skip_known_fatal: bool = True,
 ) -> EnqueueAddChannelsResult:
-    """Создаёт по одной задаче parser_add_channel на каждый канал (dedup по dedup_key)."""
+    """Создаёт по одной задаче parser_add_channel на каждый канал (dedup по dedup_key).
+
+    B12: если для канала последняя попытка уже terminal failed с постоянной
+    причиной (banned, channel_private, invalid_payload, ...) — новая задача
+    не создаётся (см. TaskQueueRepo.find_fatal_history/FATAL_ERROR_CODES).
+    Каналы, уже активные (queued/scheduled/retry/in_progress), и так не
+    дублируются — это гарантирует partial unique index dedup_key.
+    Источник вызова (n8n tg-parser-sync и т.п.) не меняется: он продолжает
+    присылать один и тот же список каналов каждый тик, фильтрация — здесь.
+    `skip_known_fatal=False` — принудительный повтор (ручной override оператора).
+    """
+    from discovery_api.session_registry import get_clump
+
     repo = TaskQueueRepo()
+    channels_repo = SourceChannelsRepo()
+    accounts_repo = AccountsRepo()
+    clump = get_clump(parser_id)
     task_ids: list[int] = []
+    skipped_fatal: dict[str, str] = {}
+    skipped_in_clump: dict[str, str] = {}
     wh = (webhook_url or "").strip() or None
 
     for raw in channel_list:
@@ -102,6 +172,20 @@ async def enqueue_parser_add_channels(
             )
             continue
 
+        owner_session = await _active_owner_in_clump(
+            clump, accounts_repo, channel_ref
+        )
+        if owner_session:
+            log.info(
+                "enqueue_parser_add_channels: канал ref=%r parser_id=%s не поставлен — "
+                "уже слушается active-аккаунтом clump session=%s (dedup на enqueue)",
+                channel_ref,
+                parser_id,
+                owner_session,
+            )
+            skipped_in_clump[channel_ref] = owner_session
+            continue
+
         payload: dict[str, str] = {
             "parser_id": parser_id,
             "channel_ref": channel_ref,
@@ -110,19 +194,40 @@ async def enqueue_parser_add_channels(
         if wh:
             payload["webhook_url"] = wh
 
+        channel_id = await channels_repo.find_id_by_ref(channel_ref)
+
         result = await repo.enqueue(
             EnqueueInput(
                 task_type_code=PARSER_ADD_CHANNEL,
                 payload=payload,
                 dedup_key=_dedup_key(PARSER_ADD_CHANNEL, parser_id, channel_ref),
                 created_by=CREATED_BY_ADD,
-            )
+                channel_id=channel_id,
+            ),
+            skip_known_fatal=skip_known_fatal,
         )
+        if result.skipped_reason == "fatal_history":
+            log.warning(
+                "enqueue_parser_add_channels: канал ref=%r parser_id=%s не поставлен — "
+                "прошлая задача id=%s фатально завершена (%s)",
+                channel_ref,
+                parser_id,
+                result.existing_task_id,
+                result.fatal_error_code,
+            )
+            skipped_fatal[channel_ref] = result.fatal_error_code or "fatal"
+            continue
+
         task_id = _task_id_from_enqueue(result)
         if task_id is not None:
             task_ids.append(task_id)
 
-    return EnqueueAddChannelsResult(task_ids=task_ids, action_id=action_id)
+    return EnqueueAddChannelsResult(
+        task_ids=task_ids,
+        action_id=action_id,
+        skipped_fatal=skipped_fatal,
+        skipped_in_clump=skipped_in_clump,
+    )
 
 
 async def enqueue_parser_remove_channels(
@@ -202,3 +307,109 @@ async def enqueue_parser_remove_channels(
             task_ids.append(task_id)
 
     return EnqueueRemoveChannelsResult(task_ids=task_ids, action_id=action_id)
+
+
+def _telegram_discover_dedup_key(
+    session_name: str | None,
+    query: str,
+    *,
+    first_pass_limit: int,
+    similarity_depth: int,
+    include_global_search: bool,
+    include_groups: bool,
+) -> str:
+    """dedup_key для telegram_discover.
+
+    session_name задан — как раньше, дедуп на конкретную сессию (fixed
+    account). session_name отсутствует (auto-pick) — используется плейсхолдер
+    "auto": дедуп идёт по query+параметрам без привязки к сессии, т.к.
+    конкретный аккаунт ещё не выбран на момент постановки (его подберёт
+    dispatch()). Один и тот же запрос без фиксированной сессии не дублируется,
+    пока предыдущая попытка активна.
+    """
+    stripped = (session_name or "").strip()
+    if stripped:
+        from app_balance.queue.accounts_sync import normalize_session_name
+
+        session = normalize_session_name(stripped)
+    else:
+        session = "auto"
+    normalized_query = (query or "").strip().lower()
+    return (
+        f"{TELEGRAM_DISCOVER}:{session}:{normalized_query}:"
+        f"{first_pass_limit}:{similarity_depth}:"
+        f"{int(include_global_search)}:{int(include_groups)}"
+    )
+
+
+async def enqueue_telegram_discover(
+    *,
+    session_name: str | None = None,
+    query: str,
+    first_pass_limit: int,
+    similarity_depth: int,
+    include_global_search: bool,
+    include_groups: bool,
+    action_id: str,
+) -> EnqueueTelegramDiscoverResult:
+    """Ставит задачу telegram_discover.
+
+    session_name задан — fixed account_id, резерв через dispatch (старое
+    поведение, обратная совместимость).
+    session_name не задан/пуст — auto-pick: account_id=None в EnqueueInput,
+    dispatch() сам подберёт свободный аккаунт с достаточным ресурсом
+    (та же механика _reserve_auto_pick_account, что у parser_add_channel;
+    ресурс-чек по min_available_resource_percent=20% для telegram_discover,
+    приоритет 80 — см. DB/A9_seed.sql).
+    """
+    trimmed_query = (query or "").strip()
+    if not trimmed_query:
+        return EnqueueTelegramDiscoverResult(task_id=None, action_id=action_id)
+
+    session_stripped = (session_name or "").strip()
+    account_id: int | None = None
+    normalized_session: str | None = None
+
+    if session_stripped:
+        from app_balance.queue.accounts_sync import normalize_session_name
+
+        accounts = AccountsRepo()
+        normalized_session = normalize_session_name(session_stripped)
+        account_id = await accounts.get_id_by_session_name(session_stripped)
+        if account_id is None:
+            log.warning(
+                "enqueue_telegram_discover: аккаунт не в PG session=%r",
+                session_stripped,
+            )
+            return EnqueueTelegramDiscoverResult(task_id=None, action_id=action_id)
+
+    payload: dict[str, Any] = {
+        "query": trimmed_query,
+        "first_pass_limit": int(first_pass_limit),
+        "similarity_depth": int(similarity_depth),
+        "include_global_search": bool(include_global_search),
+        "include_groups": bool(include_groups),
+        "action_id": action_id,
+    }
+    if normalized_session:
+        payload["session_name"] = normalized_session
+
+    repo = TaskQueueRepo()
+    result = await repo.enqueue(
+        EnqueueInput(
+            task_type_code=TELEGRAM_DISCOVER,
+            payload=payload,
+            dedup_key=_telegram_discover_dedup_key(
+                session_stripped or None,
+                trimmed_query,
+                first_pass_limit=first_pass_limit,
+                similarity_depth=similarity_depth,
+                include_global_search=include_global_search,
+                include_groups=include_groups,
+            ),
+            created_by=CREATED_BY_DISCOVER,
+            account_id=account_id,
+        )
+    )
+    task_id = _task_id_from_enqueue(result)
+    return EnqueueTelegramDiscoverResult(task_id=task_id, action_id=action_id)

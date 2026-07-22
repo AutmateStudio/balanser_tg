@@ -20,28 +20,27 @@ effective_rph = floor(rph_limit × (1 − reserve_percent / 100))
 
 | code | назначение | rph_limit | effective_rph | is_enabled |
 |------|------------|-----------|---------------|------------|
-| `auth.qr_login` | QR: qr_login + wait + recreate + get_me + save | 3 | 2 | true |
-| `connect_disconnect` | Connect / disconnect сессии | 1 | 0 | true |
-| `get_me` | Текущий пользователь (валидация сессии) | 1 | 0 | true |
-| `is_user_authorized` | Проверка авторизации | 1 | 0 | true |
-| `get_entity` | Resolve username / ссылки / peer | 7 | 6 | true |
-| `get_input_entity` | get_input_entity() для InputPeer | 7 | 6 | true |
-| `contacts.Search` | Поиск контактов / каналов | 2 | 1 | true |
-| `messages.SearchGlobal` | Глобальный поиск сообщений | 120 | 108 | true |
-| `channels.GetChannelRecommendations` | Рекомендации каналов | 30 | 27 | true |
-| `channels.GetFullChannel` | Полные данные канала | 80 | 72 | true |
-| `channels.JoinChannel` | Подписка / join канала или discussion | 30 | 27 | true |
-| `channels.LeaveChannel` | Выход из канала или discussion | 30 | 27 | true |
-| `channels.GetParticipant` | Проверка участника (InputPeerSelf) | 6000 | 5400 | true |
-| `channels.GetParticipants` | Список участников (megagroup / lidgen) | 500 | 450 | true |
-| `get_permissions` | get_permissions() для legacy Chat | 30 | 27 | true |
-| `iter_messages` | Итерация сообщений (скоринг / collect) | 450 | 405 | true |
-| `users.GetFullUser` | Полные данные пользователя (NewMessage sender) | 1500 | 1350 | true |
-| `bot.send_message` | Bot API: send_message | 1000 | 900 | true |
-| `bot.send_photo` | Bot API: send_photo | 500 | 450 | true |
+| `auth.qr_login` | QR: qr_login + wait + recreate + get_me + save | 15 | 13 | true |
+| `connect_disconnect` | Connect / disconnect сессии | 150 | 135 | true |
+| `get_me` | Текущий пользователь (валидация сессии) | 150 | 135 | true |
+| `is_user_authorized` | Проверка авторизации | 150 | 135 | true |
+| `get_entity` | Resolve username / ссылки / peer | **223** | **200** | true |
+| `get_input_entity` | get_input_entity() для InputPeer | 35 | 31 | true |
+| `contacts.Search` | Поиск контактов / каналов | 10 | 9 | true |
+| `messages.SearchGlobal` | Глобальный поиск сообщений | 600 | 540 | true |
+| `channels.GetChannelRecommendations` | Рекомендации каналов | 150 | 135 | true |
+| `channels.GetFullChannel` | Полные данные канала | **112** | **100** | true |
+| `channels.JoinChannel` | Подписка / join канала или discussion | **223** | **200** | true |
+| `channels.LeaveChannel` | Выход из канала или discussion | 150 | 135 | true |
+| `channels.GetParticipant` | Проверка участника (InputPeerSelf) | 30000 | 27000 | true |
+| `channels.GetParticipants` | Список участников (megagroup / lidgen) | 2500 | 2250 | true |
+| `get_permissions` | get_permissions() для legacy Chat | 150 | 135 | true |
+| `iter_messages` | Итерация сообщений (скоринг / collect) | 2250 | 2025 | true |
+| `users.GetFullUser` | Полные данные пользователя (NewMessage sender) | 7500 | 6750 | true |
+| `bot.send_message` | Bot API: send_message | 5000 | 4500 | true |
+| `bot.send_photo` | Bot API: send_photo | 2500 | 2250 | true |
 
-> `effective_rph` при низких лимитах (`connect_disconnect`, `get_me`, `is_user_authorized`)
-> округляется до 0 — учётные операции не блокируют задачи по RPH, а служат маркерами.
+> **Жирным** — op, калиброванные под **20 кан/ч** `parser_add_channel`. Остальные — **×5** от исходного базового seed.
 
 ## Pipelines task_type_ops (порядок шагов важен)
 
@@ -49,6 +48,12 @@ effective_rph = floor(rph_limit × (1 − reserve_percent / 100))
 `payload.last_completed_step`).
 
 ### `parser_add_channel`
+
+Пропускная способность `parser_add_channel` (A14 RPH + A15 порог): до **~80% effective
+RPH** на аккаунт (`min_available_resource_percent = 20%`, резерв 20%). При A14
+GetFull effective=100 — до ~80 GetFull/ч (~80 кан/ч), пока не упрётесь в Telegram.
+Прочие op — **×5** от базового seed
+(discovery, collect, bot и т.д.).
 
 | # | op_code | units | role |
 |---|---------|-------|------|
@@ -99,7 +104,9 @@ effective_rph = floor(rph_limit × (1 − reserve_percent / 100))
 
 ## Примечания
 
-- `collect_extra_data` и `update_channel` остаются `is_enabled=false` до задач F6/F7.
+- `update_channel` и `collect_extra_data` включены в seed (`is_enabled=true`) — adapter-ветки F6/F7 реализованы
+  (`_execute_collect_extra_data`, `_execute_update_channel`). Включение `collect_extra_data` на уже
+  развёрнутых инстансах — миграция `DB/A18_enable_collect_extra_data.sql`.
 - После любого изменения seed или каталога запустите `make verify-ops-catalog`
   (или `python scripts/verify_ops_catalog_seed.py --db` для сверки с PostgreSQL).
 - Per-op RPH с точки зрения оператора см. в [`docs/queue-runbook.md`](queue-runbook.md).

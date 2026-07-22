@@ -6,10 +6,10 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from discovery_api.account_registry import (
@@ -17,6 +17,8 @@ from discovery_api.account_registry import (
     list_all_accounts_merged,
     normalize_session_name,
     session_file_exists,
+    session_file_path,
+    sessions_dir,
 )
 from discovery_api.account_store import set_admin_blocked, update_account_fields, upsert_account
 from discovery_api.action_queue import (
@@ -44,6 +46,7 @@ from discovery_api.config import (
     get_session_max_reconnects,
     get_session_reconnect_backoff_base,
     get_session_reconnect_backoff_max,
+    get_session_archive_max_mb,
     get_session_resolve_min_interval,
     get_use_pg_queue,
 )
@@ -51,6 +54,36 @@ from discovery_api.parser_functions import get_runtime_queue_size, get_runtime_s
 from discovery_api.queue.producer import (
     enqueue_parser_add_channels,
     enqueue_parser_remove_channels,
+)
+from discovery_api.queue.metrics import MetricsResponse, get_queue_metrics
+from discovery_api.queue.ops_status import (
+    AlertsResponse,
+    ResourceAdjustmentsResponse,
+    WatchdogsResponse,
+    get_queue_alerts,
+    get_queue_watchdogs,
+    get_resource_adjustments,
+)
+from discovery_api.queue.task_types import (
+    TaskTypeDetailResponse,
+    TaskTypeListItemResponse,
+    TaskTypePatchRequest,
+    get_task_type,
+    list_task_types,
+    patch_task_type,
+)
+from discovery_api.queue.account_channels import (
+    AccountChannelItemResponse,
+    AccountChannelsPgResponse,
+    AccountChannelsSummaryResponse,
+    get_account_channels_pg,
+    get_account_channels_summary,
+)
+from discovery_api.queue.account_queue_overlay import (
+    enrich_channel_counts_from_pg,
+    fetch_pg_queue_states,
+    overlay_account_rows,
+    overlay_queue_state,
 )
 from discovery_api.queue.status import get_task_snapshot
 from discovery_api.parser_store import (
@@ -61,10 +94,12 @@ from discovery_api.parser_store import (
     normalize_persisted_record,
     upsert_job as persist_upsert_job,
 )
+from discovery_api.session_info import list_sessions_info, probe_session_info
 from discovery_api.session_registry import (
     ChannelQuotaExceeded,
     SessionClump,
     get_or_create_clump,
+    notify_session_reauthorized,
     release_client,
     remove_clump,
 )
@@ -88,7 +123,8 @@ class ParserStartRequest(BaseModel):
         None, description="Имя clump для логов (не id в URL)"
     )
     channel_list: list[str] = Field(
-        ..., min_length=1, description="@username каналов/чатов или числовые id"
+        default_factory=list,
+        description="@username каналов/чатов или числовые id (может быть пустым)",
     )
     webhook_url: HttpUrl = Field(..., description="URL для JSON POST при новом сообщении")
 
@@ -176,7 +212,22 @@ class ClumpConfigResponse(BaseModel):
     config: dict[str, Any]
 
 
-class AccountSummary(BaseModel):
+class AccountQueueOverlayFields(BaseModel):
+    """PG cooldown + available_at для дашборда (merge с runtime flood)."""
+
+    queue_status: Optional[str] = None
+    cooldown_until: Optional[str] = None
+    cooldown_remaining_seconds: Optional[int] = None
+    available_at: Optional[str] = None
+    available_in_seconds: Optional[int] = None
+    flood_until: Optional[float] = None
+    current_task_id: Optional[int] = None
+    last_error: Optional[str] = None
+    last_error_at: Optional[str] = None
+    is_enabled: Optional[bool] = None
+
+
+class AccountSummary(AccountQueueOverlayFields):
     parser_id: str
     session_name: str
     display_name: str
@@ -189,6 +240,11 @@ class AccountSummary(BaseModel):
     running: bool = False
     channel_count: int = 0
     max_channels_per_session: int = 0
+    telegram_channel_count: Optional[int] = Field(
+        default=None,
+        description="Honest-число каналов/супергрупп в Telegram (iter_dialogs), кэш из account_store",
+    )
+    telegram_channel_count_synced_at: Optional[str] = None
 
 
 class AccountListResponse(BaseModel):
@@ -196,7 +252,7 @@ class AccountListResponse(BaseModel):
     accounts: list[AccountSummary] = Field(default_factory=list)
 
 
-class AccountDetail(BaseModel):
+class AccountDetail(AccountQueueOverlayFields):
     parser_id: str
     session_name: str
     display_name: str
@@ -206,13 +262,17 @@ class AccountDetail(BaseModel):
     channel_count: int = 0
     limits: dict[str, Any] = Field(default_factory=dict)
     health: dict[str, Any] = Field(default_factory=dict)
+    flood_remaining_seconds: Optional[int] = None
 
 
 class AccountChannelsResponse(BaseModel):
-    parser_id: str
+    parser_id: Optional[str] = None
     session_name: str
     channel_count: int = 0
     channels: list[str] = Field(default_factory=list)
+    source: str = "clump"
+    account_id: Optional[int] = None
+    channels_detail: Optional[list[AccountChannelItemResponse]] = None
 
 
 class AccountMetaUpdate(BaseModel):
@@ -223,7 +283,7 @@ class AccountMetaUpdate(BaseModel):
     max_channels: Optional[int] = Field(default=None, ge=1)
 
 
-class AccountFullSummary(BaseModel):
+class AccountFullSummary(AccountQueueOverlayFields):
     session_name: str
     display_name: str
     description: str = ""
@@ -244,11 +304,49 @@ class AccountFullSummary(BaseModel):
     connected: bool = False
     running: bool = False
     channel_count: int = 0
+    telegram_channel_count: Optional[int] = Field(
+        default=None,
+        description="Сколько каналов/супергрупп аккаунт реально слушает в Telegram (iter_dialogs), из лимита MAX_CHANNELS_PER_SESSION",
+    )
+    telegram_channel_count_synced_at: Optional[str] = Field(
+        default=None,
+        description="Когда последний раз обновлялся telegram_channel_count (UTC, из account_store)",
+    )
+    required_channel_total: Optional[int] = Field(
+        default=None,
+        description="Сколько каналов уже требует пул этого парсера (SessionClump)",
+    )
+    required_channel_present: Optional[int] = Field(
+        default=None,
+        description="Сколько из требуемых каналов уже есть на этом аккаунте в Telegram",
+    )
+    membership_check_error: Optional[str] = Field(
+        default=None,
+        description="Ошибка проверки членства (iter_dialogs), если проверка не удалась",
+    )
 
 
 class AccountAllListResponse(BaseModel):
     total: int
     accounts: list[AccountFullSummary] = Field(default_factory=list)
+    generated_at: Optional[str] = None
+
+
+class SessionInfoItem(BaseModel):
+    session_name: str = Field(..., description="Имя сессии без расширения .session")
+    session_file: str = Field(..., description="Имя файла сессии, например Client1.session")
+    phone: Optional[str] = Field(
+        default=None, description="Номер телефона из Telegram (get_me), если сессия авторизована"
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Причина, по которой телефон не получен (не авторизована, сеть, …)",
+    )
+
+
+class SessionInfoListResponse(BaseModel):
+    total: int
+    sessions: list[SessionInfoItem] = Field(default_factory=list)
 
 
 class AccountBlockUpdate(BaseModel):
@@ -335,6 +433,15 @@ class AddChannelsResponse(BaseModel):
     assignments: dict[str, str] = Field(default_factory=dict)
     action_id: Optional[str] = None
     task_ids: list[int] = Field(default_factory=list)
+    skipped_fatal: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "B12: канал -> код ошибки; задача НЕ поставлена в очередь, т.к. "
+            "прошлая попытка для этого канала уже завершилась фатально "
+            "(banned/channel_private/invalid_payload/...). Повтор через "
+            "?force_retry=1"
+        ),
+    )
     async_mode: bool = False
 
 
@@ -391,6 +498,23 @@ def _env_telegram_configured() -> bool:
 
 def _persist_clump_state(parser_id: str, clump: SessionClump) -> None:
     persist_upsert_job(clump_to_record(clump, parser_id=parser_id))
+
+
+async def _sync_accounts_pg(context: str) -> None:
+    """Best-effort sync SQLite+disk+clump → PG после изменения состава clump.
+
+    Путь к parser_jobs.json передаём тем же резолвером, что и запись
+    (`parser_store._store_path()`), иначе в контейнере с уплощённым layout
+    (`/app/discovery_api/...` вместо `.../standalone_discovery/...`) синк
+    прочитает несуществующий файл → in_clump=False → аккаунты станут disabled.
+    """
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+    from discovery_api.parser_store import _store_path
+
+    await sync_accounts_to_pg_best_effort(
+        context=context,
+        parser_store_path=_store_path(),
+    )
 
 
 def _require_clump_job(parser_id: str) -> _ClumpJob:
@@ -465,7 +589,7 @@ async def parser_start(body: ParserStartRequest) -> ParserStartResponse:
         if sn:
             assignments[str(raw)] = str(sn)
 
-    if errors and not assignments:
+    if body.channel_list and errors and not assignments:
         await remove_clump(parser_id)
         _jobs.pop(parser_id, None)
         raise HTTPException(
@@ -483,8 +607,13 @@ async def parser_start(body: ParserStartRequest) -> ParserStartResponse:
 
     _jobs[parser_id] = _ClumpJob(clump=clump, parser_id=parser_id)
     _persist_clump_state(parser_id, clump)
+    await _sync_accounts_pg(f"parser-start:{parser_id}")
 
-    detail = "Clump запущен, слушатели активны"
+    detail = (
+        "Clump запущен, слушатели активны"
+        if body.channel_list
+        else "Clump создан без каналов (сессии зачислены)"
+    )
     if errors:
         detail += f"; частичные ошибки: {len(errors)}"
 
@@ -547,14 +676,22 @@ async def parser_add_channels(
     parser_id: str,
     body: ChannelsBody,
     async_mode: bool = Query(default=True, alias="async"),
+    force_retry: bool = Query(
+        default=False,
+        description=(
+            "B12: игнорировать фатальную историю dedup_key и поставить "
+            "задачу заново для всех каналов (ручной override оператора)"
+        ),
+    ),
 ) -> AddChannelsResponse:
     job = _require_running_clump(parser_id)
 
     log.info(
-        "parser add-channels parser_id=%s count=%s async=%s",
+        "parser add-channels parser_id=%s count=%s async=%s force_retry=%s",
         parser_id,
         len(body.channel_list),
         async_mode,
+        force_retry,
     )
 
     if async_mode:
@@ -566,12 +703,14 @@ async def parser_add_channels(
                 channel_list=body.channel_list,
                 webhook_url=webhook_url,
                 action_id=action_id,
+                skip_known_fatal=not force_retry,
             )
             return AddChannelsResponse(
                 parser_id=parser_id,
                 channel_list=job.clump.list_channels(),
                 action_id=pg_result.action_id,
                 task_ids=pg_result.task_ids,
+                skipped_fatal=pg_result.skipped_fatal,
                 async_mode=True,
             )
 
@@ -679,20 +818,71 @@ def _find_account_job(session_name: str, parser_id: Optional[str]) -> tuple[str,
     )
 
 
+@parser_router.get("/sessions", response_model=SessionInfoListResponse)
+async def parser_sessions_list() -> SessionInfoListResponse:
+    """Все `.session` в SESSIONS_DIR: имя файла, имя сессии и телефон аккаунта."""
+    rows = await list_sessions_info()
+    sessions = [SessionInfoItem(**row) for row in rows]
+    return SessionInfoListResponse(total=len(sessions), sessions=sessions)
+
+
+@parser_router.get("/sessions/{session_name:path}", response_model=SessionInfoItem)
+async def parser_session_detail(session_name: str) -> SessionInfoItem:
+    """Сведения об одной сессии по имени или пути к `.session`-файлу."""
+    try:
+        row = await probe_session_info(session_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SessionInfoItem(**row)
+
+
 @parser_router.get("/accounts/all", response_model=AccountAllListResponse)
 async def parser_accounts_all() -> AccountAllListResponse:
     rows = list_all_accounts_merged(_jobs)
+    now = datetime.now(timezone.utc)
+    pg_states = await fetch_pg_queue_states()
+    rows = await overlay_account_rows(rows, pg_states=pg_states, now=now)
+    await enrich_channel_counts_from_pg(rows)
     accounts = [AccountFullSummary(**row) for row in rows]
-    return AccountAllListResponse(total=len(accounts), accounts=accounts)
+    generated_at = now.isoformat().replace("+00:00", "Z")
+    return AccountAllListResponse(
+        total=len(accounts), accounts=accounts, generated_at=generated_at
+    )
 
 
 @parser_router.get("/accounts", response_model=AccountListResponse)
 async def parser_accounts() -> AccountListResponse:
+    from discovery_api.account_store import get_account as get_account_store_rec
+
+    now = datetime.now(timezone.utc)
+    pg_states = await fetch_pg_queue_states()
     accounts: list[AccountSummary] = []
     for pid, job in list(_jobs.items()):
         for summary in job.clump.list_account_summaries():
-            accounts.append(AccountSummary(parser_id=pid, **summary))
+            norm = normalize_session_name(summary["session_name"])
+            row = overlay_queue_state(
+                dict(summary),
+                pg_states.get(norm) or pg_states.get(summary["session_name"]),
+                now=now,
+            )
+            store_rec = get_account_store_rec(norm) or {}
+            row.setdefault("telegram_channel_count", store_rec.get("telegram_channel_count"))
+            row.setdefault(
+                "telegram_channel_count_synced_at",
+                store_rec.get("telegram_channel_count_synced_at"),
+            )
+            accounts.append(AccountSummary(parser_id=pid, **row))
     return AccountListResponse(total=len(accounts), accounts=accounts)
+
+
+def _detail_row_for_overlay(detail: dict[str, Any]) -> dict[str, Any]:
+    health = detail.get("health") or {}
+    row = dict(detail)
+    row.setdefault("flood_until", health.get("flood_until"))
+    row.setdefault("flood_remaining_seconds", health.get("flood_remaining_seconds"))
+    if row.get("last_error") is None:
+        row["last_error"] = health.get("last_error")
+    return row
 
 
 @parser_router.get("/account-detail", response_model=AccountDetail)
@@ -703,14 +893,37 @@ async def parser_account_detail(
     detail = job.clump.account_detail(session_name)
     if detail is None:
         raise HTTPException(status_code=404, detail="Аккаунт не найден")
-    return AccountDetail(parser_id=pid, **detail)
+    now = datetime.now(timezone.utc)
+    pg_states = await fetch_pg_queue_states()
+    norm = normalize_session_name(session_name)
+    row = overlay_queue_state(
+        _detail_row_for_overlay(detail),
+        pg_states.get(norm) or pg_states.get(session_name),
+        now=now,
+    )
+    return AccountDetail(parser_id=pid, **row)
 
 
 @parser_router.get("/account-channels", response_model=AccountChannelsResponse)
 async def parser_account_channels(
     session_name: str, parser_id: Optional[str] = None
 ) -> AccountChannelsResponse:
-    pid, job = _find_account_job(session_name, parser_id)
+    try:
+        pid, job = _find_account_job(session_name, parser_id)
+    except HTTPException as exc:
+        if exc.status_code != 404 or not get_use_pg_queue():
+            raise
+        pg = await get_account_channels_pg(session_name)
+        return AccountChannelsResponse(
+            parser_id=parser_id,
+            session_name=session_name,
+            channel_count=pg.channel_count,
+            channels=[item.channel_ref for item in pg.channels],
+            source="pg",
+            account_id=pg.account_id,
+            channels_detail=pg.channels,
+        )
+
     channels = job.clump.account_channels(session_name)
     if channels is None:
         raise HTTPException(status_code=404, detail="Аккаунт не найден")
@@ -719,6 +932,7 @@ async def parser_account_channels(
         session_name=session_name,
         channel_count=len(channels),
         channels=channels,
+        source="clump",
     )
 
 
@@ -782,6 +996,77 @@ async def parser_account_block(
     return AccountFullSummary(**row)
 
 
+@parser_router.patch("/accounts/{session_name:path}/reactivate", response_model=AccountFullSummary)
+async def parser_account_reactivate(session_name: str) -> AccountFullSummary:
+    """Снимает PG status=error после re-auth; сессия должна быть авторизована в Telethon."""
+    norm = normalize_session_name(session_name)
+    if not session_file_exists(norm):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Файл сессии не найден: {norm}.session",
+        )
+        
+    # Принудительно выкидываем старый клиент из реестра (под per-session lock),
+    # чтобы probe и get_or_create_client прочитали обновлённый .session с диска.
+    from discovery_api.session_registry import release_client
+
+    await release_client(norm)
+
+    probe = await probe_session_info(norm)
+    if probe.get("error"):
+        err = str(probe["error"])
+        if "не авторизована" in err.lower() or "not authorized" in err.lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Сессия {norm} не авторизована; войдите через QR перед reactivate",
+            )
+        raise HTTPException(status_code=409, detail=err)
+    await notify_session_reauthorized(norm)
+
+    from discovery_api.session_dialogs import refresh_and_persist_channel_count
+    from discovery_api.session_registry import find_clump_for_session
+
+    membership = await refresh_and_persist_channel_count(norm, find_clump_for_session(norm))
+
+    rows = list_all_accounts_merged(_jobs)
+    row = next((r for r in rows if r["session_name"] == norm), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Аккаунт не найден")
+    return AccountFullSummary(**{**row, **membership.to_dict()})
+
+
+@parser_router.post(
+    "/accounts/{session_name:path}/refresh-channel-count",
+    response_model=AccountFullSummary,
+)
+async def parser_account_refresh_channel_count(session_name: str) -> AccountFullSummary:
+    """Пересчитывает honest telegram_channel_count (iter_dialogs) и сохраняет в store.
+
+    В отличие от `reactivate`, не трогает health/reauth — только сверяет
+    диалоги уже подключённого (или подключаемого) клиента и обновляет кэш
+    в account_store, который отдаётся на `/accounts/all` и `/accounts`.
+    """
+    from discovery_api.session_dialogs import refresh_and_persist_channel_count
+    from discovery_api.session_registry import find_clump_for_session
+
+    norm = normalize_session_name(session_name)
+    if not session_file_exists(norm):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Файл сессии не найден: {norm}.session",
+        )
+
+    membership = await refresh_and_persist_channel_count(norm, find_clump_for_session(norm))
+    if membership.error is not None:
+        raise HTTPException(status_code=409, detail=membership.error)
+
+    rows = list_all_accounts_merged(_jobs)
+    row = next((r for r in rows if r["session_name"] == norm), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Аккаунт не найден")
+    return AccountFullSummary(**{**row, **membership.to_dict()})
+
+
 @parser_router.patch("/accounts/{session_name:path}", response_model=AccountFullSummary)
 async def parser_account_update(
     session_name: str, body: AccountUpdateBody
@@ -820,7 +1105,48 @@ async def parser_account_delete(
     await release_client(session_name)
     await release_client(norm)
     delete_account_full(norm)
+    await _sync_accounts_pg(f"delete-account:{norm}")
     return {"ok": True, "session_name": norm, "deleted": True}
+
+
+async def _finish_enroll(
+    parser_id: str,
+    job: "_ClumpJob",
+    norm: str,
+    *,
+    source: str = "manual",
+) -> AccountFullSummary:
+    """Общий хвост enroll: account_store → clump → channel_count → PG sync."""
+    upsert_account(norm, display_name=norm, source=source)
+    await job.clump.add_session(norm)
+    await job.clump.start()
+    _persist_clump_state(parser_id, job.clump)
+
+    from discovery_api.session_dialogs import refresh_and_persist_channel_count
+
+    membership = await refresh_and_persist_channel_count(norm, job.clump)
+    await _sync_accounts_pg(f"enroll:{norm}")
+
+    rows = list_all_accounts_merged(_jobs)
+    row = next((r for r in rows if r["session_name"] == norm), None)
+    if row is None:
+        raise HTTPException(status_code=500, detail="Не удалось зарегистрировать аккаунт")
+    return AccountFullSummary(**{**row, **membership.to_dict()})
+
+
+def _map_archive_error(exc: "ArchiveSessionError") -> HTTPException:
+    code = exc.code
+    # HTTP detail должен быть строкой — иначе клиент видит [object Object].
+    detail = exc.message if isinstance(exc.message, str) else str(exc.message)
+    if code == "bad_password":
+        return HTTPException(status_code=400, detail=detail)
+    if code in ("no_session_found", "unsafe_path", "archive_too_large", "ambiguous_session_name"):
+        return HTTPException(status_code=400, detail=detail)
+    if code == "auth_failed":
+        return HTTPException(status_code=409, detail=detail)
+    if code == "conversion_failed":
+        return HTTPException(status_code=400, detail=detail)
+    return HTTPException(status_code=500, detail=detail)
 
 
 @parser_router.post("/{parser_id}/enroll-session", response_model=AccountFullSummary)
@@ -834,15 +1160,157 @@ async def parser_enroll_session(
             status_code=404,
             detail=f"Файл сессии не найден: {norm}.session",
         )
-    upsert_account(norm, display_name=norm, source="manual")
-    await job.clump.add_session(norm)
-    await job.clump.start()
-    _persist_clump_state(parser_id, job.clump)
-    rows = list_all_accounts_merged(_jobs)
-    row = next((r for r in rows if r["session_name"] == norm), None)
-    if row is None:
-        raise HTTPException(status_code=500, detail="Не удалось зарегистрировать аккаунт")
-    return AccountFullSummary(**row)
+    return await _finish_enroll(parser_id, job, norm, source="manual")
+
+
+@parser_router.post(
+    "/{parser_id}/enroll-session-from-archive",
+    response_model=AccountFullSummary,
+)
+async def parser_enroll_session_from_archive(
+    parser_id: str,
+    file: UploadFile = File(...),
+    password: str = Form(""),
+    session_name: Optional[str] = Form(None),
+    overwrite: bool = Form(False),
+) -> AccountFullSummary:
+    """Принимает ZIP (retriv-бандл; пароль опционален) и зачисляет сессию в clump."""
+    import shutil
+    import tempfile
+
+    from discovery_api.session_archive import (
+        ArchiveSessionError,
+        build_identity_from_metadata,
+        bundle_to_telethon_session,
+        detect_bundle,
+        discard_session_identity,
+        extract_session_archive,
+        identity_sidecar_path,
+        probe_session_authorized,
+        save_session_identity,
+        validate_session_name,
+    )
+
+    job = _require_running_clump(parser_id)
+
+    max_mb = get_session_archive_max_mb()
+    max_bytes = max_mb * 1024 * 1024
+    raw = await file.read()
+    if len(raw) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Файл слишком большой: максимум {max_mb} MiB",
+        )
+    if not raw:
+        raise HTTPException(status_code=400, detail="Пустой файл архива")
+
+    extract_dir = tempfile.mkdtemp(prefix="session_archive_")
+    convert_dir = tempfile.mkdtemp(prefix="session_convert_")
+    backup_path: Optional[str] = None
+    identity_backup_path: Optional[str] = None
+    wrote_new_session = False
+    final_path: Optional[str] = None
+    try:
+        try:
+            extract_session_archive(raw, password, extract_dir)
+            bundle = detect_bundle(extract_dir)
+
+            if session_name and session_name.strip():
+                norm = validate_session_name(normalize_session_name(session_name.strip()))
+            elif bundle.suggested_session_name:
+                norm = validate_session_name(bundle.suggested_session_name)
+            else:
+                raise ArchiveSessionError(
+                    "ambiguous_session_name",
+                    "Не удалось определить session_name; укажите явно",
+                )
+
+            if session_file_exists(norm) and not overwrite:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Сессия уже существует: {norm}.session "
+                        "(передайте overwrite=true)"
+                    ),
+                )
+
+            temp_session = os.path.join(convert_dir, f"{norm}.session")
+            await bundle_to_telethon_session(bundle, temp_session)
+            identity = build_identity_from_metadata(bundle.metadata)
+            await probe_session_authorized(temp_session, identity=identity)
+
+            os.makedirs(sessions_dir(), exist_ok=True)
+            final_path = session_file_path(norm)
+            if os.path.isfile(final_path):
+                backup_path = final_path + ".bak"
+                try:
+                    os.remove(backup_path)
+                except FileNotFoundError:
+                    pass
+                old_identity = identity_sidecar_path(final_path)
+                if os.path.isfile(old_identity):
+                    identity_backup_path = backup_path + ".identity.json"
+                    try:
+                        os.replace(old_identity, identity_backup_path)
+                    except OSError:
+                        identity_backup_path = None
+                os.rename(final_path, backup_path)
+            shutil.move(temp_session, final_path)
+            wrote_new_session = True
+            if identity:
+                save_session_identity(final_path, identity)
+            else:
+                discard_session_identity(final_path)
+
+            result = await _finish_enroll(parser_id, job, norm, source="archive")
+            if backup_path and os.path.isfile(backup_path):
+                try:
+                    os.remove(backup_path)
+                except OSError:
+                    pass
+            if identity_backup_path and os.path.isfile(identity_backup_path):
+                try:
+                    os.remove(identity_backup_path)
+                except OSError:
+                    pass
+            return result
+        except ArchiveSessionError as e:
+            raise _map_archive_error(e) from e
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.exception("enroll-session-from-archive failed: %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail="Не удалось зарегистрировать аккаунт",
+            ) from e
+    except Exception:
+        if wrote_new_session and final_path:
+            discard_session_identity(final_path)
+            if backup_path and os.path.isfile(backup_path):
+                try:
+                    if os.path.isfile(final_path):
+                        os.remove(final_path)
+                except OSError:
+                    pass
+                try:
+                    os.rename(backup_path, final_path)
+                except OSError:
+                    pass
+                if identity_backup_path and os.path.isfile(identity_backup_path):
+                    try:
+                        os.replace(identity_backup_path, identity_sidecar_path(final_path))
+                    except OSError:
+                        pass
+            elif os.path.isfile(final_path):
+                try:
+                    os.remove(final_path)
+                except OSError:
+                    pass
+        raise
+    finally:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        shutil.rmtree(convert_dir, ignore_errors=True)
 
 
 @parser_router.get("/actions", response_model=ActionListResponse)
@@ -873,6 +1341,80 @@ async def parser_queue_task_get(task_id: int) -> TaskQueueItemResponse:
     if task is None:
         raise HTTPException(status_code=404, detail="Задача не найдена")
     return _task_snapshot_to_response(task)
+
+
+@parser_router.get("/queue/metrics", response_model=MetricsResponse)
+async def parser_queue_metrics() -> MetricsResponse:
+    return await get_queue_metrics()
+
+
+@parser_router.get("/queue/watchdogs", response_model=WatchdogsResponse)
+async def parser_queue_watchdogs() -> WatchdogsResponse:
+    return await get_queue_watchdogs()
+
+
+@parser_router.get("/queue/alerts", response_model=AlertsResponse)
+async def parser_queue_alerts() -> AlertsResponse:
+    return await get_queue_alerts()
+
+
+@parser_router.get(
+    "/queue/resource-adjustments",
+    response_model=ResourceAdjustmentsResponse,
+)
+async def parser_queue_resource_adjustments(
+    limit: int = Query(50, ge=1, le=200),
+    op_code: str | None = Query(None),
+    error_code: str | None = Query(None),
+) -> ResourceAdjustmentsResponse:
+    return await get_resource_adjustments(
+        limit=limit, op_code=op_code, error_code=error_code
+    )
+
+
+@parser_router.get(
+    "/queue/task-types",
+    response_model=list[TaskTypeListItemResponse],
+)
+async def parser_queue_task_types_list() -> list[TaskTypeListItemResponse]:
+    return await list_task_types()
+
+
+@parser_router.get(
+    "/queue/task-types/{code}",
+    response_model=TaskTypeDetailResponse,
+)
+async def parser_queue_task_type_get(code: str) -> TaskTypeDetailResponse:
+    return await get_task_type(code)
+
+
+@parser_router.patch(
+    "/queue/task-types/{code}",
+    response_model=TaskTypeDetailResponse,
+)
+async def parser_queue_task_type_patch(
+    code: str,
+    body: TaskTypePatchRequest,
+) -> TaskTypeDetailResponse:
+    return await patch_task_type(code, body)
+
+
+@parser_router.get(
+    "/queue/accounts/{session_name}/channels",
+    response_model=AccountChannelsPgResponse,
+)
+async def parser_queue_account_channels(session_name: str) -> AccountChannelsPgResponse:
+    return await get_account_channels_pg(session_name)
+
+
+@parser_router.get(
+    "/queue/accounts/{session_name}/summary",
+    response_model=AccountChannelsSummaryResponse,
+)
+async def parser_queue_account_summary(
+    session_name: str,
+) -> AccountChannelsSummaryResponse:
+    return await get_account_channels_summary(session_name)
 
 
 @parser_router.get("/settings", response_model=BalancerSettingsResponse)
@@ -938,6 +1480,7 @@ async def parser_add_session(parser_id: str, body: SessionBody) -> SessionOpResp
     job = _require_running_clump(parser_id)
     await job.clump.add_session(body.session_name)
     _persist_clump_state(parser_id, job.clump)
+    await _sync_accounts_pg(f"add-session:{body.session_name}")
     return SessionOpResponse(
         parser_id=parser_id,
         session_name_list=list(job.clump.session_name_list),
@@ -955,6 +1498,7 @@ async def parser_remove_session(parser_id: str, body: SessionBody) -> SessionOpR
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     _persist_clump_state(parser_id, job.clump)
+    await _sync_accounts_pg(f"remove-session:{body.session_name}")
     return SessionOpResponse(
         parser_id=parser_id,
         session_name_list=list(job.clump.session_name_list),
@@ -1040,11 +1584,6 @@ async def restore_persisted_parsers() -> None:
         channel_list = rec.get("channel_list")
         if not webhook_url or not isinstance(channel_list, list):
             log.warning("Пропуск некорректной записи парсера: %s", rec)
-            continue
-
-        ch_list = [str(x) for x in channel_list]
-        if not ch_list:
-            log.warning("Пропуск записи без каналов: %s", parser_id)
             continue
 
         try:

@@ -1,0 +1,191 @@
+{
+  "name": "Отправка сообщений ВК/ТЕЛЕГРАМ с кнопками и медиа (финал)",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "channel"
+            },
+            {
+              "name": "sender_id"
+            },
+            {
+              "name": "recipient_id",
+              "type": "number"
+            },
+            {
+              "name": "text"
+            },
+            {
+              "name": "buttons",
+              "type": "array"
+            },
+            {
+              "name": "image_url"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -944,
+        32
+      ],
+      "id": "e06946c6-b152-4437-a2d9-6e514a87ef5f",
+      "name": "Получаем данные для сообщения"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $input.item.json;\n\n// vk | telegram (регистронезависимо)\nconst channel = String(input.channel ?? input.Channel ?? \"\").toLowerCase().trim();\n\n// sender_id = client_id в API: для VK — id клиента парсера, для Telegram — номер аккаунта (+7999...) из регистрации\nconst client_id = String(input.sender_id ?? \"\").trim();\nconst chat_id = input.recipient_id;\n\nconst text = input.text != null ? String(input.text) : \"\";\nconst buttons = input.buttons || [];\n\nconst vkButtons = buttons.map((btn) => [\n  {\n    action: {\n      type: \"open_link\",\n      link: btn.link,\n      label: btn.label != null ? String(btn.label) : \"\",\n    },\n  },\n]);\n\nconst requestBody = {\n  client_id,\n  chat_id,\n  text,\n};\n\nif (buttons.length) {\n  requestBody.keyboard = { inline: true, buttons: vkButtons };\n}\n\nif (input.image_url) {\n  requestBody.image_url = String(input.image_url).trim();\n}\n\n// send_rich требует: непустой text ИЛИ image_url ИЛИ document_url\nconst hasContent =\n  (text && text.trim()) || !!requestBody.image_url;\nif (!hasContent) {\n  throw new Error(\n    \"Для Telegram/VK нужен непустой text или image_url (кнопки одни не подойдут)\",\n  );\n}\n\nreturn { json: { channel, requestBody } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        32
+      ],
+      "id": "a7a5b662-030c-4db7-88a4-ba7ebf44b2b5",
+      "name": "Собираем тело запроса"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "97afbc6a-0c9b-4a12-bfbb-63d357172cb7",
+              "leftValue": "={{ $json.channel }}",
+              "rightValue": "vk",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -496,
+        32
+      ],
+      "id": "6a68fd18-b6e1-43fe-9335-af815a4f80e4",
+      "name": "Отправляем в ВК?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/messages/vk/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -160,
+        -96
+      ],
+      "id": "0614dd01-7be0-453d-8c34-8148101df319",
+      "name": "Отправляем сообщение с кнопками",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/messages/telegram/send_rich",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -160,
+        160
+      ],
+      "id": "821ddf0b-78d0-459e-8774-85c1ad3da0e6",
+      "name": "Отправляем сообщение Telegram (send_rich)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Получаем данные для сообщения": {
+      "main": [
+        [
+          {
+            "node": "Собираем тело запроса",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Собираем тело запроса": {
+      "main": [
+        [
+          {
+            "node": "Отправляем в ВК?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправляем в ВК?": {
+      "main": [
+        [
+          {
+            "node": "Отправляем сообщение с кнопками",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Отправляем сообщение Telegram (send_rich)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

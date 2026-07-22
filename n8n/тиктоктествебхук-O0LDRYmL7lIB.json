@@ -1,0 +1,39 @@
+{
+  "name": "ТикТокТестВебхук",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tiktoktest",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "921c0d0f-9638-4108-9471-f37e770dbcd7",
+      "name": "Webhook",
+      "webhookId": "70738388-52ad-40c9-b7c9-2478a3abf329",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "McE05Fa9KpmZvmWX",
+          "name": "TikTokWebhook"
+        }
+      }
+    }
+  ],
+  "connections": {},
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

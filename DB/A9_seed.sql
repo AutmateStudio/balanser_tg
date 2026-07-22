@@ -1,6 +1,14 @@
 -- A9: seed справочников PG Queue Balancer (полное ТЗ + карта Telethon ops из discovery)
 -- Порядок: после BD_schema.sql
--- effective_rph = rph_limit * (1 - reserve_percent / 100), reserve_percent = 10 по умолчанию
+-- effective_rph = floor(rph_limit × (1 − reserve_percent/100)), reserve_percent = 10
+--
+-- RPH get_entity/JoinChannel: базовые значения (7 / 30), БЕЗ политики A14 (223).
+-- A14_parser_add_channel_rph_20_per_hour.sql НЕ входит в migrate_queue.sh —
+-- только ручной накат: python scripts/apply_a14_rph_migration.py
+--
+-- Политика RPH (A17): telegram_discover = до 120 async-поисков/ч на аккаунт при пороге 20%
+-- (contacts.Search/SearchGlobal=1670, GetFullChannel=2500, GetRecommendations=840,
+-- get_input_entity=340; GetParticipants/iter_messages — без изменений).
 --
 -- HTTP/фоновые задачи discovery (1–30) → resource_op_types ниже;
 -- PG-очередь (task_types) — только типы §8 ТЗ + parser_remove_channel (D9);
@@ -12,33 +20,30 @@
 
 INSERT INTO resource_op_types (code, name, rph_limit, is_enabled) VALUES
   -- Auth (задачи 1, 3, 25)
-  ('auth.qr_login', 'QR: qr_login + wait + recreate + get_me + save', 3, true),
-  ('connect_disconnect', 'Connect / disconnect сессии', 1, true),
-  ('get_me', 'Текущий пользователь (валидация сессии)', 1, true),
-  ('is_user_authorized', 'Проверка авторизации', 1, true),
-  -- Resolve / entity (6, 8, 12, 19, 23, 24)
+  ('auth.qr_login', 'QR: qr_login + wait + recreate + get_me + save', 15, true),
+  ('connect_disconnect', 'Connect / disconnect сессии', 150, true),
+  ('get_me', 'Текущий пользователь (валидация сессии)', 150, true),
+  ('is_user_authorized', 'Проверка авторизации', 150, true),
   ('get_entity', 'Resolve username / ссылки / peer', 7, true),
-  ('get_input_entity', 'get_input_entity() для InputPeer', 7, true),
-  -- Discovery search (4, 5)
-  ('contacts.Search', 'Поиск контактов / каналов', 2, true),
-  ('messages.SearchGlobal', 'Глобальный поиск сообщений', 120, true),
-  ('channels.GetChannelRecommendations', 'Рекомендации каналов', 30, true),
-  -- Channel metadata & join (6, 8, 12, 19, 23)
-  ('channels.GetFullChannel', 'Полные данные канала', 80, true),
+  ('get_input_entity', 'get_input_entity() для InputPeer', 340, true),
+  ('contacts.Search', 'Поиск контактов / каналов', 1670, true),
+  ('messages.SearchGlobal', 'Глобальный поиск сообщений', 1670, true),
+  ('channels.GetChannelRecommendations', 'Рекомендации каналов', 840, true),
+  ('channels.GetFullChannel', 'Полные данные канала', 2500, true),
   ('channels.JoinChannel', 'Подписка / join канала или discussion', 30, true),
-  ('channels.LeaveChannel', 'Выход из канала или discussion', 30, true),
-  ('channels.GetParticipant', 'Проверка участника (InputPeerSelf)', 6000, true),
-  ('channels.GetParticipants', 'Список участников (megagroup / lidgen)', 500, true),
-  ('get_permissions', 'get_permissions() для legacy Chat', 30, true),
-  -- Messages & users (4–6, 21)
-  ('iter_messages', 'Итерация сообщений (скоринг / collect)', 450, true),
-  ('users.GetFullUser', 'Полные данные пользователя (NewMessage sender)', 1500, true),
-  -- Bot API (7, 26) — не MTProto; учёт отдельно, лимиты завышены
-  ('bot.send_message', 'Bot API: send_message', 1000, true),
-  ('bot.send_photo', 'Bot API: send_photo', 500, true)
+  ('channels.LeaveChannel', 'Выход из канала или discussion', 150, true),
+  ('channels.GetParticipant', 'Проверка участника (InputPeerSelf)', 30000, true),
+  ('channels.GetParticipants', 'Список участников (megagroup / lidgen)', 2500, true),
+  ('get_permissions', 'get_permissions() для legacy Chat', 150, true),
+  ('iter_messages', 'Итерация сообщений (скоринг / collect)', 2250, true),
+  ('users.GetFullUser', 'Полные данные пользователя (NewMessage sender)', 7500, true),
+  ('bot.send_message', 'Bot API: send_message', 5000, true),
+  ('bot.send_photo', 'Bot API: send_photo', 2500, true)
 ON CONFLICT (code) DO UPDATE SET
   name = EXCLUDED.name,
-  rph_limit = EXCLUDED.rph_limit,
+  -- rph_limit НЕ перезаписываем: иначе каждый деплой затирал бы ручные/прод
+  -- значения и фактически «накатывал A14» через seed (223). Новые коды
+  -- получают rph_limit только из INSERT выше.
   is_enabled = EXCLUDED.is_enabled,
   updated_at = now();
 
@@ -53,32 +58,44 @@ INSERT INTO task_types (
   (
     'parser_add_channel',
     'Добавить канал на parser-сессию',
-    'HTTP #12/#19: resolve_listen_target() — join source + discussion, проверка доступа. Одна строка task_queue = один канал.',
-    true, 500, 80, false, NULL
+    'HTTP #12/#19: resolve_listen_target() — join source + discussion, проверка доступа. Одна строка task_queue = один канал. RPH seed A14 + порог 0% (использовать effective RPH до исчерпания).',
+    true, 500, 0, false, NULL
   ),
   (
     'move_channel',
     'Перенос канала между аккаунтами',
     'HTTP #16 migrate, #23 rebalance_idle → PG F2: join на target; проверка на source. §18–19 ТЗ.',
-    true, 100, 80, true, 20
+    true, 100, 20, true, 20
   ),
   (
     'collect_extra_data',
     'Сбор последних сообщений (временный вход)',
     'Join → GetFull (broadcast) → iter_messages → GetParticipants (megagroup) → Leave. Не оставляет канал в listener. Продюсер F4.',
-    false, 200, 90, false, 20
+    true, 200, 20, false, 20
   ),
   (
     'update_channel',
     'Обновление метаданных + сообщения',
     'Как collect_extra_data + GetParticipants (megagroup) + полные метаданные GetFullChannel. Продюсер F5.',
-    false, 50, 90, false, 20
+    true, 50, 20, false, 20
   ),
   (
     'parser_remove_channel',
     'Снять с listener и выйти из канала',
     'get_entity → GetFull (broadcast) → LeaveChannel×2 (listen + source). + remove_event_handler локально. D9.',
-    true, 400, 80, false, NULL
+    true, 400, 20, false, NULL
+  ),
+  (
+    'telegram_discover',
+    'Поиск каналов и групп (POST /discover)',
+    'HTTP POST /discover async: contacts.Search + SearchGlobal + recommendations + lidgen scoring + upsert source_channels. RPH A17: до 120 discover/ч на аккаунт при пороге 20%.',
+    true, 80, 20, false, NULL
+  ),
+  (
+    'telegram_discover_leads',
+    'Intent-поиск лидов (POST /discover-leads)',
+    'HTTP POST /discover-leads async: intent SearchGlobal pages + post scoring + graph (fwd/mentions/replies) + upsert metadata.lead_intent. Изолирован от /discover.',
+    true, 75, 20, false, NULL
   )
 ON CONFLICT (code) DO UPDATE SET
   name = EXCLUDED.name,
@@ -182,6 +199,46 @@ WHERE tt.code = 'parser_remove_channel'
 ON CONFLICT (task_type_id, op_type_id, account_role) DO UPDATE SET
   units_per_execution = EXCLUDED.units_per_execution;
 
+-- telegram_discover: оценочный расход на один async-поиск (seeds + scoring + recommendations)
+INSERT INTO task_type_ops (task_type_id, op_type_id, units_per_execution, account_role)
+SELECT tt.id, ot.id, v.units, v.role::task_op_account_role
+FROM task_types tt
+JOIN (VALUES
+  ('contacts.Search',                 10, 'primary'),
+  ('messages.SearchGlobal',           10, 'primary'),
+  ('channels.GetChannelRecommendations', 5, 'primary'),
+  ('get_input_entity',                2, 'primary'),
+  ('channels.GetFullChannel',        15, 'primary'),
+  ('channels.GetParticipants',       10, 'primary'),
+  ('iter_messages',                  10, 'primary')
+) AS v(op_code, units, role) ON true
+JOIN resource_op_types ot ON ot.code = v.op_code
+WHERE tt.code = 'telegram_discover'
+ON CONFLICT (task_type_id, op_type_id, account_role) DO UPDATE SET
+  units_per_execution = EXCLUDED.units_per_execution;
+
+-- telegram_discover_leads: SearchGlobal pages + GetFull + posts + optional GetParticipants/ResolveUsername
+INSERT INTO task_type_ops (task_type_id, op_type_id, units_per_execution, account_role)
+SELECT tt.id, ot.id, v.units, v.role::task_op_account_role
+FROM task_types tt
+JOIN (VALUES
+  ('contacts.Search',                 8, 'primary'),
+  ('messages.SearchGlobal',          20, 'primary'),
+  ('channels.GetFullChannel',        20, 'primary'),
+  ('channels.GetParticipants',       10, 'primary'),
+  ('iter_messages',                  20, 'primary'),
+  ('get_entity',                      5, 'primary')
+) AS v(op_code, units, role) ON true
+JOIN resource_op_types ot ON ot.code = v.op_code
+WHERE tt.code = 'telegram_discover_leads'
+ON CONFLICT (task_type_id, op_type_id, account_role) DO UPDATE SET
+  units_per_execution = EXCLUDED.units_per_execution;
+
+-- Удалить устаревший discover_groups (если был накатан)
+DELETE FROM task_type_ops
+WHERE task_type_id IN (SELECT id FROM task_types WHERE code = 'discover_groups');
+DELETE FROM task_types WHERE code = 'discover_groups';
+
 -- remove_event_handler / allowed_chat_ids / entity_cache — локально, не в resource_op_types
 
 -- =============================================================================
@@ -193,7 +250,10 @@ ON CONFLICT (task_type_id, op_type_id, account_role) DO UPDATE SET
 -- #4  POST /discover             → contacts.Search, messages.SearchGlobal,
 --                                 GetChannelRecommendations, get_input_entity,
 --                                 GetFullChannel, iter_messages, GetParticipants
--- #5  POST /discover-groups      → как #4 + seeds
+-- #4  POST /discover             → task_queue telegram_discover (async) + upsert source_channels
+-- #4b POST /discover-leads       → intent SearchGlobal pages + scoring + graph;
+--                                 task_queue telegram_discover_leads + metadata.lead_intent
+-- #5  POST /discover-groups      → deprecated wrapper → /discover
 -- #6  POST /add-channel-by-link  → как parser_add_channel + GetParticipants (скоринг)
 -- #7  POST /bot/send-message     → bot.send_message | bot.send_photo
 -- #8  POST /parser/start         → N × resolve_listen_target + connect + NewMessage*

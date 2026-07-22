@@ -22,17 +22,23 @@ class ErrorCode(StrEnum):
     FLOOD_WAIT = "flood_wait"
     CLUMP_ERROR = "clump_error"
     CLUMP_NOT_LOADED = "clump_not_loaded"
+    ACCOUNT_UNAUTHORIZED = "account_unauthorized"
+    CHANNELS_TOO_MUCH = "channels_too_much"
 
     # --- permanent ---
     INVALID_PAYLOAD = "invalid_payload"
     ACCOUNT_NOT_FOUND = "account_not_found"
     UNSUPPORTED_TASK_TYPE = "unsupported_task_type"
     UNKNOWN_TASK_TYPE = "unknown_task_type"
+    USERNAME_NOT_FOUND = "username_not_found"
+    CHANNEL_HAS_NO_DISCUSSION = "channel_has_no_discussion"
+    BANNED_IN_CHANNEL = "banned_in_channel"
 
     # --- resource / postpone ---
     INSUFFICIENT_RESOURCE = "insufficient_resource"
     MISSING_AVAILABILITY = "missing_availability"
     NO_AVAILABLE_ACCOUNT = "no_available_account"
+    PACING = "pacing"
     NO_OPS_FOR_ROLE = "no_ops_for_role"
     ACCOUNT_RESERVE_FAILED = "account_reserve_failed"
     DUAL_ACCOUNT_RESERVE_FAILED = "dual_account_reserve_failed"
@@ -45,6 +51,7 @@ class ErrorCode(StrEnum):
 
     # --- зарезервировано под E2 (Telethon) ---
     CHANNEL_PRIVATE = "channel_private"
+    JOIN_PENDING = "join_pending"
     BANNED = "banned"
     PEER_FLOOD = "peer_flood"
     TRANSIENT_ERROR = "transient_error"
@@ -54,6 +61,7 @@ class ErrorCode(StrEnum):
 _COMPOSITE_PREFIXES = frozenset(
     {
         ErrorCode.INSUFFICIENT_RESOURCE,
+        ErrorCode.PACING,
         ErrorCode.NO_OPS_FOR_ROLE,
         ErrorCode.ACCOUNT_RESERVE_FAILED,
         ErrorCode.DUAL_ACCOUNT_RESERVE_FAILED,

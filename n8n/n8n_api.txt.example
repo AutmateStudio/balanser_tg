@@ -1,0 +1,3 @@
+# JWT API-ключ n8n (Public API). Скопируйте в n8n/n8n_api.txt — файл в .gitignore.
+# Получить: n8n → Settings → API → Create API Key
+YOUR_N8N_JWT_API_KEY_HERE

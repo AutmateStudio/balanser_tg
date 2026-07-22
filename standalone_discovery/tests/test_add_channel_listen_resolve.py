@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from fastapi.testclient import TestClient
 
 from discovery_api.chat_resolve import ChannelHasNoDiscussionError, ListenTarget
+from telethon.errors import FloodWaitError
 
 
 class AddChannelListenResolveTests(unittest.TestCase):
@@ -66,12 +67,36 @@ class AddChannelListenResolveTests(unittest.TestCase):
             new_callable=AsyncMock,
             return_value=target,
         ):
-            chat_id, err = __import__("asyncio").run(
+            chat_id, err, code = __import__("asyncio").run(
                 resolve_channel_to_chat_id(client, "https://t.me/news")
             )
 
         self.assertIsNone(err)
+        self.assertIsNone(code)
         self.assertEqual(chat_id, -100222)
+
+    def test_resolve_channel_to_chat_id_join_flood_wait_returns_flood_string(self) -> None:
+        from discovery_api.parser_functions import resolve_channel_to_chat_id
+
+        client = MagicMock()
+        client.is_connected.return_value = True
+        unique_ref = f"https://t.me/flood_join_test_{id(self)}"
+
+        with patch(
+            "discovery_api.parser_functions.get_cached_chat_ids",
+            return_value={},
+        ), patch(
+            "discovery_api.parser_functions.resolve_listen_target",
+            new_callable=AsyncMock,
+            side_effect=FloodWaitError(request=None, capture=270),
+        ):
+            chat_id, err, code = __import__("asyncio").run(
+                resolve_channel_to_chat_id(client, unique_ref)
+            )
+
+        self.assertIsNone(chat_id)
+        self.assertIn("FloodWait 270s", err or "")
+        self.assertEqual(code, "flood_wait")
 
 
 if __name__ == "__main__":

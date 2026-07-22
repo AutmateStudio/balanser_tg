@@ -1,0 +1,2191 @@
+{
+  "name": "Обработка Сообщений из source_messages",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH channel_ids AS (\n  SELECT source_channel_id\n  FROM public.project_source_channels\n  WHERE monitoring_project_id = {{ $('Общие даннные').item.json.project_id }}\n),\nproject_filter AS (\n  SELECT\n    CASE\n      WHEN jsonb_typeof(search_filters) = 'array'\n        THEN search_filters\n      WHEN jsonb_typeof(search_filters -> 'score') = 'array'\n        THEN search_filters -> 'score'\n      WHEN jsonb_typeof(search_filters -> 'rules') = 'array'\n        THEN search_filters -> 'rules'\n      WHEN jsonb_typeof(search_filters -> 'filters') = 'array'\n        THEN search_filters -> 'filters'\n      WHEN jsonb_typeof(search_filters -> 'score_filters') = 'array'\n        THEN search_filters -> 'score_filters'\n      WHEN jsonb_typeof(search_filters -> 'filter1') = 'array'\n        THEN search_filters -> 'filter1'\n      ELSE NULL\n    END AS rules\n  FROM public.monitoring_projects\n  WHERE id = {{ $('Общие даннные').item.json.project_id }}\n),\neffective_start AS (\n  SELECT\n    CASE\n      WHEN ({{ $('Сообщения на обработку последнее').item.json.old_id }})::bigint IS NULL\n      THEN (\n        SELECT MIN(sub.id)\n        FROM (\n          SELECT sm.id\n          FROM public.source_messages sm, project_filter\n          WHERE sm.source_channel_id IN (SELECT source_channel_id FROM channel_ids)\n            AND sm.id <= ({{ $('Сообщения на обработку последнее').item.json.new_id }})::bigint\n            AND (\n              project_filter.rules IS NULL\n              OR jsonb_typeof(project_filter.rules) <> 'array'\n              OR EXISTS (\n                SELECT 1 FROM jsonb_array_elements(project_filter.rules) f\n                WHERE (sm.filter1_top1_label = f->>'label' AND sm.filter1_top1_score >= (f->>'min_prob')::numeric)\n                   OR (sm.filter1_top2_label = f->>'label' AND sm.filter1_top2_score >= (f->>'min_prob')::numeric)\n              )\n            )\n          ORDER BY sm.id DESC\n          LIMIT {{ $('Общие даннные').item.json.limit_message_find }}\n        ) sub\n      )\n      ELSE ({{ $('Сообщения на обработку последнее').item.json.old_id }})::bigint\n    END AS start_id\n),\nraw AS (\n  SELECT\n    sm.id,\n    sm.source_channel_id,\n    sc.name                                  AS channel_name,\n    sm.external_message_id,\n    sm.published_at,\n    sm.message_text,\n    sm.message_url,\n    sm.sender_external_id,\n    sm.sender_payload->>'sender_name'        AS sender_name,\n    sm.sender_payload->>'sender_username'    AS sender_username,\n    sm.sender_payload->>'sender_phone'       AS sender_phone,\n    sm.sender_payload,\n    sm.filter1_top1_label,\n    sm.filter1_top1_score,\n    sm.filter1_top2_label,\n    sm.filter1_top2_score,\n    mp.lead_search_prompt,\n    mp.outreach_message_template\n  FROM public.source_messages sm\n  JOIN public.source_channels sc ON sc.id = sm.source_channel_id\n  JOIN public.monitoring_projects mp ON mp.id = {{ $('Общие даннные').item.json.project_id }}\n  CROSS JOIN effective_start\n  CROSS JOIN project_filter\n  WHERE sm.source_channel_id IN (SELECT source_channel_id FROM channel_ids)\n    AND sm.id <= ({{ $('Сообщения на обработку последнее').item.json.new_id }})::bigint\n    AND sm.id >= effective_start.start_id\n    AND (\n      project_filter.rules IS NULL\n      OR jsonb_typeof(project_filter.rules) <> 'array'\n      OR EXISTS (\n        SELECT 1 FROM jsonb_array_elements(project_filter.rules) f\n        WHERE (sm.filter1_top1_label = f->>'label' AND sm.filter1_top1_score >= (f->>'min_prob')::numeric)\n           OR (sm.filter1_top2_label = f->>'label' AND sm.filter1_top2_score >= (f->>'min_prob')::numeric)\n      )\n    )\n  ORDER BY sm.id DESC\n  LIMIT {{ $('Общие даннные').item.json.limit_message_find }}\n)\nSELECT * FROM raw\nORDER BY id ASC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1408,
+        304
+      ],
+      "id": "d8aafe14-1fe5-40f1-baff-5c465860ae55",
+      "name": "Сообщения на обработку",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH current_state AS (\n  SELECT last_message_id AS old_id\n  FROM monitoring_projects\n  WHERE id = {{ $json.project_id }}\n),\nlatest AS (\n  SELECT MAX(sm.id) AS new_id\n  FROM source_messages sm\n  WHERE sm.source_channel_id IN (\n    SELECT source_channel_id\n    FROM project_source_channels\n    WHERE monitoring_project_id = {{ $json.project_id }}\n  )\n  HAVING MAX(sm.id) IS NOT NULL\n),\nupdated AS (\n  UPDATE monitoring_projects\n  SET\n    last_message_id = latest.new_id,\n    updated_at      = now()\n  FROM latest\n  WHERE id = {{ $json.project_id }}\n  RETURNING monitoring_projects.last_message_id AS new_id\n)\nSELECT\n  current_state.old_id,\n  updated.new_id,\n  (current_state.old_id IS DISTINCT FROM updated.new_id) AS has_new\nFROM updated\nCROSS JOIN current_state;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2096,
+        320
+      ],
+      "id": "f55a43d9-e0c6-458c-8d01-c3a2b0e77e88",
+      "name": "Сообщения на обработку последнее",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1056,
+        304
+      ],
+      "id": "70a63907-b977-4d09-92a9-b96eed95305d",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "errorMessage": "2 уровень"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        128
+      ],
+      "id": "becc9bf4-7f85-429d-8d45-9de809a8dd52",
+      "name": "Stop and Error2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Функция для очистки от Markdown (обратных кавычек)\nfunction stripCodeFences(s) {\n  s = s.trim();\n  s = s.replace(/^`{3}(?:json)?\\s*/i, '');\n  s = s.replace(/`{3}$/i, '');\n  return s.trim();\n}\n\n// Функция безопасного парсинга JSON\nfunction tryParseJson(raw) {\n  try { return JSON.parse(raw); } catch (_) {}\n  \n  let fixed = raw.replace(/\\uFEFF/g, '');\n  fixed = fixed.replace(/,\\s*([}\\]])/g, '$1');\n  \n  try { return JSON.parse(fixed); } \n  catch (e) { return { error: 'invalid_json', message: e.message, raw: raw }; }\n}\n\n// Берем данные строго из указанного узла\nconst inputItems = $('Проверка сообщения в AI').all();\n\nreturn inputItems.map((item) => {\n  const j = item.json || {};\n  \n  // 1. Достаем сам текст ответа строго из структуры OpenRouter (или фолбэк для других)\n  let rawContent = '';\n  if (j.choices && j.choices[0] && j.choices[0].message) {\n    rawContent = j.choices[0].message.content || '';\n  } else if (typeof j.text === 'string') {\n    rawContent = j.text;\n  } else if (typeof j.message === 'string') {\n    rawContent = j.message;\n  }\n  \n  // 2. Автоматически забираем токены и деньги для статистики\n  const usage = j.usage || {};\n  const metaData = {\n    _total_tokens: usage.total_tokens || 0,\n    _cost_usd: usage.cost || 0\n  };\n\n  rawContent = String(rawContent).trim();\n\n  if (!rawContent) {\n    return { json: { error: 'empty_ai_output', raw: '', ...metaData } };\n  }\n\n  // Нормализуем переносы\n  const normalized = rawContent.replace(/\\r\\n/g, '\\n').trim();\n\n  // 3. ПРАВИЛЬНАЯ ПРОВЕРКА НА PASS\n  // Если ответ начинается с \"PASS\" (например, \"PASS 0%\" или \"PASS 57%\")\n  if (normalized.startsWith('PASS')) {\n    return { \n      json: { \n        тип_лида: 'PASS',\n        совпадение: normalized.replace('PASS', '').trim(), \n        ...metaData\n      } \n    };\n  }\n\n  // 4. Если это не PASS, значит ИИ должен был вернуть JSON\n  let candidate = stripCodeFences(normalized);\n  const first = candidate.search(/[{[]/);\n  if (first > 0) candidate = candidate.slice(first).trim();\n\n  const parsed = tryParseJson(candidate);\n\n  // Если ИИ выдал кривой JSON, передаем ошибку дальше, не ломая воркфлоу\n  if (parsed.error) {\n    return { json: { ...parsed, ...metaData } };\n  }\n\n  // 5. Успех! Возвращаем чистый распарсенный JSON + данные по токенам и стоимости\n  return { json: { ...parsed, ...metaData } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        336
+      ],
+      "id": "e2739fc3-46d1-4cac-98ca-cddb6db32732",
+      "name": "Из текста в JSON"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7c347-a914-4732-bbe0-1898b54661e9",
+              "name": "text",
+              "value": "=Принят лид ✅ \n💬 Сообщение: \n<pre>\n{{ $('Loop Over Items').item.json.message_text }}\n</pre>\n\n📊 Тип лида: {{ $json[\"тип_лида\"] }}\n\n🔗 Ссылка на сообщение: {{ $('Loop Over Items').item.json.message_url }}\n\nПеременные: \n- Название чата: {{ $('Loop Over Items').item.json.chenal_name }}\n- Имя отправителя: {{ $('Loop Over Items').item.json.sender_name }}\n- Username отправителя: @{{ $('Loop Over Items').item.json.sender_username }}\n- Телефон: {{ $('Loop Over Items').item.json.sender_phone }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        496,
+        352
+      ],
+      "id": "6e4f308d-6dd7-4706-92a0-8b8c04ab3217",
+      "name": "Формируем текст"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a6008532-6699-4974-ae4d-c4cfb772d13e",
+              "leftValue": "={{ $json[\"тип_лида\"] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        176,
+        336
+      ],
+      "id": "ae969148-f7db-498c-9420-825f142028dc",
+      "name": "Пропускаем"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d93c63d9-8d0f-4218-a289-59083a16b41a",
+              "leftValue": "={{$('Ответ нейросети').item.json.response}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -144,
+        336
+      ],
+      "id": "b2067cde-28c0-476f-893b-a8d6a3bd909e",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (JavaScript)\n// Ожидает во входном item поля:\n// - text: текст сообщения\n// - username: username в Telegram (можно с @ или без)\n\nconst items = $input.all();\n\nreturn items.map((item) => {\n  const text = (item.json.text ?? '').toString();\n  let username = (item.json.username ?? '').toString().trim();\n\n  // Убираем @ в начале, если есть\n  username = username.replace(/^@/, '');\n\n  // Кодируем текст для URL\n  const encodedText = encodeURIComponent(text);\n\n  // Собираем ссылку\n  const tgLink = `https://t.me/${username}?text=${encodedText}`;\n\n  return {\n    json: {\n      ...item.json,\n      tg_link: tgLink,\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        352
+      ],
+      "id": "8f702371-eda7-429e-8d1e-ffdee9491dcc",
+      "name": "Из текста в JSON1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7c347-a914-4732-bbe0-1898b54661e9",
+              "name": "response",
+              "value": "={{ $json.choices[0].message.content }}",
+              "type": "string"
+            },
+            {
+              "id": "9eb3fc0b-d576-4e60-a13f-9bbcbd7ae2cb",
+              "name": "token_request",
+              "value": "={{ $json.usage.prompt_tokens }}",
+              "type": "number"
+            },
+            {
+              "id": "efd481ff-a1af-4924-acf9-c9efa1beb47f",
+              "name": "token_response",
+              "value": "={{ $json.usage.completion_tokens }}",
+              "type": "number"
+            },
+            {
+              "id": "365123be-44ad-45ec-af13-99aa9d761593",
+              "name": "cost",
+              "value": "={{ $json.usage.cost }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -656,
+        320
+      ],
+      "id": "562e18d0-3244-4524-92b4-8a6c5b94637d",
+      "name": "Ответ нейросети"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  (() => {\n    const msg = $('Loop Over Items').item.json ?? {};\n\n    const systemPrompt = `Ты — AI-квалификатор лидов и помощник по подготовке ответа в Telegram.\n\nТвоя задача:\n1) По входящему сообщению определить, является ли написавший лидом по критериям из блока «ПРОФИЛЬ КОМПАНИИ».\n2) Если это лид — вернуть тип лида, username для ответа и текст ответа.\n3) Текст ответа нужно формировать НЕ с нуля, а только через минимальную адаптацию «Дефолтного сообщения».\n4) Если это не лид — вернуть только PASS и процент совпадения.\n\nПРОФИЛЬ КОМПАНИИ:\n'''\n${msg.lead_search_prompt ?? ''}\n'''\n\nДЕФОЛТНОЕ СООБЩЕНИЕ В ОТВЕТ (ШАБЛОН, ОСНОВА ДЛЯ АДАПТАЦИИ):\n\"\"\"\n${msg.outreach_message_template ?? ''}\n\"\"\"\n\nВХОД:\n* «ПРОФИЛЬ КОМПАНИИ» (главные правила — что считать лидом и что отсеивать)\n* данные входящего сообщения (text, chat_title, sender_name, sender_username, message_link, sender_phone, и др.)\n* username отправителя (с которого пришло сообщение)\n* контакты/username, если они указаны прямо в тексте сообщения\n\nГЛАВНОЕ ПРАВИЛО:\nКритерии «что является лидом» и «что не является лидом» нужно брать ТОЛЬКО из текста «ПРОФИЛЬ КОМПАНИИ».\nНельзя использовать внешние знания, догадки и допущения.\nЕсли ощущение, что процент совпадения больше 60%, то это наш лид.\n\nПРАВИЛО ПО USERNAME:\nНужно вернуть поле «username».\nЕсли во входящем сообщении явно указан контакт/username, кому писать (например, @username в тексте, контакт для связи, «пишите сюда») — используй его.\nЕсли НЕ указано, кому писать — используй sender_username (username отправителя), который передан во входе.\nНе выдумывай username.\nЕсли username найден в тексте в формате @name, верни в том же виде, как нужен вашему процессу (желательно без лишних пробелов).\n\nКРИТИЧЕСКОЕ ПРАВИЛО ПО ТЕКСТУ (ОЧЕНЬ ВАЖНО):\nПоле «text» нужно делать на основе «ДЕФОЛТНОГО СООБЩЕНИЯ В ОТВЕТ».\nНельзя писать новый текст с нуля, если это не требуется.\n\nНужно выполнить МИНИМАЛЬНЫЕ правки под запрос/контекст входящего сообщения:\n* сохранить структуру, тон, смысл и основную формулировку шаблона\n* менять только отдельные слова/фразы, которые делают ответ уместным под конкретный запрос\n* если шаблон уже подходит — вернуть его почти без изменений\n* не переписывать целиком\n* не добавлять новые блоки, преимущества, офферы, ссылки, кейсы, которых нет в шаблоне\n* не добавлять выдуманные детали о клиенте/задаче\n* если данных мало — сделать нейтральную минимальную адаптацию (или оставить шаблон почти без изменений)\n\nПРИОРИТЕТЫ АДАПТАЦИИ ТЕКСТА (по убыванию важности):\n1) Уместность под запрос (например, упомянуть релевантную услугу/формулировку из сообщения)\n2) Сохранение исходного шаблона\n3) Минимум изменений\n\nЧТО СЧИТАЕТСЯ \"МИНИМАЛЬНЫМИ ПРАВКАМИ\":\n* заменить 1–3 фразы в шаблоне под контекст запроса\n* добавить короткое уточнение по теме запроса (если это прямо следует из сообщения)\n* слегка изменить приветствие/обращение (по необходимости)\nНе считается минимальными правками:\n* полностью новый текст\n* полная перестройка структуры\n* добавление длинных объяснений, которых нет в шаблоне\n\nФОРМАТ ВЫВОДА:\n1) Если сообщение НЕ подходит под «ПРОФИЛЬ КОМПАНИИ» — ответ строго:\nPASS + процент совпадения\nНапример: PASS 20% / PASS 57%\nТолько это, без JSON, без пояснений, без дополнительных символов.\n\n2) Если сообщение подходит — ответ строго валидный JSON.\nБез Markdown, без код-блоков, без пояснений вне JSON, без эмодзи, без тегов и украшений.\nВ JSON возвращай только 3 поля: «тип_лида», «username», «text».\n\nТИП ЛИДА (только если подходит):\n* \"Прямой лид\" — явно просит то, что соответствует профилю.\n* \"Косвенный лид\" — потенциально подходит под профиль, но формулировка размыта / мало деталей / неясно, что это точно ваша зона (но похоже на профиль).\n\nСТРОГАЯ СХЕМА JSON (только если подходит):\n{\n  \"тип_лида\": \"Прямой лид | Косвенный лид\",\n  \"username\": \"username кому написать (из текста сообщения, если указан; иначе sender_username)\",\n  \"text\": \"дефолтное сообщение с минимальными правками под запрос\"\n}\n\nЗАПРЕЩЕНО:\n* Обрабатывать или возвращать поля: «ии_анализ», «готовность_платить», «валидность_клиента»\n* Добавлять любые другие поля в JSON\n* Писать что-либо кроме строго указанного формата ответа\n* Выдумывать данные, которых нет во входе\n* Генерировать новый текст вместо минимальной адаптации дефолтного сообщения (без необходимости)\n\nНичего лишнего в ответ отправлять запрещено.`;\n\n    const userPrompt = `ПОЛЯ СООБЩЕНИЯ:\n1) text: ${msg.message_text ?? ''}\n2) chat_title: ${msg.channel_name ?? ''}\n3) sender_name: ${msg.sender_name ?? ''}\n4) sender_username: ${msg.sender_username ?? ''}\n5) message_link: ${msg.message_url ?? ''}\n6) sender_phone: ${msg.sender_phone ?? ''}`;\n\n    return {\n      model: 'openai/gpt-oss-20b',\n      messages: [\n        { role: 'system', content: systemPrompt },\n        { role: 'user',   content: userPrompt  }\n      ]\n    };\n  })()\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -848,
+        320
+      ],
+      "id": "465cf788-f6e6-422e-a81b-0b707f16d7fa",
+      "name": "Проверка сообщения в AI",
+      "credentials": {
+        "openRouterApi": {
+          "id": "hwaDdGPn5HFuYp7N",
+          "name": "Лидоген ВК"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2624,
+        480
+      ],
+      "id": "ac22b130-b80d-49e7-a16a-abf1bcf9027e",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bbcac59e-db1a-4eb9-b2e0-59d7e31c161e",
+              "name": "project_id",
+              "value": 1,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2448,
+        480
+      ],
+      "id": "bea8b66b-fff2-4e34-885d-76861869c94a",
+      "name": "Тест"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "25bbe974-399a-4617-bfac-2f79e2b948f6",
+              "name": "limit_message_find",
+              "value": 100,
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2288,
+        320
+      ],
+      "id": "b9e6f667-a07b-475f-a307-86cd150dbb3c",
+      "name": "Общие даннные"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "project_id"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2448,
+        320
+      ],
+      "id": "9523631a-6652-41bb-a3c2-1012c4d19ec3",
+      "name": "НАЧАЛО"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f31ca21f-40ba-4135-8cdb-43c6633833c5",
+              "leftValue": "={{ $json.has_new }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1856,
+        320
+      ],
+      "id": "a7c90345-b164-4d9d-a6ad-c7b870e33d03",
+      "name": "Есть ли новые строки"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "Oyd2YrLSCL0IbXyX",
+          "mode": "list",
+          "cachedResultName": "Результат ответов",
+          "cachedResultUrl": "/projects/IyBpQnHyeNAIQCPe/datatables/Oyd2YrLSCL0IbXyX"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "text": "={{ $('Loop Over Items').item.json.message_text }}",
+            "result_type": "={{$('Ответ нейросети').item.json.response}}",
+            "chenal_id": "={{ $('Loop Over Items').item.json.source_channel_id }}",
+            "resipment_name": "={{ $('Loop Over Items').item.json.sender_payload.sender_name || \"\" }}",
+            "channel_messages_id": "={{ $('Loop Over Items').item.json.id }}",
+            "system_valid": "={{ !($json.response?.includes('PASS')) }}",
+            "token_response": "={{ $json.token_response }}",
+            "cost": "={{ $json.cost }}",
+            "token_request": "={{ $json.token_request }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "channel_messages_id",
+              "displayName": "channel_messages_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "result_type",
+              "displayName": "result_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "chenal_id",
+              "displayName": "chenal_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "resipment_name",
+              "displayName": "resipment_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "user_score",
+              "displayName": "user_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "system_valid",
+              "displayName": "system_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "token_request",
+              "displayName": "token_request",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "token_response",
+              "displayName": "token_response",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cost",
+              "displayName": "cost",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -480,
+        320
+      ],
+      "id": "4e20676e-29dc-41d1-be70-2794ccf44f85",
+      "name": "Сохраняем результат3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a6008532-6699-4974-ae4d-c4cfb772d13e",
+              "leftValue": "={{$('Ответ нейросети').item.json.response}}",
+              "rightValue": "PASS",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -304,
+        320
+      ],
+      "id": "af1f3211-baac-4dcf-8a8e-a758c1d6255e",
+      "name": "Пропускаем1"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list"
+        },
+        "table": {
+          "__rl": true,
+          "value": "message_ai_screening_runs",
+          "mode": "list",
+          "cachedResultName": "message_ai_screening_runs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "monitoring_project_id": "={{ $('Общие даннные').item.json.project_id }}",
+            "source_message_id": "={{ $('Loop Over Items').item.json.id }}",
+            "run_status": "completed",
+            "ai_model": "openai/gpt-oss-20b",
+            "prompt_version": "1.0",
+            "pipeline_version": "1.0",
+            "first_level_filter_data": "={{ JSON.stringify({ top1_label: $('Loop Over Items').item.json.filter1_top1_label, top1_score: $('Loop Over Items').item.json.filter1_top1_score, top2_label: $('Loop Over Items').item.json.filter1_top2_label, top2_score: $('Loop Over Items').item.json.filter1_top2_score }) }}",
+            "input_message_text": "={{ $('Loop Over Items').item.json.message_text }}",
+            "ai_result_text": "={{ $('Ответ нейросети').item.json.response }}",
+            "ai_result_payload": "={{ $('Из текста в JSON').item.json }}",
+            "is_match": "={{ $('Из текста в JSON').item.json['тип_лида'] !== 'PASS' }}",
+            "match_reason_short": "={{ $('Из текста в JSON').item.json['тип_лида'] }}",
+            "delivery_status": "={{ $('Из текста в JSON').item.json['тип_лида'] !== 'PASS' ? 'pending' : 'skipped' }}",
+            "sender_payload_snapshot": "={{ $('Loop Over Items').item.json.sender_payload }}",
+            "processed_at": "={{ $now }}",
+            "is_latest": true
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "monitoring_project_id",
+              "displayName": "monitoring_project_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_message_id",
+              "displayName": "source_message_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "run_status",
+              "displayName": "run_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "options",
+              "canBeUsedToMatch": true,
+              "options": [
+                {
+                  "name": "queued",
+                  "value": "queued"
+                },
+                {
+                  "name": "processing",
+                  "value": "processing"
+                },
+                {
+                  "name": "completed",
+                  "value": "completed"
+                },
+                {
+                  "name": "failed",
+                  "value": "failed"
+                },
+                {
+                  "name": "skipped",
+                  "value": "skipped"
+                }
+              ]
+            },
+            {
+              "id": "ai_model",
+              "displayName": "ai_model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "prompt_version",
+              "displayName": "prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pipeline_version",
+              "displayName": "pipeline_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "first_level_filter_data",
+              "displayName": "first_level_filter_data",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "input_message_text",
+              "displayName": "input_message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ai_result_text",
+              "displayName": "ai_result_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ai_result_payload",
+              "displayName": "ai_result_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "is_match",
+              "displayName": "is_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "matched_user_id",
+              "displayName": "matched_user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "matched_contact_channel_id",
+              "displayName": "matched_contact_channel_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "match_confidence",
+              "displayName": "match_confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "match_reason_short",
+              "displayName": "match_reason_short",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_status",
+              "displayName": "delivery_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "options",
+              "canBeUsedToMatch": true,
+              "options": [
+                {
+                  "name": "pending",
+                  "value": "pending"
+                },
+                {
+                  "name": "sent",
+                  "value": "sent"
+                },
+                {
+                  "name": "failed",
+                  "value": "failed"
+                },
+                {
+                  "name": "skipped",
+                  "value": "skipped"
+                }
+              ]
+            },
+            {
+              "id": "delivery_platform_id",
+              "displayName": "delivery_platform_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "delivery_external_id",
+              "displayName": "delivery_external_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "delivered_at",
+              "displayName": "delivered_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "delivery_error_text",
+              "displayName": "delivery_error_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "delivery_result_payload",
+              "displayName": "delivery_result_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "client_feedback_status",
+              "displayName": "client_feedback_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "options",
+              "canBeUsedToMatch": true,
+              "options": [
+                {
+                  "name": "unknown",
+                  "value": "unknown"
+                },
+                {
+                  "name": "lead",
+                  "value": "lead"
+                },
+                {
+                  "name": "not_lead",
+                  "value": "not_lead"
+                }
+              ],
+              "removed": true
+            },
+            {
+              "id": "client_feedback_at",
+              "displayName": "client_feedback_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "client_feedback_source_platform_id",
+              "displayName": "client_feedback_source_platform_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "client_feedback_comment",
+              "displayName": "client_feedback_comment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "raw_message_payload_snapshot",
+              "displayName": "raw_message_payload_snapshot",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "sender_payload_snapshot",
+              "displayName": "sender_payload_snapshot",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_text",
+              "displayName": "error_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "is_latest",
+              "displayName": "is_latest",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        688,
+        352
+      ],
+      "id": "7a4c0f66-cb4d-4c03-aea2-4911ddfd220b",
+      "name": "Сохраняем результат",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "monitoring_projects",
+          "mode": "list",
+          "cachedResultName": "monitoring_projects"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": 1,
+            "last_message_id": 101120
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "owner_user_id",
+              "displayName": "owner_user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "options",
+              "canBeUsedToMatch": true,
+              "options": [
+                {
+                  "name": "active",
+                  "value": "active"
+                },
+                {
+                  "name": "archived",
+                  "value": "archived"
+                },
+                {
+                  "name": "deleted",
+                  "value": "deleted"
+                }
+              ],
+              "removed": true
+            },
+            {
+              "id": "lead_search_prompt",
+              "displayName": "lead_search_prompt",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "lead_search_prompt_version",
+              "displayName": "lead_search_prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "outreach_message_template",
+              "displayName": "outreach_message_template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "outreach_message_template_version",
+              "displayName": "outreach_message_template_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "filters_version",
+              "displayName": "filters_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "search_filters",
+              "displayName": "search_filters",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "archived_at",
+              "displayName": "archived_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "deleted_at",
+              "displayName": "deleted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "last_message_id",
+              "displayName": "last_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "score_filters",
+              "displayName": "score_filters",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2000,
+        -16
+      ],
+      "id": "ae22d875-ebf2-453b-b762-4015621f13c8",
+      "name": "Сообщения на обработку последнее1",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT DISTINCT label\nFROM (\n  SELECT sm.filter1_top1_label AS label\n  FROM public.source_messages sm\n  WHERE sm.filter1_top1_label IS NOT NULL\n\n  UNION\n\n  SELECT sm.filter1_top2_label AS label\n  FROM public.source_messages sm\n  WHERE sm.filter1_top2_label IS NOT NULL\n) t\nORDER BY label;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1648,
+        0
+      ],
+      "id": "752fd711-e3e1-408d-8be4-1f82cd2550d9",
+      "name": "Сообщения на обработку последнее2",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "monitoring_projects",
+          "mode": "list",
+          "cachedResultName": "monitoring_projects"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2000,
+        -192
+      ],
+      "id": "56c0fbd2-8776-4e1b-a5dd-16c2b74fe0d6",
+      "name": "Сообщения на обработку последнее3",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "in_app_notifications",
+          "mode": "list",
+          "cachedResultName": "in_app_notifications"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -16,
+        -16
+      ],
+      "id": "87c9538d-e996-437b-b104-0810cf9d2533",
+      "name": "Сохраняем результат2",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "in_app_notifications",
+          "mode": "list",
+          "cachedResultName": "in_app_notifications"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "entity_id": "={{ $('Сохраняем результат').item.json.id }}",
+            "project_id": "={{ $('Общие даннные').item.json.project_id }}",
+            "is_read": false,
+            "type": "new_lead",
+            "title": "Новый лид!",
+            "body": "={{ $('Loop Over Items').item.json.message_text }}",
+            "metadata": "{\n  \"channelName\": \"Новый лид!\",\n  \"platform\": \"none\",\n  \"confidence\": 0\n}",
+            "entity_type": "screening_run"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "options",
+              "canBeUsedToMatch": true,
+              "options": [
+                {
+                  "name": "new_lead",
+                  "value": "new_lead"
+                },
+                {
+                  "name": "system_report",
+                  "value": "system_report"
+                },
+                {
+                  "name": "billing_paid",
+                  "value": "billing_paid"
+                },
+                {
+                  "name": "billing_failed",
+                  "value": "billing_failed"
+                },
+                {
+                  "name": "subscription_expiring",
+                  "value": "subscription_expiring"
+                },
+                {
+                  "name": "channel_request_approved",
+                  "value": "channel_request_approved"
+                },
+                {
+                  "name": "channel_request_rejected",
+                  "value": "channel_request_rejected"
+                }
+              ],
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "entity_type",
+              "displayName": "entity_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "entity_id",
+              "displayName": "entity_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "metadata",
+              "displayName": "metadata",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "is_read",
+              "displayName": "is_read",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "read_at",
+              "displayName": "read_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "project_id",
+              "displayName": "project_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        352
+      ],
+      "id": "a79a11cb-0569-4976-91fc-57181e96aa6d",
+      "name": "Сохраняем уведомление",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "WITH channel_ids AS (\n  SELECT source_channel_id\n  FROM public.project_source_channels\n  WHERE monitoring_project_id = {{ $('Общие даннные').item.json.project_id }}\n),\nproject_filter AS (\n  SELECT search_filters AS rules\n  FROM public.monitoring_projects\n  WHERE id = {{ $('Общие даннные').item.json.project_id }}\n),\neffective_start AS (\n  SELECT\n    CASE\n      WHEN ({{ $('Сообщения на обработку последнее').item.json.old_id }})::bigint IS NULL\n      THEN (\n        SELECT MIN(sub.id)\n        FROM (\n          SELECT sm.id\n          FROM public.source_messages sm, project_filter\n          WHERE sm.source_channel_id IN (SELECT source_channel_id FROM channel_ids)\n            AND sm.id <= ({{ $('Сообщения на обработку последнее').item.json.new_id }})::bigint\n            AND (\n              project_filter.rules IS NULL\n              OR EXISTS (\n                SELECT 1 FROM jsonb_array_elements(project_filter.rules) f\n                WHERE (sm.filter1_top1_label = f->>'label' AND sm.filter1_top1_score >= (f->>'min_prob')::numeric)\n                   OR (sm.filter1_top2_label = f->>'label' AND sm.filter1_top2_score >= (f->>'min_prob')::numeric)\n              )\n            )\n          ORDER BY sm.id DESC\n          LIMIT {{ $('Общие даннные').item.json.limit_message_find }}\n        ) sub\n      )\n      ELSE ({{ $('Сообщения на обработку последнее').item.json.old_id }})::bigint\n    END AS start_id\n),\nraw AS (\n  SELECT\n    sm.id,\n    sm.source_channel_id,\n    sc.name                                  AS channel_name,\n    sm.external_message_id,\n    sm.published_at,\n    sm.message_text,\n    sm.message_url,\n    sm.sender_external_id,\n    sm.sender_payload->>'sender_name'        AS sender_name,\n    sm.sender_payload->>'sender_username'    AS sender_username,\n    sm.sender_payload->>'sender_phone'       AS sender_phone,\n    sm.sender_payload,\n    sm.filter1_top1_label,\n    sm.filter1_top1_score,\n    sm.filter1_top2_label,\n    sm.filter1_top2_score,\n    mp.lead_search_prompt,\n    mp.outreach_message_template\n  FROM public.source_messages sm\n  JOIN public.source_channels sc ON sc.id = sm.source_channel_id\n  JOIN public.monitoring_projects mp ON mp.id = {{ $('Общие даннные').item.json.project_id }}\n  CROSS JOIN effective_start\n  CROSS JOIN project_filter\n  WHERE sm.source_channel_id IN (SELECT source_channel_id FROM channel_ids)\n    AND sm.id <= ({{ $('Сообщения на обработку последнее').item.json.new_id }})::bigint\n    AND sm.id >= effective_start.start_id\n    AND (\n      project_filter.rules IS NULL\n      OR EXISTS (\n        SELECT 1 FROM jsonb_array_elements(project_filter.rules) f\n        WHERE (sm.filter1_top1_label = f->>'label' AND sm.filter1_top1_score >= (f->>'min_prob')::numeric)\n           OR (sm.filter1_top2_label = f->>'label' AND sm.filter1_top2_score >= (f->>'min_prob')::numeric)\n      )\n    )\n  ORDER BY sm.id DESC\n  LIMIT {{ $('Общие даннные').item.json.limit_message_find }}\n)\nSELECT * FROM raw\nORDER BY id ASC;"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1680,
+        624
+      ],
+      "id": "3ab01282-16be-4d7c-9f79-f249693f8c53",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "WITH channel_ids AS (\n  SELECT source_channel_id\n  FROM public.project_source_channels\n  WHERE monitoring_project_id = {{ $('Общие даннные').item.json.project_id }}\n),\nproject_filter AS (\n  SELECT score_filters AS rules\n  FROM public.monitoring_projects\n  WHERE id = {{ $('Общие даннные').item.json.project_id }}\n),\neffective_start AS (\n  SELECT\n    CASE\n      WHEN ({{ $('Сообщения на обработку последнее').item.json.old_id }})::bigint IS NULL\n      THEN (\n        SELECT MIN(sub.id)\n        FROM (\n          SELECT sm.id\n          FROM public.source_messages sm, project_filter\n          WHERE sm.source_channel_id IN (SELECT source_channel_id FROM channel_ids)\n            AND sm.id <= ({{ $('Сообщения на обработку последнее').item.json.new_id }})::bigint\n            AND (\n              project_filter.rules IS NULL\n              OR EXISTS (\n                SELECT 1 FROM jsonb_array_elements(project_filter.rules) f\n                WHERE (sm.filter1_top1_label = f->>'label' AND sm.filter1_top1_score >= (f->>'min_prob')::numeric)\n                   OR (sm.filter1_top2_label = f->>'label' AND sm.filter1_top2_score >= (f->>'min_prob')::numeric)\n              )\n            )\n          ORDER BY sm.id DESC\n          LIMIT {{ $('Общие даннные').item.json.limit_message_find }}\n        ) sub\n      )\n      ELSE ({{ $('Сообщения на обработку последнее').item.json.old_id }})::bigint\n    END AS start_id\n),\nraw AS (\n  SELECT\n    sm.id,\n    sm.source_channel_id,\n    sc.name                                  AS channel_name,\n    sm.external_message_id,\n    sm.published_at,\n    sm.message_text,\n    sm.message_url,\n    sm.sender_external_id,\n    sm.sender_payload->>'sender_name'        AS sender_name,\n    sm.sender_payload->>'sender_username'    AS sender_username,\n    sm.sender_payload->>'sender_phone'       AS sender_phone,\n    sm.sender_payload,\n    sm.filter1_top1_label,\n    sm.filter1_top1_score,\n    sm.filter1_top2_label,\n    sm.filter1_top2_score,\n    mp.lead_search_prompt,\n    mp.outreach_message_template\n  FROM public.source_messages sm\n  JOIN public.source_channels sc ON sc.id = sm.source_channel_id\n  JOIN public.monitoring_projects mp ON mp.id = {{ $('Общие даннные').item.json.project_id }}\n  CROSS JOIN effective_start\n  CROSS JOIN project_filter\n  WHERE sm.source_channel_id IN (SELECT source_channel_id FROM channel_ids)\n    AND sm.id <= ({{ $('Сообщения на обработку последнее').item.json.new_id }})::bigint\n    AND sm.id >= effective_start.start_id\n    AND (\n      project_filter.rules IS NULL\n      OR EXISTS (\n        SELECT 1 FROM jsonb_array_elements(project_filter.rules) f\n        WHERE (sm.filter1_top1_label = f->>'label' AND sm.filter1_top1_score >= (f->>'min_prob')::numeric)\n           OR (sm.filter1_top2_label = f->>'label' AND sm.filter1_top2_score >= (f->>'min_prob')::numeric)\n      )\n    )\n  ORDER BY sm.id DESC\n  LIMIT {{ $('Общие даннные').item.json.limit_message_find }}\n)\nSELECT * FROM raw\nORDER BY id ASC;"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1296,
+        624
+      ],
+      "id": "9ea0d5ce-ebf8-4b14-a5db-bae97014025e",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "WITH channel_ids AS (\n  SELECT source_channel_id\n  FROM public.project_source_channels\n  WHERE monitoring_project_id = {{ $('Общие даннные').item.json.project_id }}\n),\nproject_filter AS (\n  SELECT\n    CASE\n      WHEN jsonb_typeof(search_filters) = 'array'\n        THEN search_filters\n      WHEN jsonb_typeof(search_filters -> 'score') = 'array'\n        THEN search_filters -> 'score'\n      WHEN jsonb_typeof(search_filters -> 'rules') = 'array'\n        THEN search_filters -> 'rules'\n      WHEN jsonb_typeof(search_filters -> 'filters') = 'array'\n        THEN search_filters -> 'filters'\n      WHEN jsonb_typeof(search_filters -> 'score_filters') = 'array'\n        THEN search_filters -> 'score_filters'\n      WHEN jsonb_typeof(search_filters -> 'filter1') = 'array'\n        THEN search_filters -> 'filter1'\n      ELSE NULL\n    END AS rules\n  FROM public.monitoring_projects\n  WHERE id = {{ $('Общие даннные').item.json.project_id }}\n),\neffective_start AS (\n  SELECT\n    CASE\n      WHEN ({{ $('Сообщения на обработку последнее').item.json.old_id }})::bigint IS NULL\n      THEN (\n        SELECT MIN(sub.id)\n        FROM (\n          SELECT sm.id\n          FROM public.source_messages sm, project_filter\n          WHERE sm.source_channel_id IN (SELECT source_channel_id FROM channel_ids)\n            AND sm.id <= ({{ $('Сообщения на обработку последнее').item.json.new_id }})::bigint\n            AND (\n              project_filter.rules IS NULL\n              OR jsonb_typeof(project_filter.rules) <> 'array'\n              OR EXISTS (\n                SELECT 1 FROM jsonb_array_elements(project_filter.rules) f\n                WHERE (sm.filter1_top1_label = f->>'label' AND sm.filter1_top1_score >= (f->>'min_prob')::numeric)\n                   OR (sm.filter1_top2_label = f->>'label' AND sm.filter1_top2_score >= (f->>'min_prob')::numeric)\n              )\n            )\n          ORDER BY sm.id DESC\n          LIMIT {{ $('Общие даннные').item.json.limit_message_find }}\n        ) sub\n      )\n      ELSE ({{ $('Сообщения на обработку последнее').item.json.old_id }})::bigint\n    END AS start_id\n),\nraw AS (\n  SELECT\n    sm.id,\n    sm.source_channel_id,\n    sc.name                                  AS channel_name,\n    sm.external_message_id,\n    sm.published_at,\n    sm.message_text,\n    sm.message_url,\n    sm.sender_external_id,\n    sm.sender_payload->>'sender_name'        AS sender_name,\n    sm.sender_payload->>'sender_username'    AS sender_username,\n    sm.sender_payload->>'sender_phone'       AS sender_phone,\n    sm.sender_payload,\n    sm.filter1_top1_label,\n    sm.filter1_top1_score,\n    sm.filter1_top2_label,\n    sm.filter1_top2_score,\n    mp.lead_search_prompt,\n    mp.outreach_message_template\n  FROM public.source_messages sm\n  JOIN public.source_channels sc ON sc.id = sm.source_channel_id\n  JOIN public.monitoring_projects mp ON mp.id = {{ $('Общие даннные').item.json.project_id }}\n  CROSS JOIN effective_start\n  CROSS JOIN project_filter\n  WHERE sm.source_channel_id IN (SELECT source_channel_id FROM channel_ids)\n    AND sm.id <= ({{ $('Сообщения на обработку последнее').item.json.new_id }})::bigint\n    AND sm.id >= effective_start.start_id\n    AND (\n      project_filter.rules IS NULL\n      OR jsonb_typeof(project_filter.rules) <> 'array'\n      OR EXISTS (\n        SELECT 1 FROM jsonb_array_elements(project_filter.rules) f\n        WHERE (sm.filter1_top1_label = f->>'label' AND sm.filter1_top1_score >= (f->>'min_prob')::numeric)\n           OR (sm.filter1_top2_label = f->>'label' AND sm.filter1_top2_score >= (f->>'min_prob')::numeric)\n      )\n    )\n  ORDER BY sm.id DESC\n  LIMIT {{ $('Общие даннные').item.json.limit_message_find }}\n)\nSELECT * FROM raw\nORDER BY id ASC;"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1296,
+        928
+      ],
+      "id": "947199b1-ea30-423a-bfaf-5ce9297f3561",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "AbMfNJrcLtx65zc6",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/AbMfNJrcLtx65zc6",
+          "cachedResultName": "отправка сообщений из очереди (новый prod API)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_latest": true,
+            "monitoring_project_id": "={{ $('Общие даннные').item.json.project_id }}",
+            "source_message_id": "={{ $('Loop Over Items').item.json.id }}",
+            "run_status": "complete",
+            "ai_model": "null",
+            "prompt_version": "null",
+            "pipeline_version": "null",
+            "first_level_filter_data": "={{ JSON.stringify({ top1_label: $('Loop Over Items').item.json.filter1_top1_label, top1_score: $('Loop Over Items').item.json.filter1_top1_score, top2_label: $('Loop Over Items').item.json.filter1_top2_label, top2_score: $('Loop Over Items').item.json.filter1_top2_score }) }}",
+            "input_message_text": "={{ $('Loop Over Items').item.json.message_text }}",
+            "ai_result_text": "={{ $('Ответ нейросети').item.json.response }}",
+            "ai_result_payload": "={{ $('Из текста в JSON').item.json }}",
+            "is_match": "={{ $('Из текста в JSON').item.json['тип_лида'] !== 'PASS' }}",
+            "match_reason_short": "={{ $('Из текста в JSON').item.json['тип_лида'] }}",
+            "delivery_status": "={{ $('Из текста в JSON').item.json['тип_лида'] !== 'PASS' ? 'pending' : 'skipped' }}",
+            "sender_payload_snapshot": "={{ $('Loop Over Items').item.json.sender_payload }}",
+            "processed_at": "={{$now}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "monitoring_project_id",
+              "displayName": "monitoring_project_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "source_message_id",
+              "displayName": "source_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "run_status",
+              "displayName": "run_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ai_model",
+              "displayName": "ai_model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "prompt_version",
+              "displayName": "prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "pipeline_version",
+              "displayName": "pipeline_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "first_level_filter_data",
+              "displayName": "first_level_filter_data",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "input_message_text",
+              "displayName": "input_message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ai_result_text",
+              "displayName": "ai_result_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ai_result_payload",
+              "displayName": "ai_result_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "is_match",
+              "displayName": "is_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "match_reason_short",
+              "displayName": "match_reason_short",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "delivery_status",
+              "displayName": "delivery_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "sender_payload_snapshot",
+              "displayName": "sender_payload_snapshot",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "is_latest",
+              "displayName": "is_latest",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1040,
+        352
+      ],
+      "id": "ec731185-29d3-4736-a086-d2dcde22ce84",
+      "name": "Call 'отправка сообщений из очереди'",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "AbMfNJrcLtx65zc6",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/AbMfNJrcLtx65zc6",
+          "cachedResultName": "отправка сообщений из очереди (новый prod API)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_latest": true,
+            "monitoring_project_id": "=10",
+            "source_message_id": "=1000",
+            "run_status": "complete",
+            "ai_model": "null",
+            "prompt_version": "null",
+            "pipeline_version": "null",
+            "first_level_filter_data": "={{ JSON.stringify({ top1_label: $('Loop Over Items').item.json.filter1_top1_label, top1_score: $('Loop Over Items').item.json.filter1_top1_score, top2_label: $('Loop Over Items').item.json.filter1_top2_label, top2_score: $('Loop Over Items').item.json.filter1_top2_score }) }}",
+            "input_message_text": "={{ $('Loop Over Items').item.json.message_text }}",
+            "ai_result_text": "={{ $('Ответ нейросети').item.json.response }}",
+            "ai_result_payload": "={{ $('Из текста в JSON').item.json }}",
+            "is_match": "={{ $('Из текста в JSON').item.json['тип_лида'] !== 'PASS' }}",
+            "match_reason_short": "={{ $('Из текста в JSON').item.json['тип_лида'] }}",
+            "delivery_status": "={{ $('Из текста в JSON').item.json['тип_лида'] !== 'PASS' ? 'pending' : 'skipped' }}",
+            "sender_payload_snapshot": "={{ $('Loop Over Items').item.json.sender_payload }}",
+            "processed_at": "={{$now}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "monitoring_project_id",
+              "displayName": "monitoring_project_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "source_message_id",
+              "displayName": "source_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "run_status",
+              "displayName": "run_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ai_model",
+              "displayName": "ai_model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "prompt_version",
+              "displayName": "prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "pipeline_version",
+              "displayName": "pipeline_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "first_level_filter_data",
+              "displayName": "first_level_filter_data",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "input_message_text",
+              "displayName": "input_message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ai_result_text",
+              "displayName": "ai_result_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ai_result_payload",
+              "displayName": "ai_result_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "is_match",
+              "displayName": "is_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "match_reason_short",
+              "displayName": "match_reason_short",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "delivery_status",
+              "displayName": "delivery_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "sender_payload_snapshot",
+              "displayName": "sender_payload_snapshot",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "is_latest",
+              "displayName": "is_latest",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -592,
+        -192
+      ],
+      "id": "58128b55-db46-45da-afd2-5453f28caae9",
+      "name": "Call 'отправка сообщений из очереди'1"
+    }
+  ],
+  "connections": {
+    "Сообщения на обработку": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сообщения на обработку последнее": {
+      "main": [
+        [
+          {
+            "node": "Есть ли новые строки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Проверка сообщения в AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Из текста в JSON": {
+      "main": [
+        [
+          {
+            "node": "Пропускаем",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Формируем текст": {
+      "main": [
+        [
+          {
+            "node": "Сохраняем результат",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Пропускаем": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Из текста в JSON1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Проверка сообщения в AI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Из текста в JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Из текста в JSON1": {
+      "main": [
+        [
+          {
+            "node": "Формируем текст",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ответ нейросети": {
+      "main": [
+        [
+          {
+            "node": "Сохраняем результат3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверка сообщения в AI": {
+      "main": [
+        [
+          {
+            "node": "Ответ нейросети",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Тест",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Тест": {
+      "main": [
+        [
+          {
+            "node": "Общие даннные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Общие даннные": {
+      "main": [
+        [
+          {
+            "node": "Сообщения на обработку последнее",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "НАЧАЛО": {
+      "main": [
+        [
+          {
+            "node": "Общие даннные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Есть ли новые строки": {
+      "main": [
+        [
+          {
+            "node": "Сообщения на обработку",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сохраняем результат3": {
+      "main": [
+        [
+          {
+            "node": "Пропускаем1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Пропускаем1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сохраняем результат": {
+      "main": [
+        [
+          {
+            "node": "Сохраняем уведомление",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сохраняем уведомление": {
+      "main": [
+        [
+          {
+            "node": "Call 'отправка сообщений из очереди'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'отправка сообщений из очереди'": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

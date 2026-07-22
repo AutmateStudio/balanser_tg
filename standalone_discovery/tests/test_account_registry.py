@@ -35,6 +35,43 @@ class AccountStoreTests(unittest.TestCase):
         self.assertTrue(rec2["admin_blocked"])
         self.assertEqual(rec2["block_reason"], "test")
 
+    def test_telegram_channel_count_absent_by_default(self) -> None:
+        from discovery_api.account_store import get_account, upsert_account
+
+        upsert_account("Client1")
+        rec = get_account("Client1")
+        self.assertIsNone(rec["telegram_channel_count"])
+        self.assertIsNone(rec["telegram_channel_count_synced_at"])
+
+    def test_set_telegram_channel_count_creates_record_and_persists(self) -> None:
+        from discovery_api.account_store import get_account, set_telegram_channel_count
+
+        rec = set_telegram_channel_count("NewAccount", 17)
+        self.assertEqual(rec["telegram_channel_count"], 17)
+        self.assertIsNotNone(rec["telegram_channel_count_synced_at"])
+
+        rec2 = get_account("NewAccount")
+        self.assertEqual(rec2["telegram_channel_count"], 17)
+
+    def test_set_telegram_channel_count_does_not_reset_other_fields(self) -> None:
+        from discovery_api.account_store import (
+            get_account,
+            set_telegram_channel_count,
+            upsert_account,
+        )
+
+        upsert_account("Client1", display_name="C1", max_channels=10)
+        set_telegram_channel_count("Client1", 500)
+        rec = get_account("Client1")
+        self.assertEqual(rec["display_name"], "C1")
+        self.assertEqual(rec["max_channels"], 10)
+        self.assertEqual(rec["telegram_channel_count"], 500)
+
+        # Обычный upsert (без явного значения) не должен стирать кэш счётчика.
+        upsert_account("Client1", description="new desc")
+        rec2 = get_account("Client1")
+        self.assertEqual(rec2["telegram_channel_count"], 500)
+
 
 class AccountRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -254,6 +291,45 @@ class AccountEndpointTests(unittest.TestCase):
         names = {a["session_name"] for a in data["accounts"]}
         self.assertIn("Client1", names)
 
+    def test_accounts_all_exposes_cached_telegram_channel_count(self) -> None:
+        """channel_count (балансировщик) и telegram_channel_count (честный, из
+        Telegram) — разные числа; /accounts/all должен отдавать оба."""
+        from discovery_api.account_store import set_telegram_channel_count
+
+        set_telegram_channel_count("Client1", 483)
+
+        resp = self.client.get("/discovery-api/parser/accounts/all")
+        self.assertEqual(resp.status_code, 200)
+        row = next(a for a in resp.json()["accounts"] if a["session_name"] == "Client1")
+        self.assertEqual(row["telegram_channel_count"], 483)
+        self.assertIsNotNone(row["telegram_channel_count_synced_at"])
+
+    def test_refresh_channel_count_endpoint_persists_and_returns_count(self) -> None:
+        from discovery_api.session_dialogs import AccountMembershipSnapshot
+
+        with patch(
+            "discovery_api.session_dialogs.scan_account_channel_membership",
+            new_callable=AsyncMock,
+            return_value=AccountMembershipSnapshot(42, 0, 0),
+        ):
+            resp = self.client.post(
+                "/discovery-api/parser/accounts/Client1/refresh-channel-count"
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["telegram_channel_count"], 42)
+
+        from discovery_api.account_store import get_account
+
+        rec = get_account("Client1")
+        self.assertEqual(rec["telegram_channel_count"], 42)
+
+    def test_refresh_channel_count_endpoint_404_for_missing_session_file(self) -> None:
+        resp = self.client.post(
+            "/discovery-api/parser/accounts/NoSuchAccount/refresh-channel-count"
+        )
+        self.assertEqual(resp.status_code, 404)
+
     def test_block_and_unblock(self) -> None:
         resp = self.client.patch(
             "/discovery-api/parser/accounts/Client1/block",
@@ -295,6 +371,41 @@ class AccountEndpointTests(unittest.TestCase):
         self.assertEqual(row["parser_id"], "pid")
         self.assertEqual(row["channel_count"], 1)
 
+    def test_accounts_all_includes_pg_cooldown_overlay(self) -> None:
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import AsyncMock, patch
+
+        from app_balance.queue.accounts import AccountQueueState
+
+        until = datetime.now(timezone.utc) + timedelta(seconds=180)
+        pg = {
+            "Client1": AccountQueueState(
+                id=99,
+                session_name="Client1",
+                status="cooldown",
+                is_enabled=True,
+                cooldown_until=until,
+                current_task_id=None,
+                last_error="flood_wait",
+                last_error_at=until - timedelta(seconds=10),
+            )
+        }
+        with patch(
+            "discovery_api.parser_router.fetch_pg_queue_states",
+            new_callable=AsyncMock,
+            return_value=pg,
+        ):
+            resp = self.client.get("/discovery-api/parser/accounts/all")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIsNotNone(data.get("generated_at"))
+        row = next(a for a in data["accounts"] if a["session_name"] == "Client1")
+        self.assertEqual(row["queue_status"], "cooldown")
+        self.assertGreaterEqual(row["cooldown_remaining_seconds"], 170)
+        self.assertIsNotNone(row["cooldown_until"])
+        self.assertGreaterEqual(row["available_in_seconds"], 170)
+        self.assertEqual(row["last_error"], "flood_wait")
+
     def test_delete_account_removes_file_and_store(self) -> None:
         from discovery_api.account_registry import session_file_exists
         from discovery_api.account_store import get_account, upsert_account
@@ -302,7 +413,11 @@ class AccountEndpointTests(unittest.TestCase):
         upsert_account("Client1", display_name="C1")
         self.assertTrue(session_file_exists("Client1"))
 
-        resp = self.client.delete("/discovery-api/parser/accounts/Client1")
+        with patch(
+            "discovery_api.parser_router._sync_accounts_pg",
+            new_callable=AsyncMock,
+        ):
+            resp = self.client.delete("/discovery-api/parser/accounts/Client1")
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["deleted"])
         self.assertFalse(session_file_exists("Client1"))
@@ -312,15 +427,122 @@ class AccountEndpointTests(unittest.TestCase):
         from discovery_api.parser_router import _ClumpJob, _jobs
         from discovery_api.session_registry import SessionClump
 
+        from discovery_api.session_dialogs import AccountMembershipSnapshot
+
         clump = SessionClump(["/s0"], "c", webhook_url="http://h")
         _jobs["pid"] = _ClumpJob(clump=clump, parser_id="pid")
-        with patch.object(clump, "start", new_callable=AsyncMock):
+        with (
+            patch.object(clump, "start", new_callable=AsyncMock),
+            patch(
+                "discovery_api.session_dialogs.scan_account_channel_membership",
+                new_callable=AsyncMock,
+                return_value=AccountMembershipSnapshot(3, 5, 2),
+            ),
+            patch(
+                "discovery_api.parser_router._sync_accounts_pg",
+                new_callable=AsyncMock,
+            ),
+        ):
             resp = self.client.post(
                 "/discovery-api/parser/pid/enroll-session",
                 json={"session_name": "Client1"},
             )
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.json()["in_clump"])
+        data = resp.json()
+        self.assertTrue(data["in_clump"])
+        self.assertEqual(data["telegram_channel_count"], 3)
+        self.assertEqual(data["required_channel_total"], 5)
+        self.assertEqual(data["required_channel_present"], 2)
+
+    def test_sessions_list_returns_phone(self) -> None:
+        with patch(
+            "discovery_api.parser_router.list_sessions_info",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "session_name": "Client1",
+                    "session_file": "Client1.session",
+                    "phone": "+79991234567",
+                    "error": None,
+                }
+            ],
+        ):
+            resp = self.client.get("/discovery-api/parser/sessions")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["sessions"][0]["session_name"], "Client1")
+        self.assertEqual(data["sessions"][0]["session_file"], "Client1.session")
+        self.assertEqual(data["sessions"][0]["phone"], "+79991234567")
+
+    def test_session_detail_not_found(self) -> None:
+        with patch(
+            "discovery_api.parser_router.probe_session_info",
+            new_callable=AsyncMock,
+            side_effect=FileNotFoundError("Файл сессии не найден: Missing.session"),
+        ):
+            resp = self.client.get("/discovery-api/parser/sessions/Missing")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_session_detail_returns_phone(self) -> None:
+        with patch(
+            "discovery_api.parser_router.probe_session_info",
+            new_callable=AsyncMock,
+            return_value={
+                "session_name": "Client1",
+                "session_file": "Client1.session",
+                "phone": "+79991234567",
+                "error": None,
+            },
+        ):
+            resp = self.client.get("/discovery-api/parser/sessions/Client1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["phone"], "+79991234567")
+
+    def test_account_reactivate_ok(self) -> None:
+        from discovery_api.session_dialogs import AccountMembershipSnapshot
+
+        with (
+            patch(
+                "discovery_api.parser_router.probe_session_info",
+                new_callable=AsyncMock,
+                return_value={
+                    "session_name": "Client1",
+                    "session_file": "Client1.session",
+                    "phone": "+79991234567",
+                    "error": None,
+                },
+            ),
+            patch(
+                "discovery_api.parser_router.notify_session_reauthorized",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "discovery_api.session_dialogs.scan_account_channel_membership",
+                new_callable=AsyncMock,
+                return_value=AccountMembershipSnapshot(7, 0, 0),
+            ),
+        ):
+            resp = self.client.patch("/discovery-api/parser/accounts/Client1/reactivate")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["session_name"], "Client1")
+        self.assertEqual(data["telegram_channel_count"], 7)
+
+    def test_account_reactivate_unauthorized_409(self) -> None:
+        with patch(
+            "discovery_api.parser_router.probe_session_info",
+            new_callable=AsyncMock,
+            return_value={
+                "session_name": "Client1",
+                "session_file": "Client1.session",
+                "phone": None,
+                "error": "Сессия не авторизована",
+            },
+        ):
+            resp = self.client.patch("/discovery-api/parser/accounts/Client1/reactivate")
+        self.assertEqual(resp.status_code, 409)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,107 @@
+{
+  "name": "Отправка в VK или телеграм",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "group_id"
+            },
+            {
+              "name": "user_id",
+              "type": "number"
+            },
+            {
+              "name": "text"
+            },
+            {
+              "name": "buttons",
+              "type": "array"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        80,
+        144
+      ],
+      "id": "452f4529-6c7b-4be0-9b77-7a36e92b3fd5",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Входные данные из вызывающего воркфлоу\nconst input = $input.item.json;\n\n// Массив кнопок: [{\"link\": \"https://...\", \"label\": \"Текст кнопки\"}, ...]\nconst buttons = input.buttons || [];\n\n// Формируем VK keyboard: каждая кнопка — отдельная строка (ряд)\nconst vkButtons = buttons.map(btn => [\n  {\n    action: {\n      type: \"open_link\",\n      link: btn.link,\n      label: btn.label\n    }\n  }\n]);\n\nconst keyboard = {\n  inline: true,\n  buttons: vkButtons\n};\n\nreturn {\n  json: {\n    client_id: `${input.group_id}`,\n    chat_id: input.user_id,\n    text: input.text || \"\",\n    keyboard: keyboard\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        144
+      ],
+      "id": "b3de77ac-1aed-468a-9cc5-31f73fd8eaac",
+      "name": "Собираем клавиатуру"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/messages/vk/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        592,
+        144
+      ],
+      "id": "c4fe877a-1f91-4aac-8df8-4409ce6bbe0e",
+      "name": "Отправляем сообщение с кнопками",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Собираем клавиатуру",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Собираем клавиатуру": {
+      "main": [
+        [
+          {
+            "node": "Отправляем сообщение с кнопками",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}

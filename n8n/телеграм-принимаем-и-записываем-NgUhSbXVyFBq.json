@@ -1,0 +1,799 @@
+{
+  "name": "Телеграм принимаем и записываем",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram-messages",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -224,
+        -112
+      ],
+      "id": "3fcd017e-3edf-440d-a000-28067c8ad81e",
+      "name": "Webhook",
+      "webhookId": "112c2bc6-ec7f-43c1-8949-bb7206eb1132"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "\n  {\n    \"headers\": {\n      \"host\": \"mokuegopasan.beget.app\",\n      \"user-agent\": \"Python/3.11 aiohttp/3.13.5\",\n      \"content-length\": \"731\",\n      \"accept\": \"*/*\",\n      \"accept-encoding\": \"gzip, deflate\",\n      \"content-type\": \"application/json\",\n      \"x-api-key\": \"ZiJHVEEtP+gmvT5vg4aBrly8UNCXocnrJUZdfsz8QhE=\",\n      \"x-forwarded-for\": \"194.156.117.160\",\n      \"x-forwarded-host\": \"mokuegopasan.beget.app\",\n      \"x-forwarded-port\": \"443\",\n      \"x-forwarded-proto\": \"https\",\n      \"x-forwarded-server\": \"ed84361b6596\",\n      \"x-real-ip\": \"194.156.117.160\"\n    },\n    \"params\": {},\n    \"query\": {},\n    \"body\": {\n      \"telegram_message\": {\n        \"id\": 944740,\n        \"text\": \"rtehyrujthgfdrtyujikjhgfgthyjukjhgfgth yjuh tgrfe\",\n        \"raw_text\": \"rtehyrujthgfdrtyujikjhgfgthyjukjhgfgth yjuh tgrfe\",\n        \"date\": \"2026-05-13T21:02:51+00:00\",\n        \"sender_id\": 98327526,\n        \"chat_id\": -1001809918387,\n        \"is_private\": false,\n        \"is_group\": true,\n        \"is_channel\": true,\n        \"sender\": {\n          \"id\": 98327526,\n          \"type\": \"user\",\n          \"verified\": false,\n          \"scam\": false,\n          \"fake\": false,\n          \"restricted\": false,\n          \"restriction_reason\": null,\n          \"username\": null,\n          \"first_name\": \"Камилла\",\n          \"last_name\": null,\n          \"phone\": null,\n          \"bot\": false,\n          \"premium\": true,\n          \"deleted\": false,\n          \"lang_code\": null,\n          \"is_self\": false,\n          \"contact\": false,\n          \"mutual_contact\": false,\n          \"about\": null,\n          \"common_chats_count\": 1\n        }\n      }\n    },\n    \"webhookUrl\": \"https://mokuegopasan.beget.app/webhook/telegram-messages\",\n    \"executionMode\": \"production\"\n  }\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -224,
+        64
+      ],
+      "id": "7f5d0589-133b-4ee1-8aab-24fc3739c917",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        64
+      ],
+      "id": "84d88274-572b-44dc-875c-fd3338aa6777",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json.body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        32,
+        -112
+      ],
+      "id": "fd221618-950d-4e7f-8537-3c8eace32513",
+      "name": "Общие данные"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_messages",
+          "mode": "list",
+          "cachedResultName": "source_messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_channel_id": 0,
+            "filter1_top1_score": 0,
+            "filter1_top2_score": 0
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "source_channel_id",
+              "displayName": "source_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_message_id",
+              "displayName": "external_message_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ingested_at",
+              "displayName": "ingested_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "edited_at",
+              "displayName": "edited_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "deleted_at",
+              "displayName": "deleted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_text",
+              "displayName": "message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_url",
+              "displayName": "message_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "raw_message_payload",
+              "displayName": "raw_message_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender_external_id",
+              "displayName": "sender_external_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender_payload",
+              "displayName": "sender_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "filter1_top1_label",
+              "displayName": "filter1_top1_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "filter1_top1_score",
+              "displayName": "filter1_top1_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "filter1_top2_label",
+              "displayName": "filter1_top2_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "filter1_top2_score",
+              "displayName": "filter1_top2_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        512,
+        -288
+      ],
+      "id": "f00a9d9a-68c2-4c35-9388-ec9813051f41",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "eeaef6c3-bf5a-4ba8-9660-961b5c0df89d",
+              "leftValue": "={{ $json.telegram_message.text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        240,
+        -112
+      ],
+      "id": "59e0ebc8-3b11-4f37-b800-3d1e7074c7b8",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://159.194.221.16:8000/classify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.telegram_message.text }}"
+            },
+            {
+              "name": "k",
+              "value": "2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        496,
+        -128
+      ],
+      "id": "19118361-3c64-49b2-aceb-f49ce582bd1e",
+      "name": "Фильтр 1 Уровня (реальный)",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 10,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "byN2WpQidQrEAKPk",
+          "name": "Фильтр 1 Уровня"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "294d149a-dc8c-4512-8501-5b0175701e30",
+              "name": "source_channel_id",
+              "value": "={{ $('Общие данные').item.json.telegram_message.chat_id.toString().replace('-100', '') }}",
+              "type": "number"
+            },
+            {
+              "id": "8fa9b264-08f2-4e0f-8134-54d0c13aeb41",
+              "name": "external_message_id",
+              "value": "={{ $('Общие данные').item.json.telegram_message.id }}",
+              "type": "number"
+            },
+            {
+              "id": "50a217bc-c732-4acf-9a4d-16dca31f5a47",
+              "name": "published_at",
+              "value": "={{ $('Общие данные').item.json.telegram_message.date }}",
+              "type": "string"
+            },
+            {
+              "id": "3417a930-2952-4afb-a621-d9601f4a8bb6",
+              "name": "ingested_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "325ad23e-8ec2-4ddd-a497-90d71cae2636",
+              "name": "edited_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "841e8dcb-ab56-42f5-94aa-0402149db767",
+              "name": "deleted_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "1d13310d-6a98-476a-bfb3-9152e16c70de",
+              "name": "message_text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "c72d5805-b380-48ec-840f-ecb523f24e8c",
+              "name": "message_url",
+              "value": "=https://t.me/c/{{ $('Общие данные').item.json.telegram_message.chat_id.toString().replace('-100', '') }}/{{ $('Общие данные').item.json.telegram_message.id }}",
+              "type": "string"
+            },
+            {
+              "id": "08e48149-9ddd-4fd2-a6c5-f7f565f2c9f2",
+              "name": "raw_message_payload",
+              "value": "={{ $('Webhook').item.json.body }}",
+              "type": "object"
+            },
+            {
+              "id": "2bdc5f36-4d2d-45fd-b36d-fe6d5a0368ed",
+              "name": "sender_external_id",
+              "value": "={{ $('Webhook').item.json.body.telegram_message.sender.id }}",
+              "type": "number"
+            },
+            {
+              "id": "081cd079-e75d-4e0f-97b0-21b74c5acc43",
+              "name": "created_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "b338d2ff-9b1b-4d3a-9239-71caf36f2f43",
+              "name": "updated_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        736,
+        -128
+      ],
+      "id": "c460645b-df68-462d-94ed-b28e178128bf",
+      "name": "Формируем запись source_messages"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "external_channel_id",
+              "value": "={{ $('Общие данные').item.json.telegram_message.chat_id.toString().replace('-100', '') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        944,
+        -128
+      ],
+      "id": "5416b3bf-7fd7-4b19-bdcd-654737e4e78a",
+      "name": "Получаем канал",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_messages",
+          "mode": "list",
+          "cachedResultName": "source_messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_channel_id": "={{ $json.id }}",
+            "external_message_id": "={{ $('Формируем запись source_messages').item.json.external_message_id }}",
+            "published_at": "={{ $('Формируем запись source_messages').item.json.published_at }}",
+            "ingested_at": "={{ $('Формируем запись source_messages').item.json.ingested_at }}",
+            "message_text": "={{ $('Формируем запись source_messages').item.json.message_text }}",
+            "message_url": "={{ $('Формируем запись source_messages').item.json.message_url }}",
+            "raw_message_payload": "={{ $('Формируем запись source_messages').item.json.raw_message_payload }}",
+            "sender_external_id": "={{ $('Формируем запись source_messages').item.json.sender_external_id }}",
+            "created_at": "={{ $json.created_at }}",
+            "sender_payload": "={{ $('Общие данные').item.json.telegram_message.sender }}",
+            "filter1_top1_score": "={{ $('Фильтр 1 Уровня (реальный)').item.json.predictions[0].score }}",
+            "filter1_top2_score": "={{ $('Фильтр 1 Уровня (реальный)').item.json.predictions[1].score }}",
+            "filter1_top1_label": "={{ $('Фильтр 1 Уровня (реальный)').item.json.predictions[0].label }}",
+            "filter1_top2_label": "={{ $('Фильтр 1 Уровня (реальный)').item.json.predictions[1].label }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "source_channel_id",
+              "displayName": "source_channel_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_message_id",
+              "displayName": "external_message_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ingested_at",
+              "displayName": "ingested_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "edited_at",
+              "displayName": "edited_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "deleted_at",
+              "displayName": "deleted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "message_text",
+              "displayName": "message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_url",
+              "displayName": "message_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "raw_message_payload",
+              "displayName": "raw_message_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender_external_id",
+              "displayName": "sender_external_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender_payload",
+              "displayName": "sender_payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "filter1_top1_label",
+              "displayName": "filter1_top1_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "filter1_top1_score",
+              "displayName": "filter1_top1_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "filter1_top2_label",
+              "displayName": "filter1_top2_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "filter1_top2_score",
+              "displayName": "filter1_top2_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1168,
+        -128
+      ],
+      "id": "c5033e4f-5fc6-4487-ab24-45917341dded",
+      "name": "Создаём строку в очереди",
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Общие данные",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Общие данные": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Фильтр 1 Уровня (реальный)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Формируем запись source_messages": {
+      "main": [
+        [
+          {
+            "node": "Получаем канал",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем канал": {
+      "main": [
+        [
+          {
+            "node": "Создаём строку в очереди",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Фильтр 1 Уровня (реальный)": {
+      "main": [
+        [
+          {
+            "node": "Формируем запись source_messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

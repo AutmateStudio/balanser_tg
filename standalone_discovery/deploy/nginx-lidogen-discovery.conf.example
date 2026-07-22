@@ -1,0 +1,4 @@
+# Устарело — используйте deploy/nginx/ и deploy/NGINX.md
+#
+#   ./deploy/install-nginx-discovery.sh
+#   deploy/nginx/lidogen-discovery.conf.template

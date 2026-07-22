@@ -10,13 +10,16 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import asyncpg
 
 from app_balance.queue.db import acquire, transaction
 from app_balance.queue.error_codes import ErrorCode, error_code_prefix
 from app_balance.queue.per_op_reading import TaskTypesRepo
+
+if TYPE_CHECKING:
+    from app_balance.queue.watchdog import WatchdogAutoRetryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,30 @@ WATCHDOG_STUCK_REASON = ErrorCode.WATCHDOG_TASK_TIMEOUT
 # Статусы, в которых задача считается «активной» — совпадает с условием
 # partial unique index idx_task_queue_dedup_active (BD_schema.sql).
 ACTIVE_STATUSES = ("queued", "scheduled", "retry", "in_progress")
+
+# B12: коды last_error, при которых повторная постановка того же dedup_key
+# без вмешательства оператора бессмысленна («канал умер фатально»). Не
+# включает retryable/resource-коды (flood_wait, insufficient_resource,
+# account_reserve_failed, clump_error, join_pending, transient_error,
+# watchdog:*) — те могут пройти при следующей попытке, поэтому re-enqueue
+# для них не блокируется.
+# Аккаунтные ошибки (banned, account_unauthorized, channels_too_much,
+# banned_in_channel) — НЕ здесь: проблема сессии/аккаунта, а не канала;
+# после re-auth или на другом аккаунте канал нужно ставить снова.
+# Партиальный unique-индекс уже не пускает дубль, пока такая задача активна
+# (queued/scheduled/retry/in_progress) — здесь закрывается оставшийся случай:
+# задача уже terminal failed с постоянной причиной, но dedup_key снова свободен.
+FATAL_ERROR_CODES = frozenset(
+    {
+        ErrorCode.INVALID_PAYLOAD,
+        ErrorCode.ACCOUNT_NOT_FOUND,
+        ErrorCode.UNSUPPORTED_TASK_TYPE,
+        ErrorCode.UNKNOWN_TASK_TYPE,
+        ErrorCode.CHANNEL_PRIVATE,
+        ErrorCode.CHANNEL_HAS_NO_DISCUSSION,
+        ErrorCode.USERNAME_NOT_FOUND,
+    }
+)
 
 
 class UnknownTaskTypeError(ValueError):
@@ -51,11 +78,27 @@ class EnqueueResult:
     created: bool
     task_id: int | None
     existing_task_id: int | None = None
+    # B12: "fatal_history" — не создано, т.к. последняя задача с этим dedup_key
+    # уже завершилась permanent-ошибкой (см. FATAL_ERROR_CODES).
+    skipped_reason: str | None = None
+    fatal_error_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FatalHistoryInfo:
+    """B12: последняя terminal-failed попытка по dedup_key с постоянной причиной."""
+
+    task_id: int
+    error_code: str
+    last_error: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class StuckTaskResult:
-    """Задача, переведённая watchdog в stuck (C6)."""
+    """Задача, обработанная watchdog по таймауту (C6 stuck / G5 auto-retry).
+
+    outcome — итоговый статус: 'stuck' (C6), 'retry' или 'failed' (G5).
+    """
 
     id: int
     task_type_code: str
@@ -63,6 +106,10 @@ class StuckTaskResult:
     account_id: int | None
     source_account_id: int | None
     target_account_id: int | None
+    outcome: Literal["stuck", "retry", "failed"] = "stuck"
+    attempt_count: int = 0
+    max_attempts: int = 0
+    watchdog_retry_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +181,16 @@ FROM task_queue
 WHERE dedup_key = $1
   AND status IN {ACTIVE_STATUSES}
 ORDER BY id ASC
+LIMIT 1
+"""
+
+# B12: последняя по времени задача с этим dedup_key (любой статус). Если это
+# terminal failed с постоянной причиной — новую задачу создавать не будем.
+_FIND_LAST_BY_DEDUP_SQL = """
+SELECT id, status::text AS status, last_error
+FROM task_queue
+WHERE dedup_key = $1
+ORDER BY id DESC
 LIMIT 1
 """
 
@@ -273,6 +330,14 @@ SET account_id = $2,
 WHERE id = $1
 """
 
+_UNASSIGN_ACCOUNT_SQL = """
+UPDATE task_queue
+SET account_id = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'in_progress'
+"""
+
 # E6: фиксирует op-код последнего успешного шага multi-op пайплайна в payload
 # (jsonb_set по одному ключу, остальные ключи payload не трогаем).
 _SET_LAST_COMPLETED_STEP_SQL = """
@@ -285,6 +350,14 @@ SET payload = jsonb_set(
     ),
     updated_at = now()
 WHERE id = $1
+"""
+
+_MERGE_PAYLOAD_SQL = """
+UPDATE task_queue
+SET payload = COALESCE(payload, '{}'::jsonb) || $2::jsonb,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'in_progress'
 """
 
 # ТЗ §9.3: attempt_count — только при передаче задачи аккаунту (до execute).
@@ -312,32 +385,86 @@ WHERE id = $1
   AND status = 'in_progress'
 """
 
-# C6: in_progress дольше task_timeout_seconds от locked_at → stuck + release аккаунтов.
-_MARK_STUCK_TIMED_OUT_SQL = f"""
+# C6/G5: in_progress дольше task_timeout_seconds → stuck (C6) либо auto-retry (G5).
+# Параметры: $1 limit, $2 auto_retry_enabled, $3 watchdog max_attempts (cap),
+# $4 retry delay (s), $5 last_error код. Во всех ветках — release аккаунтов + снятие lock.
+# can_retry = enabled И watchdog_retry_count < cap И attempt_count < max_attempts.
+_RELEASE_ORPHAN_ACCOUNT_LOCKS_SQL = """
+UPDATE accounts a
+SET current_task_id = NULL,
+    updated_at = now()
+WHERE a.current_task_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM task_queue t
+    WHERE t.id = a.current_task_id
+      AND t.status = 'in_progress'
+  )
+RETURNING a.id
+"""
+
+_MARK_STUCK_TIMED_OUT_SQL = """
 WITH timed_out AS (
     SELECT t.id
     FROM task_queue t
     JOIN task_types tt ON tt.id = t.task_type_id
     WHERE t.status = 'in_progress'
-      AND t.locked_at IS NOT NULL
-      AND t.locked_at + (tt.task_timeout_seconds * interval '1 second') < now()
-    ORDER BY t.locked_at ASC
+      AND COALESCE(t.locked_at, t.started_at) IS NOT NULL
+      AND COALESCE(t.locked_at, t.started_at)
+          + (tt.task_timeout_seconds * interval '1 second') < now()
+    ORDER BY COALESCE(t.locked_at, t.started_at) ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 ),
+computed AS (
+    SELECT t.id,
+           COALESCE((t.payload->>'watchdog_retry_count')::int, 0) AS wd_count,
+           (
+               $2::boolean
+               AND COALESCE((t.payload->>'watchdog_retry_count')::int, 0) < $3::int
+               AND t.attempt_count < t.max_attempts
+           ) AS can_retry
+    FROM task_queue t
+    JOIN timed_out x ON x.id = t.id
+),
 marked AS (
     UPDATE task_queue t
-    SET status = 'stuck',
-        last_error = '{WATCHDOG_STUCK_REASON}',
+    SET status = CASE
+            WHEN NOT $2::boolean THEN 'stuck'::task_status
+            WHEN c.can_retry THEN 'retry'::task_status
+            ELSE 'failed'::task_status
+        END,
+        last_error = $5,
         last_error_at = now(),
+        finished_at = CASE
+            WHEN $2::boolean AND NOT c.can_retry THEN now()
+            ELSE t.finished_at
+        END,
+        run_after = CASE
+            WHEN $2::boolean AND c.can_retry
+                THEN now() + ($4::int * interval '1 second')
+            ELSE t.run_after
+        END,
+        payload = CASE
+            WHEN $2::boolean AND c.can_retry THEN jsonb_set(
+                COALESCE(t.payload, '{}'::jsonb),
+                '{watchdog_retry_count}',
+                to_jsonb(c.wd_count + 1),
+                true
+            )
+            ELSE t.payload
+        END,
         locked_by = NULL,
         locked_at = NULL,
         locked_until = NULL,
         updated_at = now()
-    FROM timed_out x
-    WHERE t.id = x.id
+    FROM computed c
+    WHERE t.id = c.id
     RETURNING t.id, t.task_type_code, t.locked_by,
-              t.account_id, t.source_account_id, t.target_account_id
+              t.account_id, t.source_account_id, t.target_account_id,
+              t.status::text AS outcome, t.attempt_count, t.max_attempts,
+              COALESCE((t.payload->>'watchdog_retry_count')::int, 0)
+                  AS watchdog_retry_count
 ),
 released AS (
     UPDATE accounts a
@@ -346,7 +473,8 @@ released AS (
     RETURNING a.id
 )
 SELECT id, task_type_code, locked_by,
-       account_id, source_account_id, target_account_id
+       account_id, source_account_id, target_account_id,
+       outcome, attempt_count, max_attempts, watchdog_retry_count
 FROM marked
 """
 
@@ -359,6 +487,10 @@ def _row_to_stuck(row) -> StuckTaskResult:
         account_id=row["account_id"],
         source_account_id=row["source_account_id"],
         target_account_id=row["target_account_id"],
+        outcome=row["outcome"],
+        attempt_count=row["attempt_count"],
+        max_attempts=row["max_attempts"],
+        watchdog_retry_count=row["watchdog_retry_count"],
     )
 
 
@@ -414,12 +546,55 @@ class TaskQueueRepo:
     def __init__(self, task_types: TaskTypesRepo | None = None) -> None:
         self._task_types = task_types or TaskTypesRepo()
 
-    async def enqueue(self, data: EnqueueInput) -> EnqueueResult:
+    async def find_fatal_history(self, dedup_key: str | None) -> FatalHistoryInfo | None:
+        """B12: последняя попытка по dedup_key, если это terminal failed с fatal-кодом.
+
+        Не блокирует retry после временных/ресурсных ошибок — только после
+        кодов из FATAL_ERROR_CODES (banned, channel_private, invalid_payload,
+        username_not_found, fatal и т.п.). account_unauthorized сюда не
+        входит — проблема аккаунта, не канала. Активные статусы (queued/
+        scheduled/retry/in_progress) сюда не попадают — их уже отсекает
+        partial unique index (idx_task_queue_dedup_active) в enqueue().
+        """
+        if not dedup_key:
+            return None
+        async with acquire() as conn:
+            row = await conn.fetchrow(_FIND_LAST_BY_DEDUP_SQL, dedup_key)
+        if row is None or row["status"] != "failed":
+            return None
+        code = error_code_prefix(row["last_error"])
+        if code not in FATAL_ERROR_CODES:
+            return None
+        return FatalHistoryInfo(
+            task_id=row["id"], error_code=code, last_error=row["last_error"]
+        )
+
+    async def enqueue(
+        self, data: EnqueueInput, *, skip_known_fatal: bool = True
+    ) -> EnqueueResult:
         task_type = await self._task_types.get_by_code(data.task_type_code)
         if task_type is None or not task_type.is_enabled:
             raise UnknownTaskTypeError(
                 f"Тип задачи '{data.task_type_code}' не найден или выключен"
             )
+
+        if skip_known_fatal and data.dedup_key:
+            fatal = await self.find_fatal_history(data.dedup_key)
+            if fatal is not None:
+                logger.info(
+                    "enqueue: пропуск dedup_key=%s — прошлая задача id=%s "
+                    "завершилась фатально (%s), новая не создана",
+                    data.dedup_key,
+                    fatal.task_id,
+                    fatal.error_code,
+                )
+                return EnqueueResult(
+                    created=False,
+                    task_id=None,
+                    existing_task_id=fatal.task_id,
+                    skipped_reason="fatal_history",
+                    fatal_error_code=fatal.error_code,
+                )
 
         priority = data.priority if data.priority is not None else task_type.default_priority
         payload_json = json.dumps(data.payload or {})
@@ -561,6 +736,11 @@ class TaskQueueRepo:
         async with acquire() as conn:
             await conn.execute(_ASSIGN_ACCOUNT_SQL, task_id, account_id)
 
+    async def unassign_account(self, task_id: int) -> None:
+        """Сбрасывает закреплённый account_id (смена аккаунта при retry)."""
+        async with acquire() as conn:
+            await conn.execute(_UNASSIGN_ACCOUNT_SQL, task_id)
+
     async def set_last_completed_step(self, task_id: int, step: str) -> None:
         """E6: сохраняет op-код последнего успешного шага в payload (идемпотентность).
 
@@ -569,6 +749,13 @@ class TaskQueueRepo:
         """
         async with acquire() as conn:
             await conn.execute(_SET_LAST_COMPLETED_STEP_SQL, task_id, step)
+
+    async def merge_payload(self, task_id: int, patch: dict[str, Any]) -> bool:
+        """Дополняет payload задачи (напр. result после discover_groups)."""
+        payload_json = json.dumps(patch or {})
+        async with acquire() as conn:
+            result = await conn.execute(_MERGE_PAYLOAD_SQL, task_id, payload_json)
+            return int(result.split()[-1]) == 1
 
     async def begin_execution_attempt(self, task_id: int) -> int:
         """Инкремент attempt_count при передаче задачи аккаунту (ТЗ §9.3)."""
@@ -602,8 +789,42 @@ class TaskQueueRepo:
                 return False
             return True
 
-    async def mark_stuck_timed_out(self, *, limit: int = 100) -> list[StuckTaskResult]:
-        """C6: переводит зависшие in_progress в stuck и освобождает аккаунты."""
+    async def release_orphan_account_locks(self) -> int:
+        """Снимает accounts.current_task_id, если задача уже не in_progress.
+
+        Закрывает zombie-locks после crash между complete/postpone/fail и release.
+        """
+        async with acquire() as conn:
+            rows = await conn.fetch(_RELEASE_ORPHAN_ACCOUNT_LOCKS_SQL)
+        released = len(rows)
+        if released:
+            logger.warning(
+                "release_orphan_account_locks: снято %d orphan current_task_id",
+                released,
+            )
+        return released
+
+    async def mark_stuck_timed_out(
+        self,
+        *,
+        limit: int = 100,
+        auto_retry: "WatchdogAutoRetryConfig | None" = None,
+    ) -> list[StuckTaskResult]:
+        """C6/G5: обрабатывает зависшие in_progress и освобождает аккаунты.
+
+        Без auto_retry (или при enabled=False) — поведение C6: → stuck.
+        При auto_retry.enabled — G5: → retry (если остались попытки) либо failed.
+        """
+        enabled = bool(auto_retry and auto_retry.enabled)
+        cap = auto_retry.max_attempts if auto_retry else 0
+        delay = auto_retry.delay_seconds if auto_retry else 0
         async with transaction() as conn:
-            rows = await conn.fetch(_MARK_STUCK_TIMED_OUT_SQL, limit)
+            rows = await conn.fetch(
+                _MARK_STUCK_TIMED_OUT_SQL,
+                limit,
+                enabled,
+                cap,
+                delay,
+                WATCHDOG_STUCK_REASON.value,
+            )
             return [_row_to_stuck(row) for row in rows]

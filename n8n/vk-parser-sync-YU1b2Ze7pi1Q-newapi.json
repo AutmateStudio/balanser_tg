@@ -1,0 +1,464 @@
+{
+  "name": "vk-parser-sync (новый prod API)",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.addCount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5beb18f0-6828-486e-b837-a8cc8f53d493",
+      "name": "If has new",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -144,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.removeCount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7045a2e5-ee8d-4a60-9240-5f005ba6eca4",
+      "name": "If has removed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -144,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/{{ $json.parserId }}/remove-channels?async=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($json.channelsToRemove) }}\n}",
+        "options": {}
+      },
+      "id": "e3b1ba8e-88ff-401f-bb8e-5cdc18244558",
+      "name": "Remove channels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        112,
+        32
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "a6251297-df00-4732-b38d-e917f4d9bed5",
+      "name": "Every 1m1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1744,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "source_channels",
+          "mode": "list",
+          "cachedResultName": "source_channels"
+        },
+        "returnAll": true,
+        "where": {
+          "values": [
+            {
+              "column": "platform_id",
+              "value": "1"
+            },
+            {
+              "column": "is_active",
+              "value": "True"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ecb0232b-29a5-4786-9790-1f8aaf871786",
+      "name": "Get new channels1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1536,
+        -208
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "oDhlznSq4rKFi3EP",
+          "name": "База_ядра"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/list",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "e5166a0c-b555-493d-8268-eaa744df1377",
+      "name": "List parsers1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        -48
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "parserId",
+              "value": "={{ $json.parser_id }}",
+              "type": "string",
+              "id": "873f03c1-ce07-41d3-88f3-8a2e7a3da2eb"
+            },
+            {
+              "name": "channels",
+              "value": "={{ $json.channel_list }}",
+              "type": "array",
+              "id": "63347cda-8e5e-4c48-ac51-89a8905cc3f5"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c9bf1a1e-03fa-4cce-abcf-379cdb2fae18",
+      "name": "Pick parser1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -576,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dbItems = $('Get new channels1').all();\nconst pick = $('Pick parser1').first().json;\n\nconst parserId = pick.parserId;\nconst listenedRaw = Array.isArray(pick.channels) ? pick.channels : [];\n\nconst norm = (raw) => String(raw || '').trim().replace(/^https?:\\/\\/t\\.me\\//i, '').replace(/^@/, '').toLowerCase();\n\nconst listenedSet = new Set(listenedRaw.map(norm));\nconst channelsToAdd = [];\nconst rowsToAdd = [];\nconst activeDbSet = new Set();\n\nfor (const item of dbItems) {\n  const ch = item.json || {};\n  if (ch.is_active === false) continue;\n  let username = ch?.metadata?.username;\n  if (!username && typeof ch.external_url === 'string') {\n    const m = ch.external_url.match(/t\\.me\\/(@?[A-Za-z0-9_]+)/i);\n    if (m) username = m[1];\n  }\n  if (!username) continue;\n  const key = norm(username);\n  activeDbSet.add(key);\n  if (!listenedSet.has(key)) {\n    const ref = '@' + username.replace(/^@/, '');\n    channelsToAdd.push(ref);\n    rowsToAdd.push({ id: ch.id, channel_ref: ref, username, external_url: ch.external_url, name: ch.name });\n  }\n}\n\nconst channelsToRemove = listenedRaw.filter(c => !activeDbSet.has(norm(c)));\n\nreturn [{ json: { parserId, channelsToAdd, addCount: channelsToAdd.length, rowsToAdd, channelsToRemove, removeCount: channelsToRemove.length } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        -48
+      ],
+      "id": "c1d60726-0b81-4ab9-a877-2b3c48e82298",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://lidogen-balancer-tg-prod.web.oboyma.ai/discovery-api/parser/{{ $json.parserId }}/add-channels?async=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel_list\": {{ JSON.stringify($json.channelsToAdd) }}\n}",
+        "options": {}
+      },
+      "id": "8bbead6c-3812-4660-9cfd-a74754b694f7",
+      "name": "Add channels1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        -144
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5okNCR8zaFTeWUrt",
+          "name": "Авторизация телеграм поиск"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "external_channel_id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -1328,
+        -208
+      ],
+      "id": "d9c8e040-0566-447a-859f-229fd5252b57",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const dbItems = $('Get new channels1').all();\nconst pick = $('Pick parser1').first().json;\n\nconst parserId = pick.parserId;\nconst listenedRaw = Array.isArray(pick.channels) ? pick.channels : [];\n\nconst norm = (raw) => String(raw || '').trim().replace(/^https?:\\/\\/t\\.me\\//i, '').replace(/^@/, '').toLowerCase();\n\nconst listenedSet = new Set(listenedRaw.map(norm));\nconst channelsToAdd = [];\nconst rowsToAdd = [];\nconst activeDbSet = new Set();\n\nfor (const item of dbItems) {\n  const ch = item.json || {};\n  if (ch.is_active === false) continue;\n  let username = ch?.metadata?.username;\n  if (!username && typeof ch.external_url === 'string') {\n    const m = ch.external_url.match(/t\\.me\\/(@?[A-Za-z0-9_]+)/i);\n    if (m) username = m[1];\n  }\n  if (!username) continue;\n  const key = norm(username);\n  activeDbSet.add(key);\n  if (!listenedSet.has(key)) {\n    const ref = '@' + username.replace(/^@/, '');\n    channelsToAdd.push(ref);\n    rowsToAdd.push({ id: ch.id, channel_ref: ref, username, external_url: ch.external_url, name: ch.name });\n  }\n}\n\nconst channelsToRemove = listenedRaw.filter(c => !activeDbSet.has(norm(c)));\n\nreturn [{ json: { parserId, channelsToAdd, addCount: channelsToAdd.length, rowsToAdd, channelsToRemove, removeCount: channelsToRemove.length } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        -432
+      ],
+      "id": "6f906944-4650-4b87-9a46-d4f158065893",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "url": "http://217.26.24.119:3000/listeners/vk-user/Server_account_3/status",
+        "options": {}
+      },
+      "id": "4a6d2967-42ca-488a-a959-6ec34888f3d3",
+      "name": "List parsers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1120,
+        -208
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://217.26.24.119:3000/listeners/vk-user/Server_account_3/comments/walls/add",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"owner_ids\": [\n    -117301898,\n    -90283000,\n    -211228481\n  ],\n  \"count\": 10\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1344,
+        48
+      ],
+      "id": "d3c5bdb0-c0bc-477c-8e44-f6bde89b62aa",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://217.26.24.119:3000/listeners/vk-user/Server_account_3/start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"webhook_url\": \"{{ $('Получаем данные для обновления').item.json.webhook }}\",\n  \"watch_walls\": [{{ $('Получаем данные для обновления').item.json.walls }}],\n  \"wall_posts_count\": {{ $('Получаем данные для обновления').item.json.post_count }},\n  \"poll_interval\": {{ $('Получаем данные для обновления').item.json.poll_interval }}\n}",
+        "options": {
+          "timeout": "={{ 600*1000 }}"
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1616,
+        16
+      ],
+      "id": "29a6996b-ff9b-4e4c-8590-11727b94f3f7",
+      "name": "Запускаем слушатель с обновленнными данными",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mk4NuVi4Xb8V1oqr",
+          "name": "Omni_parser_creds"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "If has new": {
+      "main": [
+        [
+          {
+            "node": "Add channels1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If has removed": {
+      "main": [
+        [
+          {
+            "node": "Remove channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 1m1": {
+      "main": [
+        [
+          {
+            "node": "Get new channels1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get new channels1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List parsers1": {
+      "main": [
+        [
+          {
+            "node": "Pick parser1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick parser1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If has new",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If has removed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "List parsers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List parsers": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null
+}
