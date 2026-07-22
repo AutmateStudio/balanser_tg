@@ -243,6 +243,60 @@ async def test_null_peer_typeerror_is_permanent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_already_participant_skips_leave() -> None:
+    """update_channel на assigned-канале: уже участник → Leave не вызываем."""
+
+    class _AlreadyMemberClient(_FakeClient):
+        async def __call__(self, request):
+            name = type(request).__name__
+            self.requests.append(name)
+            if name == "JoinChannelRequest":
+                from telethon.errors import UserAlreadyParticipantError
+
+                raise UserAlreadyParticipantError(request=None)
+            if name == "GetFullChannelRequest":
+                return _FakeFull(participants_count=10, about="a")
+            if name == "LeaveChannelRequest":
+                raise AssertionError("LeaveChannel не должен вызываться")
+            return None
+
+    client = _AlreadyMemberClient(_FakeEntity(megagroup=True))
+    ctx = CollectContext()
+    execute_op = build_collect_op_executor(client, "@testch", ctx)
+    for step in ordered_pipeline(_collect_task_type()):
+        await execute_op(step)
+
+    assert ctx.already_member is True
+    assert ctx.joined is False
+    assert "LeaveChannelRequest" not in client.requests
+
+
+@pytest.mark.asyncio
+async def test_leave_not_member_is_soft_ok() -> None:
+    class _LeaveFailClient(_FakeClient):
+        async def __call__(self, request):
+            name = type(request).__name__
+            self.requests.append(name)
+            if name == "GetFullChannelRequest":
+                return _FakeFull(participants_count=10, about="a")
+            if name == "LeaveChannelRequest":
+                raise RuntimeError(
+                    "The target user is not a member of the specified "
+                    "megagroup or channel (caused by LeaveChannelRequest)"
+                )
+            return None
+
+    client = _LeaveFailClient(_FakeEntity(megagroup=True))
+    ctx = CollectContext()
+    execute_op = build_collect_op_executor(client, "@testch", ctx)
+    for step in ordered_pipeline(_collect_task_type()):
+        await execute_op(step)
+
+    assert ctx.joined is True
+    assert ctx.left is True  # soft-ok считается завершённым leave
+
+
+@pytest.mark.asyncio
 async def test_telethon_error_mapped_to_typed_error() -> None:
     class _BoomClient(_FakeClient):
         async def get_entity(self, ref):
