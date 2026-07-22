@@ -15,6 +15,7 @@ from discovery_api.bot_registry import start_bot_polling_once, stop_bot_polling
 from discovery_api.config import get_inprocess_worker, get_inprocess_worker_count, get_use_pg_queue
 from discovery_api.parser_router import parser_router, restore_persisted_parsers, setup_parser_services
 from discovery_api.router import router
+from discovery_api.lead_intent.router import router as lead_intent_router
 from discovery_api.session_registry import (
     release_all,
     start_channel_count_refresher,
@@ -248,6 +249,7 @@ async def _debug_request_ingest_middleware(request: Request, call_next):
 
 
 app.include_router(router, dependencies=[Depends(require_api_key)])
+app.include_router(lead_intent_router, dependencies=[Depends(require_api_key)])
 app.include_router(parser_router, dependencies=[Depends(require_api_key)])
 
 
