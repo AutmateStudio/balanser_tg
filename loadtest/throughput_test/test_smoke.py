@@ -232,6 +232,25 @@ class TestStateAndSync(unittest.TestCase):
         only = pick_parser_id_from_list([{"parser_id": "solo", "running": False}])
         self.assertEqual(only, "solo")
 
+    def test_postfacto_window_from_run(self) -> None:
+        from loadtest.throughput_test.postfacto import _window_from_run
+
+        ctx = {
+            "run_id": "20260721T221400Z",
+            "state.json": {
+                "parser_id": "abc",
+                "phase_timestamps": {
+                    "queue_swap": "2026-07-21T22:14:04+00:00",
+                    "restore": "2026-07-21T22:16:04+00:00",
+                },
+            },
+            "config.json": {},
+        }
+        since, until, pid = _window_from_run(ctx)
+        self.assertEqual(pid, "abc")
+        self.assertEqual(since.isoformat(), "2026-07-21T22:14:04+00:00")
+        self.assertEqual(until.isoformat(), "2026-07-21T22:16:04+00:00")
+
     def test_name_matches_sync_workflows(self) -> None:
         self.assertTrue(_name_matches("tg-parser-sync новый prod API"))
         self.assertTrue(_name_matches("VK-parser-sync"))

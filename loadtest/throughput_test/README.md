@@ -91,3 +91,27 @@ python3 -m loadtest.throughput_test --resume <run_id>
 ```bash
 python3 -m unittest loadtest.throughput_test.test_smoke -v
 ```
+
+## Post-facto отчёт (реальные цифры из PG)
+
+Если harness-отчёт пустой/обороан — собрать метрики из `task_queue`:
+
+```bash
+cd ~/Lidogen_telegram_balancer
+source .venv-loadtest/bin/activate
+
+# по конкретному run (окно queue_swap→restore + parser_id из state)
+python3 -m loadtest.throughput_test.postfacto --from-run 20260721T221400Z
+
+# за последние 12 часов (авто parser_id с localhost)
+python3 -m loadtest.throughput_test.postfacto --hours 12
+
+# явное окно, все parser_id
+python3 -m loadtest.throughput_test.postfacto \
+  --since 2026-07-21T20:00:00Z \
+  --until 2026-07-22T06:00:00Z \
+  --all-parsers
+```
+
+Отчёт: `out/<run_id>/postfacto/report.md` или `out/postfacto-<ts>/report.md`.
+В консоли сразу SUMMARY: done / задач/час.
