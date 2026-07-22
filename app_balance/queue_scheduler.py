@@ -1,14 +1,16 @@
 """F8 — планировщик продюсеров очереди (cron / docker schedule).
 
-Продюсеры (F2 channel_balancer, F4 collect_extra_data, F5 update_channel) сами
-себя не запускают — нужен внешний триггер. Этот модуль даёт единую точку входа
-с подкомандами и периодическим запуском, чтобы оформить их как job'ы в
-docker-compose (см. сервисы producer-* в docker-compose.yml).
+Продюсеры (F2 channel_balancer, F4 collect_extra_data, F5 update_channel,
+inactive-remove) сами себя не запускают — нужен внешний триггер. Этот модуль
+даёт единую точку входа с подкомандами и периодическим запуском, чтобы
+оформить их как job'ы в docker-compose (см. сервисы producer-* в
+docker-compose.yml).
 
 Запуск:
     python -m app_balance.queue_scheduler collect          # бесконечный цикл
     python -m app_balance.queue_scheduler update --once     # один тик и выход
     python -m app_balance.queue_scheduler balancer --interval 120
+    python -m app_balance.queue_scheduler inactive-remove   # remove неактивных
 
 Интервал по умолчанию берётся из env PRODUCER_INTERVAL_SECONDS (дефолт 60s),
 либо из --interval. Режим --once удобен для внешнего cron (один тик на запуск).
@@ -16,12 +18,14 @@ docker-compose (см. сервисы producer-* в docker-compose.yml).
 channel_balancer (F2) требует in-memory реестр clump'ов: перед запуском
 восстанавливаем clump'ы из стора (как делает queue_worker.serve), иначе
 продюсер не увидит ни одного аккаунта.
+
+inactive-remove читает parser_jobs.json без Telethon restore — безопасен
+рядом с discovery-api на том же хосте (как producer-collect/update).
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import logging
 import os
 import signal
@@ -31,6 +35,9 @@ from app_balance.queue import db
 from app_balance.queue.producers.base import BaseProducer, ProduceResult
 from app_balance.queue.producers.channel_balancer import ChannelBalancerProducer
 from app_balance.queue.producers.collect_extra_data import CollectExtraDataProducer
+from app_balance.queue.producers.inactive_channel_remove import (
+    InactiveChannelRemoveProducer,
+)
 from app_balance.queue.producers.update_channel import UpdateChannelProducer
 
 logger = logging.getLogger("queue_scheduler")
@@ -45,9 +52,11 @@ PRODUCERS: dict[str, ProducerFactory] = {
     "collect": CollectExtraDataProducer,
     "update": UpdateChannelProducer,
     "balancer": ChannelBalancerProducer,
+    "inactive-remove": InactiveChannelRemoveProducer,
 }
 
 # Подкоманды, которым нужен in-memory реестр clump'ов (F2).
+# inactive-remove НЕ входит: на co-located vps-104 restore конфликтует с .session.
 _NEEDS_CLUMPS = frozenset({"balancer"})
 
 

@@ -111,6 +111,8 @@ def _telegram_url_candidates(needle: str) -> list[str]:
         f"telegram.me/{n}",
     )
     return [b.lower() for b in bases]
+
+
 _LIST_PENDING_COLLECT_SQL = """
 SELECT sc.id, sc.assigned_account_id
 FROM source_channels sc
@@ -150,6 +152,46 @@ WHERE sc.assigned_account_id IS NOT NULL
   AND (sc.last_updated_at IS NULL
        OR sc.last_updated_at < now() - ($1 * interval '1 second'))
 ORDER BY sc.last_updated_at ASC NULLS FIRST
+LIMIT $2
+"""
+
+# Каналы на сессии без active-проекта и без активности ≥ N секунд.
+_LIST_INACTIVE_ON_SESSIONS_SQL = """
+SELECT
+  sc.id,
+  sc.assigned_account_id,
+  sc.external_url,
+  sc.external_channel_id,
+  a.session_name,
+  COALESCE(lm.last_published_at, sc.updated_at) AS activity_at
+FROM source_channels sc
+JOIN accounts a ON a.id = sc.assigned_account_id
+JOIN platforms p ON p.id = sc.platform_id AND lower(p.code) = 'tg'
+LEFT JOIN LATERAL (
+  SELECT MAX(sm.published_at) AS last_published_at
+  FROM source_messages sm
+  WHERE sm.source_channel_id = sc.id
+) lm ON true
+WHERE sc.assigned_account_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM project_source_channels psc
+    JOIN monitoring_projects mp ON mp.id = psc.monitoring_project_id
+    WHERE psc.source_channel_id = sc.id
+      AND psc.is_enabled = true
+      AND mp.status = 'active'
+      AND mp.deleted_at IS NULL
+  )
+  AND COALESCE(lm.last_published_at, sc.updated_at)
+      < now() - ($1 * interval '1 second')
+  AND (
+    NULLIF(BTRIM(sc.external_url), '') IS NOT NULL
+    OR (
+      NULLIF(BTRIM(sc.external_channel_id), '') IS NOT NULL
+      AND BTRIM(sc.external_channel_id) !~ '^-?[0-9]+$'
+    )
+  )
+ORDER BY COALESCE(lm.last_published_at, sc.updated_at) ASC NULLS FIRST, sc.id ASC
 LIMIT $2
 """
 
@@ -244,6 +286,24 @@ class StaleChannel:
     id: int
     account_id: int
     last_updated_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class InactiveOnSessionChannel:
+    """Канал на сессии без active-проекта и без активности ≥ порога (remove producer)."""
+
+    channel_id: int
+    account_id: int
+    session_name: str
+    external_url: str | None
+    external_channel_id: str | None
+    activity_at: datetime | None
+
+    def ref(self) -> str:
+        url = (self.external_url or "").strip()
+        if url:
+            return url
+        return (self.external_channel_id or "").strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,6 +468,31 @@ class SourceChannelsRepo:
                 id=int(row["id"]),
                 account_id=int(row["assigned_account_id"]),
                 last_updated_at=row["last_updated_at"],
+            )
+            for row in rows
+        ]
+
+    async def list_inactive_on_sessions(
+        self, limit: int, stale_after_seconds: int
+    ) -> list[InactiveOnSessionChannel]:
+        """Каналы на сессии: нет active-проекта и активность старше порога.
+
+        Активность = MAX(source_messages.published_at) или source_channels.updated_at.
+        """
+        if limit <= 0 or stale_after_seconds <= 0:
+            return []
+        async with acquire() as conn:
+            rows = await conn.fetch(
+                _LIST_INACTIVE_ON_SESSIONS_SQL, stale_after_seconds, limit
+            )
+        return [
+            InactiveOnSessionChannel(
+                channel_id=int(row["id"]),
+                account_id=int(row["assigned_account_id"]),
+                session_name=str(row["session_name"]),
+                external_url=row["external_url"],
+                external_channel_id=row["external_channel_id"],
+                activity_at=row["activity_at"],
             )
             for row in rows
         ]

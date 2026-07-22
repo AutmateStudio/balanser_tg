@@ -138,6 +138,7 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 | `channel_balancer.py` (F2) | `move_channel` | перекос числа каналов между аккаунтами clump > ±5% | `channel_balancer` |
 | `collect_extra_data.py` (F4) | `collect_extra_data` | `extra_data_collected = false` | `collect_extra_data_producer` |
 | `update_channel.py` (F5) | `update_channel` | устаревший `last_updated_at` (приоритет старым / NULL) | `update_channel_producer` |
+| `inactive_channel_remove.py` | `parser_remove_channel` | нет active-проекта + активность ≥ 30д + на сессии | `inactive_channel_remove_producer` |
 
 ### F2/F3 — балансировка каналов и отключение старого idle-rebalance
 
@@ -169,6 +170,29 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 - Задача ставится с `account_id = assigned_account_id` канала, чтобы dispatch
   резервировал именно закреплённый аккаунт, а не выбирал произвольный.
 
+### inactive-remove — снятие давно неактивных каналов с сессий
+
+Канал-кандидат, если одновременно:
+
+1. нет строки `project_source_channels` с `is_enabled=true` у
+   `monitoring_projects.status='active'` (`deleted_at IS NULL`);
+2. `COALESCE(MAX(source_messages.published_at), source_channels.updated_at)`
+   старше порога `INACTIVE_CHANNEL_REMOVE_AFTER_SECONDS` (дефолт `2592000` = 30 суток);
+3. `assigned_account_id IS NOT NULL` и есть usable ref (URL или нечисловой
+   `external_channel_id`).
+
+Перед enqueue обязательно проверяется, что канал есть на сессии: live-clump
+(`iter_clumps`) или `parser_jobs.json` (`assignments` / `channel_list`).
+Telethon restore **не** вызывается — сервис совместим с co-located discovery-api
+на vps-104 (без конфликта `.session`). Если в PG `assigned`, а в store канала
+нет — remove не ставится; при
+`INACTIVE_CHANNEL_REMOVE_CLEAR_ORPHAN_ASSIGNED=true` (дефолт) чистится
+`assigned_account_id`.
+
+```bash
+docker compose --profile producers up -d producer-inactive-remove
+```
+
 ### F8 — запуск продюсеров по расписанию
 
 Единая точка входа — модуль `app_balance.queue_scheduler` с подкомандами:
@@ -177,6 +201,7 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 python -m app_balance.queue_scheduler collect            # бесконечный цикл
 python -m app_balance.queue_scheduler update --once      # один тик (для внешнего cron)
 python -m app_balance.queue_scheduler balancer --interval 120
+python -m app_balance.queue_scheduler inactive-remove
 ```
 
 - Интервал между тиками: флаг `--interval` или env `PRODUCER_INTERVAL_SECONDS`
@@ -186,11 +211,13 @@ python -m app_balance.queue_scheduler balancer --interval 120
 - `balancer` (F2) требует in-memory реестр clump'ов — перед запуском scheduler
   восстанавливает их из стора (`restore_all_clumps_from_store`), поэтому сервису
   нужны те же session/data-маунты и `WORKER_TASK_ADAPTER`, что и `queue-worker`.
+- `inactive-remove` читает только `PARSER_STORE_PATH` / `parser_jobs.json`, без
+  restore clump и без маунта `sessions`.
 
-В `docker-compose.yml` три job'а под профилем `producers`:
+В `docker-compose.yml` job'ы под профилем `producers`:
 
 ```bash
-docker compose --profile producers up -d producer-collect producer-update producer-balancer
+docker compose --profile producers up -d producer-collect producer-update producer-balancer producer-inactive-remove
 ```
 
 | Сервис | Подкоманда | Интервал (env) | Дефолт |
@@ -198,6 +225,7 @@ docker compose --profile producers up -d producer-collect producer-update produc
 | `producer-collect` | `collect` | `PRODUCER_COLLECT_INTERVAL_SECONDS` | 300s |
 | `producer-update` | `update` | `PRODUCER_UPDATE_INTERVAL_SECONDS` | 3600s |
 | `producer-balancer` | `balancer` | `PRODUCER_BALANCER_INTERVAL_SECONDS` | 300s |
+| `producer-inactive-remove` | `inactive-remove` | `PRODUCER_INACTIVE_REMOVE_INTERVAL_SECONDS` | 86400s |
 
 ---
 
