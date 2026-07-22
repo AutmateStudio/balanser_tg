@@ -193,6 +193,13 @@ def map_clump_error_message(err: str) -> QueueTaskError:
 
 def map_telethon_exception(exc: BaseException) -> QueueTaskError:
     """E2: Telethon/сеть/сессия → typed error через classify_telethon_error."""
+    # Без импорта discovery_api: TypeError от get_input_peer(None).
+    msg_lower = str(exc).lower()
+    if isinstance(exc, TypeError) and (
+        "peer" in msg_lower or "nonetype" in msg_lower
+    ):
+        return PermanentError(ErrorCode.INVALID_PAYLOAD, str(exc) or "null_peer")
+
     try:
         from discovery_api.session_health import (
             classify_telethon_error,

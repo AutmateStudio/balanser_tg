@@ -112,22 +112,44 @@ def _telegram_url_candidates(needle: str) -> list[str]:
     )
     return [b.lower() for b in bases]
 _LIST_PENDING_COLLECT_SQL = """
-SELECT id, assigned_account_id
-FROM source_channels
-WHERE assigned_account_id IS NOT NULL
-  AND extra_data_collected = false
-ORDER BY created_at ASC, id ASC
+SELECT sc.id, sc.assigned_account_id
+FROM source_channels sc
+JOIN accounts a ON a.id = sc.assigned_account_id
+WHERE sc.assigned_account_id IS NOT NULL
+  AND sc.extra_data_collected = false
+  AND a.is_enabled = true
+  AND a.status IN ('active', 'cooldown')
+  AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())
+  AND (
+    NULLIF(BTRIM(sc.external_url), '') IS NOT NULL
+    OR (
+      NULLIF(BTRIM(sc.external_channel_id), '') IS NOT NULL
+      AND BTRIM(sc.external_channel_id) !~ '^-?[0-9]+$'
+    )
+  )
+ORDER BY sc.created_at ASC, sc.id ASC
 LIMIT $1
 """
 
 _LIST_STALE_FOR_UPDATE_SQL = """
-SELECT id, assigned_account_id, last_updated_at
-FROM source_channels
-WHERE assigned_account_id IS NOT NULL
-  AND is_active = true
-  AND (last_updated_at IS NULL
-       OR last_updated_at < now() - ($1 * interval '1 second'))
-ORDER BY last_updated_at ASC NULLS FIRST
+SELECT sc.id, sc.assigned_account_id, sc.last_updated_at
+FROM source_channels sc
+JOIN accounts a ON a.id = sc.assigned_account_id
+WHERE sc.assigned_account_id IS NOT NULL
+  AND sc.is_active = true
+  AND a.is_enabled = true
+  AND a.status IN ('active', 'cooldown')
+  AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())
+  AND (
+    NULLIF(BTRIM(sc.external_url), '') IS NOT NULL
+    OR (
+      NULLIF(BTRIM(sc.external_channel_id), '') IS NOT NULL
+      AND BTRIM(sc.external_channel_id) !~ '^-?[0-9]+$'
+    )
+  )
+  AND (sc.last_updated_at IS NULL
+       OR sc.last_updated_at < now() - ($1 * interval '1 second'))
+ORDER BY sc.last_updated_at ASC NULLS FIRST
 LIMIT $2
 """
 
@@ -292,6 +314,20 @@ class SourceChannelsRepo:
         async with acquire() as conn:
             row = await conn.fetchrow(_CLEAR_ASSIGNED_SQL, channel_id)
             return row is not None
+
+    async def clear_assignments_for_account(self, account_id: int) -> int:
+        """Снимает assigned_account_id со всех каналов аккаунта (мёртвая сессия)."""
+        async with acquire() as conn:
+            rows = await conn.fetch(
+                """
+                UPDATE source_channels
+                SET assigned_account_id = NULL
+                WHERE assigned_account_id = $1
+                RETURNING id
+                """,
+                account_id,
+            )
+        return len(rows)
 
     async def find_id_by_ref(self, ref: str) -> int | None:
         """Находит source_channels.id по @username / t.me-URL / external_channel_id.
