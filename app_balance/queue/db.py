@@ -1,9 +1,12 @@
 import os
+import time
 
 import asyncpg
 import dotenv
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+
+from app_balance.queue import timing as _timing
 
 dotenv.load_dotenv()
 
@@ -48,8 +51,18 @@ async def close_pool() -> None:
 @asynccontextmanager
 async def acquire() -> AsyncGenerator[asyncpg.Connection, None]:
     pool = await get_pool()
+    # Диагностика throughput: ожидание свободного соединения (pool_wait) и
+    # время удержания соединения (proxy стоимости SQL, особенно через SSH-туннель).
+    _wait_start = time.monotonic()
     async with pool.acquire() as conn:
-        yield conn
+        _acquired = time.monotonic()
+        try:
+            yield conn
+        finally:
+            _timing.record_db(
+                time.monotonic() - _acquired,
+                _acquired - _wait_start,
+            )
 
 
 @asynccontextmanager
