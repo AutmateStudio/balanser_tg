@@ -33,6 +33,7 @@ from app_balance.queue.per_op_reading import TaskType
 from app_balance.queue.resource_usage import ResourceUsageRepo
 from app_balance.queue.source_channels import SourceChannelsRepo
 from app_balance.queue.task_queue import ClaimedTask, TaskQueueRepo
+from app_balance.queue import timing
 
 log = logging.getLogger(__name__)
 
@@ -215,11 +216,12 @@ async def _execute_parser_add_channel(
 
     session_name = _resolve_clump_session_name(clump, account.session_name)
     try:
-        result = await clump.add_channel_on_session(
-            session_name,
-            channel_ref,
-            webhook_url=webhook_url,
-        )
+        with timing.track_telegram():
+            result = await clump.add_channel_on_session(
+                session_name,
+                channel_ref,
+                webhook_url=webhook_url,
+            )
     except QueueTaskError:
         raise
     except Exception as exc:  # noqa: BLE001

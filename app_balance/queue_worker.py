@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from app_balance.queue import db
+from app_balance.queue import timing
 from app_balance.queue.accounts import AccountsRepo
 from app_balance.queue.dispatch import DispatchResult, TaskDispatcher
 from app_balance.queue.mock_adapter import TaskAdapter, default_mock_adapter
@@ -151,7 +152,16 @@ class QueueWorker:
         if self._legacy_handler is not None:
             await self._process_legacy(task)
             return
-        result = await self._dispatcher.dispatch(task)
+        with timing.track_task() as t:
+            result = await self._dispatcher.dispatch(task)
+        if t is not None:
+            outcome = result.value if isinstance(result, DispatchResult) else str(result)
+            timing.note_finished(
+                t,
+                outcome=outcome,
+                task_id=task.id,
+                task_type=task.task_type_code,
+            )
         if result == DispatchResult.COMPLETED:
             self._processed += 1
 
