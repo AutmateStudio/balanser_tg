@@ -38,6 +38,7 @@ class ErrorCode(StrEnum):
     INSUFFICIENT_RESOURCE = "insufficient_resource"
     MISSING_AVAILABILITY = "missing_availability"
     NO_AVAILABLE_ACCOUNT = "no_available_account"
+    PACING = "pacing"
     NO_OPS_FOR_ROLE = "no_ops_for_role"
     ACCOUNT_RESERVE_FAILED = "account_reserve_failed"
     DUAL_ACCOUNT_RESERVE_FAILED = "dual_account_reserve_failed"
@@ -60,6 +61,7 @@ class ErrorCode(StrEnum):
 _COMPOSITE_PREFIXES = frozenset(
     {
         ErrorCode.INSUFFICIENT_RESOURCE,
+        ErrorCode.PACING,
         ErrorCode.NO_OPS_FOR_ROLE,
         ErrorCode.ACCOUNT_RESERVE_FAILED,
         ErrorCode.DUAL_ACCOUNT_RESERVE_FAILED,

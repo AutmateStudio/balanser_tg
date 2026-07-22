@@ -23,6 +23,7 @@ from app_balance.queue.errors import (
 )
 from app_balance.queue.mock_adapter import TaskAdapter
 from app_balance.queue.ops_catalog import MULTI_OP_TASK_TYPES
+from app_balance.queue.pacing import AccountPacer, get_pacer
 from app_balance.queue.per_op_reading import TaskType, TaskTypesRepo
 
 from app_balance.queue.resource_check import ResourceCheckResult, ResourceChecker
@@ -59,6 +60,9 @@ _AUTO_PICK_TASK_TYPES = frozenset(
         "discover_groups",
     }
 )
+# Типы задач, к которым применяется пейсинг join (минимальный интервал между
+# join на одном аккаунте, чтобы бурст не гнал аккаунты в FloodWait).
+_PACED_TASK_TYPES = frozenset({"parser_add_channel"})
 
 
 class DispatchResult(str, Enum):
@@ -101,6 +105,8 @@ class TaskDispatcher:
 
         attempts: TaskAttemptsRepo | None = None,
 
+        pacer: AccountPacer | None = None,
+
         postpone_delay_seconds: int = 300,
 
         retry_delay_seconds: int = 60,
@@ -120,6 +126,8 @@ class TaskDispatcher:
         self._attempts = attempts or TaskAttemptsRepo()
 
         self._resource_check = resource_check or ResourceChecker(self._usage)
+
+        self._pacer = pacer or get_pacer()
 
         self._postpone_delay_seconds = postpone_delay_seconds
 
@@ -609,22 +617,42 @@ class TaskDispatcher:
 
         check = await self._resource_check.check_account(account.id, task_type)
 
-        if check.ok:
+        if not check.ok:
 
-            return account
+            await self._accounts.release(account.id, task.id)
 
+            await self._postpone_task(
+                task,
+                task_type=task_type,
+                reason=self._resource_postpone_reason(check),
+                account=account,
+            )
 
+            return None
 
-        await self._accounts.release(account.id, task.id)
+        # Пейсинг для фиксированного аккаунта: ротации нет, поэтому если join
+        # слишком рано — откладываем задачу на остаток интервала.
+        if self._pacer.enabled and task_type.code in _PACED_TASK_TYPES:
 
-        await self._postpone_task(
-            task,
-            task_type=task_type,
-            reason=self._resource_postpone_reason(check),
-            account=account,
-        )
+            wait = self._pacer.try_acquire(account.id)
 
-        return None
+            if wait > 0:
+
+                await self._accounts.release(account.id, task.id)
+
+                await self._postpone_task(
+                    task,
+                    task_type=task_type,
+                    reason=ErrorCode.PACING,
+                    account=account,
+                    delay_seconds=max(
+                        1, min(int(wait) + 1, self._postpone_delay_seconds)
+                    ),
+                )
+
+                return None
+
+        return account
 
 
 
@@ -638,6 +666,10 @@ class TaskDispatcher:
 
         last_check: ResourceCheckResult | None = None
         last_account: Account | None = None
+        # Пейсинг: сколько секунд ждать до следующего join, если весь доступный
+        # пул отклонён именно из-за интервала (а не из-за нехватки ресурса).
+        max_pacing_wait: float = 0.0
+        paced = self._pacer.enabled and task_type.code in _PACED_TASK_TYPES
 
         while True:
 
@@ -651,27 +683,41 @@ class TaskDispatcher:
 
             if account is None:
 
-                if rejected_ids:
+                if last_check is not None:
 
-                    reason = (
+                    reason = self._resource_postpone_reason(last_check)
 
-                        self._resource_postpone_reason(last_check)
+                elif max_pacing_wait > 0:
 
-                        if last_check is not None
+                    reason = ErrorCode.PACING
 
-                        else ErrorCode.INSUFFICIENT_RESOURCE
+                elif rejected_ids:
 
-                    )
+                    reason = ErrorCode.INSUFFICIENT_RESOURCE
 
                 else:
 
                     reason = ErrorCode.NO_AVAILABLE_ACCOUNT
+
+                # Если задержал только пейсинг — откладываем на остаток интервала,
+                # а не на полный postpone-delay (задача вернётся, как только слот
+                # освободится). Иначе — стандартный postpone-delay.
+                pacing_delay: int | None = None
+                if reason == ErrorCode.PACING:
+                    pacing_delay = max(
+                        1,
+                        min(
+                            int(max_pacing_wait) + 1,
+                            self._postpone_delay_seconds,
+                        ),
+                    )
 
                 await self._postpone_task(
                     task,
                     task_type=task_type,
                     reason=reason,
                     account=last_account,
+                    delay_seconds=pacing_delay,
                 )
 
                 return None
@@ -680,17 +726,31 @@ class TaskDispatcher:
 
             check = await self._resource_check.check_account(account.id, task_type)
 
-            if check.ok:
+            if not check.ok:
 
-                return account
+                await self._accounts.release(account.id, task.id)
 
+                rejected_ids.add(account.id)
+                last_account = account
+                last_check = check
+                continue
 
+            if paced:
 
-            await self._accounts.release(account.id, task.id)
+                wait = self._pacer.try_acquire(account.id)
 
-            rejected_ids.add(account.id)
-            last_account = account
-            last_check = check
+                if wait > 0:
+
+                    # Аккаунт ресурсно готов, но join слишком рано — отклоняем и
+                    # пробуем следующий (как при нехватке ресурса).
+                    await self._accounts.release(account.id, task.id)
+
+                    rejected_ids.add(account.id)
+                    last_account = account
+                    max_pacing_wait = max(max_pacing_wait, wait)
+                    continue
+
+            return account
 
 
 
