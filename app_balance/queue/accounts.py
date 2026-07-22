@@ -32,6 +32,14 @@ class DualReserveResult:
 
 
 @dataclass(frozen=True, slots=True)
+class BestPickResult:
+    """Результат pick_best_and_reserve: аккаунт + ops-scoped availability %."""
+
+    account: Account
+    availability_percent: float
+
+
+@dataclass(frozen=True, slots=True)
 class AccountQueueState:
     """Снимок PG accounts для дашборда (без pick/reserve)."""
 
@@ -76,6 +84,42 @@ WHERE status IN ('active', 'cooldown')
 ORDER BY last_used_at ASC NULLS FIRST, id ASC
 LIMIT 1
 FOR UPDATE SKIP LOCKED
+"""
+
+# Внеочередной pick: максимальный available % среди op task_type (primary).
+# $1 = task_type_code, $2 = exclude account ids, $3 = min_available_percent.
+_PICK_BEST_FOR_UPDATE_SQL = """
+SELECT
+    a.id,
+    a.session_name,
+    a.status,
+    a.is_enabled,
+    a.current_task_id,
+    a.cooldown_until,
+    a.last_used_at,
+    COALESCE(s.score, 100.0)::float8 AS availability_percent
+FROM accounts a
+LEFT JOIN (
+    SELECT
+        u.account_id,
+        MIN(u.available_resource_percent) FILTER (WHERE u.effective_rph > 0) AS score
+    FROM v_account_op_usage_last_hour u
+    INNER JOIN task_type_ops tto ON tto.op_type_id = u.op_type_id
+    INNER JOIN task_types tt
+        ON tt.id = tto.task_type_id
+       AND tt.code = $1
+    WHERE tto.account_role = 'primary'
+    GROUP BY u.account_id
+) s ON s.account_id = a.id
+WHERE a.status IN ('active', 'cooldown')
+  AND a.is_enabled = true
+  AND a.current_task_id IS NULL
+  AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())
+  AND NOT (a.id = ANY($2::bigint[]))
+  AND COALESCE(s.score, 100.0) >= $3::float8
+ORDER BY COALESCE(s.score, 100.0) DESC, a.last_used_at ASC NULLS FIRST, a.id ASC
+FOR UPDATE OF a SKIP LOCKED
+LIMIT 1
 """
 
 _RESERVE_SQL = """
@@ -429,3 +473,44 @@ class AccountsRepo:
                 task_id,
             )
             return _row_to_account(row)
+
+    async def pick_best_and_reserve(
+        self,
+        task_id: int,
+        *,
+        task_type_code: str,
+        min_available_percent: float = 0.0,
+        exclude_account_ids: frozenset[int] | None = None,
+    ) -> BestPickResult | None:
+        """Pick аккаунта с макс. ops-scoped available % + атомарный reserve.
+
+        Score = MIN(available_resource_percent) по primary-op'ам `task_type_code`
+        (effective_rph > 0). При отсутствии строк в usage — 100%.
+        Исключает аккаунты с score < min_available_percent.
+        """
+        code = (task_type_code or "").strip()
+        if not code:
+            return None
+        excluded = list(exclude_account_ids or ())
+        threshold = float(min_available_percent)
+        async with transaction() as conn:
+            row = await conn.fetchrow(
+                _PICK_BEST_FOR_UPDATE_SQL,
+                code,
+                excluded,
+                threshold,
+            )
+            if row is None:
+                return None
+            await conn.execute(
+                "UPDATE accounts SET current_task_id = $2, last_used_at = now(), "
+                "status = 'active' "
+                "WHERE id = $1",
+                row["id"],
+                task_id,
+            )
+            account = _row_to_account(row)
+            return BestPickResult(
+                account=account,
+                availability_percent=float(row["availability_percent"]),
+            )

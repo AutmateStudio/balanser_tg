@@ -59,6 +59,7 @@ _AUTO_PICK_TASK_TYPES = frozenset(
     {
         "parser_add_channel",
         "telegram_discover",
+        "telegram_discover_leads",
         "discover_groups",
         "collect_extra_data",
         "update_channel",

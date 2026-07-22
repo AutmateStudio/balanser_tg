@@ -169,6 +169,99 @@ curl -sS -X POST "$BASE/discovery-api/discover-groups" \
 
 Файл workflow: [`n8n/телеграм-поиск-Cno7xg0nQg8D-newapi.json`](../n8n/телеграм-поиск-Cno7xg0nQg8D-newapi.json).
 
+### POST /discovery-api/discover-leads
+
+**Отдельный модуль** intent-based поиска лидов. **Не меняет** логику `/discover`.
+
+Пайплайн: генерация intent-сидов → `messages.SearchGlobal` (до 3–4 страниц на сид) +
+`contacts.Search` для group-suffix → скоринг последних постов (lead/spam/premium/файлы ТЗ) →
+граф (`fwd_from`, `@mentions`, `GetReplies`) → upsert в `source_channels.metadata.lead_intent`.
+
+По умолчанию — **async** через PG-очередь (`telegram_discover_leads`). Результат — в
+`GET /discovery-api/parser/queue/tasks/{task_id}` → `payload.result`.
+
+**Фильтр записи:** `lead_score >= min_lead_score` (default 50 / env `LEAD_INTENT_MIN_SCORE`);
+broadcast с intent-hits может сохраниться при score ≥ порог−15.
+
+**Тело** (`LeadIntentRequest`):
+
+| Поле | Тип | Обяз. | По умолч. | Описание |
+|------|-----|-------|-----------|----------|
+| `session_name` | string | нет* | — | Сессия; для sync обязателен; для async можно опустить (auto-pick) |
+| `query` | string | да | — | Ниша (`дизайн`, `юрист`, …) |
+| `first_pass_limit` | int (1–50) | нет | 10 | Лимит на страницу SearchGlobal / contacts |
+| `max_seeds` | int (1–60) | нет | 25 | Макс. число intent-сидов |
+| `search_pages` | int (1–4) | нет | 3 | Страниц SearchGlobal на сид |
+| `graph_depth` | int (0–2) | нет | 1 | Раунды графа fwd/mentions |
+| `max_graph_seeds` | int (0–100) | нет | 30 | Лимит граф-сидов |
+| `min_lead_score` | int (0–100) | нет | 50 | Порог persist |
+| `posts_limit` | int (5–50) | нет | 30 | Сколько последних постов скорить |
+| `extra_intents` | string[] | нет | [] | Доп. фразы поверх шаблонов |
+| `force_refresh_posts` | bool | нет | false | Игнорировать кэш `scored_at` &lt; 7 дней |
+
+**Ответ** (`LeadIntentResponse`): `query`, `seeds`, `total`, `candidates[]` (`lead_score`,
+`lead_probability`, `is_job_board` / `is_community` / `is_client_base`, `intent_hits`, …),
+`persist` (`inserted`, `updated`, `skipped_low_score`, `channel_ids`), `task_id`, `action_id`,
+`async_mode`.
+
+**n8n: приоритезация по lead_score**
+
+```sql
+SELECT id, name, external_url,
+       (metadata->'lead_intent'->>'lead_score')::int AS lead_score,
+       metadata->'lead_intent'->>'is_job_board' AS is_job_board
+FROM source_channels
+WHERE platform_id = 2
+  AND metadata ? 'lead_intent'
+ORDER BY (metadata->'lead_intent'->>'lead_score')::int DESC NULLS LAST
+LIMIT 100;
+```
+
+```bash
+# async
+curl -sS -X POST "$BASE/discovery-api/discover-leads" \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{
+    "session_name": "my_account",
+    "query": "дизайн",
+    "max_seeds": 20,
+    "search_pages": 3,
+    "min_lead_score": 50,
+    "extra_intents": ["ищу дизайнера", "нужен логотип"]
+  }'
+
+# sync
+curl -sS -X POST "$BASE/discovery-api/discover-leads?async=false" \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"session_name":"my_account","query":"дизайн","max_seeds":10,"graph_depth":0}'
+```
+
+Env: `LEAD_INTENT_MIN_SCORE` (50), `LEAD_INTENT_CACHE_DAYS` (7).
+
+Миграция task type: [`DB/A23_telegram_discover_leads.sql`](../DB/A23_telegram_discover_leads.sql).
+
+### POST /discovery-api/discover-leads/direct
+
+**Sync без worker-очереди.** Резервирует аккаунт с максимальным ops-scoped
+`available_resource_percent` (op'ы `telegram_discover_leads`), гоняет тот же
+lead-intent pipeline, затем освобождает аккаунт (`accounts.current_task_id`).
+
+Механика: эфемерная строка в `task_queue` со `status=in_progress` (FK для резерва;
+worker `claim` её не берёт — claim только `queued|scheduled|retry`) →
+`pick_best_and_reserve` → `record_for_task` → pipeline → `release` + `complete`/`fail`.
+
+- `session_name` в теле **игнорируется** (auto lease).
+- `503` — нет свободного аккаунта с ресурсом ≥ порога (`min_available_resource_percent`).
+- В ответе: `leased_session_name`, `lease_task_id`, `lease_availability_percent`.
+
+```bash
+curl -sS -X POST "$BASE/discovery-api/discover-leads/direct" \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"query":"дизайн","max_seeds":15,"search_pages":2,"graph_depth":0}'
+```
+
+Требует `USE_PG_QUEUE=true` и пул PG (lease ходит в `accounts` / `task_queue`).
+
 ### POST /discovery-api/add-channel-by-link
 
 Резолв и добавление одного канала/чата по ссылке через указанную сессию.
@@ -835,6 +928,8 @@ curl -sS "$BASE/discovery-api/parser/queue/accounts/Test2/summary" -H "X-API-Key
 | GET | `/health` | Живость (без ключа) |
 | POST | `/discovery-api/discover` | Единый поиск каналов/групп + upsert в `source_channels` (async по умолч.) |
 | POST | `/discovery-api/discover-groups` | **Deprecated** — обёртка над `/discover` |
+| POST | `/discovery-api/discover-leads` | Intent-поиск лидов + `metadata.lead_intent` (изолированный модуль) |
+| POST | `/discovery-api/discover-leads/direct` | Sync lease самого живого аккаунта + lead-intent (без worker-очереди) |
 | POST | `/discovery-api/add-channel-by-link` | Добавить канал по ссылке |
 | POST | `/discovery-api/add-channel-by-link-session-file` | То же, сессия в `session_file` |
 | POST | `/discovery-api/auth/qr` | Создать QR-сессию |

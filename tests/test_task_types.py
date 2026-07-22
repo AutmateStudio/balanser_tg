@@ -14,6 +14,8 @@ _ENABLED_BEFORE_A18 = {
     "telegram_discover",
 }
 _ENABLED_AFTER_A18 = _ENABLED_BEFORE_A18 | {"collect_extra_data"}
+_ENABLED_AFTER_A23 = _ENABLED_AFTER_A18 | {"telegram_discover_leads"}
+_ENABLED_A23_WITHOUT_A18 = _ENABLED_BEFORE_A18 | {"telegram_discover_leads"}
 
 
 @requires_pg
@@ -60,8 +62,12 @@ async def test_list_enabled(pg_pool) -> None:
     enabled = await repo.list_enabled()
     codes = {item.code for item in enabled}
 
-    if codes == _ENABLED_AFTER_A18:
+    if codes == _ENABLED_AFTER_A23:
+        expected = _ENABLED_AFTER_A23
+    elif codes == _ENABLED_AFTER_A18:
         expected = _ENABLED_AFTER_A18
+    elif codes == _ENABLED_A23_WITHOUT_A18:
+        expected = _ENABLED_A23_WITHOUT_A18
     elif codes == _ENABLED_BEFORE_A18:
         pytest.skip(
             "collect_extra_data ещё не включён в PG — накатите migrate (A18_enable_collect_extra_data.sql)"

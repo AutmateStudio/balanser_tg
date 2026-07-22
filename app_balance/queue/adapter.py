@@ -44,6 +44,7 @@ COLLECT_EXTRA_DATA = "collect_extra_data"
 UPDATE_CHANNEL = "update_channel"
 DISCOVER_GROUPS = "discover_groups"  # legacy alias
 TELEGRAM_DISCOVER = "telegram_discover"
+TELEGRAM_DISCOVER_LEADS = "telegram_discover_leads"
 
 SyncAfterAdd = Callable[[ClaimedTask, Account, Any], Awaitable[None]]
 SyncAfterMove = Callable[[ClaimedTask, Account, Any], Awaitable[None]]
@@ -540,6 +541,103 @@ async def _execute_telegram_discover(
     )
 
 
+def _parse_telegram_discover_leads_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    query = payload.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing query")
+
+    def _int(name: str, default: int, lo: int, hi: int) -> int:
+        try:
+            val = int(payload.get(name, default))
+        except (TypeError, ValueError) as exc:
+            raise PermanentError(ErrorCode.INVALID_PAYLOAD, f"invalid {name}") from exc
+        if not (lo <= val <= hi):
+            raise PermanentError(ErrorCode.INVALID_PAYLOAD, f"{name} out of range")
+        return val
+
+    extra = payload.get("extra_intents") or []
+    if not isinstance(extra, list):
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "invalid extra_intents")
+    extra_intents = [str(x).strip() for x in extra if str(x).strip()]
+
+    return {
+        "query": query.strip(),
+        "first_pass_limit": _int("first_pass_limit", 10, 1, 50),
+        "max_seeds": _int("max_seeds", 25, 1, 60),
+        "search_pages": _int("search_pages", 3, 1, 4),
+        "graph_depth": _int("graph_depth", 1, 0, 2),
+        "max_graph_seeds": _int("max_graph_seeds", 30, 0, 100),
+        "min_lead_score": _int("min_lead_score", 50, 0, 100),
+        "posts_limit": _int("posts_limit", 30, 5, 50),
+        "extra_intents": extra_intents,
+        "force_refresh_posts": bool(payload.get("force_refresh_posts", False)),
+    }
+
+
+async def _execute_telegram_discover_leads(
+    task: ClaimedTask,
+    *,
+    account: Account,
+    client_getter: ClientGetter,
+    queue: TaskQueueRepo,
+    channels_repo: SourceChannelsRepo | None = None,
+) -> None:
+    """POST /discover-leads async: intent SearchGlobal + lead scoring + metadata upsert."""
+    from discovery_api.lead_intent.pipeline import (
+        run_lead_intent_on_client,
+        serialize_lead_discovery_result,
+    )
+
+    params = _parse_telegram_discover_leads_payload(dict(task.payload))
+    client = await client_getter(account.session_name)
+    try:
+        result = await run_lead_intent_on_client(
+            client,
+            params["query"],
+            first_pass_limit=params["first_pass_limit"],
+            max_seeds=params["max_seeds"],
+            search_pages=params["search_pages"],
+            graph_depth=params["graph_depth"],
+            max_graph_seeds=params["max_graph_seeds"],
+            min_lead_score=params["min_lead_score"],
+            posts_limit=params["posts_limit"],
+            extra_intents=params["extra_intents"],
+            force_refresh_posts=params["force_refresh_posts"],
+            persist=True,
+            channels_repo=channels_repo or SourceChannelsRepo(),
+        )
+    except QueueTaskError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise map_telethon_exception(exc) from exc
+
+    persist_dict = result.persist.to_dict() if result.persist is not None else None
+    merged = await queue.merge_payload(
+        task.id,
+        {
+            "result": serialize_lead_discovery_result(
+                result,
+                persist=persist_dict,
+            )
+        },
+    )
+    if not merged:
+        log.warning(
+            "execute_task: не удалось записать result telegram_discover_leads task_id=%s",
+            task.id,
+        )
+
+    log.info(
+        "execute_task: telegram_discover_leads OK task_id=%s session=%s total=%s inserted=%s updated=%s skipped=%s",
+        task.id,
+        account.session_name,
+        result.total,
+        (result.persist.inserted if result.persist else 0),
+        (result.persist.updated if result.persist else 0),
+        (result.persist.skipped_low_score if result.persist else 0),
+    )
+
+
 async def execute_task(
     task: ClaimedTask,
     *,
@@ -622,6 +720,14 @@ async def execute_task(
         )
     elif task.task_type_code in (TELEGRAM_DISCOVER, DISCOVER_GROUPS):
         await _execute_telegram_discover(
+            task,
+            account=account,
+            client_getter=client_getter or default_client_getter(),
+            queue=queue or TaskQueueRepo(),
+            channels_repo=channels_repo or SourceChannelsRepo(),
+        )
+    elif task.task_type_code == TELEGRAM_DISCOVER_LEADS:
+        await _execute_telegram_discover_leads(
             task,
             account=account,
             client_getter=client_getter or default_client_getter(),
