@@ -9,11 +9,10 @@
 
 РЕШЕНИЕ:
     Гейт минимального интервала между join на одном аккаунте (в дополнение к
-    часовому RPH). Равномерно размазывает join во времени: при интервале 120с
-    один аккаунт делает не чаще 1 join / 2 мин ≈ 30 join/час — это совпадает с
-    безопасным governor'ом из A22 (30 add/аккаунт/час). На здоровом пуле из ~30
-    аккаунтов даёт ~900/час без бурстов; на малом пуле мягко ограничивает темп,
-    не гоня аккаунты в FloodWait.
+    часовому RPH). Равномерно размазывает join во времени. Интервал задаётся
+    только через ``JOIN_PACING_SECONDS`` в ``.env`` (см. ниже) — без хардкода
+    «безопасного» 120с. Примеры: 30с ≈ 120 join/акк/час, 60с ≈ 60/час,
+    120с ≈ 30/час (ровно под governor A22).
 
 РЕАЛИЗАЦИЯ:
     Per-process (один event loop → один процесс воркеров). Диспетчер держит
@@ -27,9 +26,11 @@
     пейсинге — откладывает задачу (postpone) на остаток интервала. Так воркеры
     не залипают на sleep и не держат lease задачи (WORKER_LOCK_TTL_SECONDS).
 
-Управление через env:
-- ``JOIN_PACING_SECONDS`` (default 120) — минимальный интервал между join на
-  одном аккаунте, в секундах. ``0`` — пейсинг выключен.
+Управление через env (``standalone_discovery/.env`` на co-located / корневой
+``.env`` для отдельного queue-worker):
+- ``JOIN_PACING_SECONDS`` — минимальный интервал между join на одном аккаунте,
+  в секундах. Обязательно задавать явно в prod. ``0`` — пейсинг выключен.
+  Если переменная не задана — fallback ``60`` (умеренный темп, не 120).
 """
 from __future__ import annotations
 
@@ -40,19 +41,25 @@ import time
 logger = logging.getLogger("queue_worker.pacing")
 
 _ENV_INTERVAL = "JOIN_PACING_SECONDS"
-_DEFAULT_INTERVAL_SECONDS = 120.0
+# Fallback только если переменная не задана. Тюнить темп — через .env, не код.
+_DEFAULT_INTERVAL_SECONDS = 60.0
 
 
 def _resolve_interval() -> float:
-    """Интервал пейсинга из env (fallback — безопасные 120с = 30 join/ч)."""
+    """Интервал пейсинга строго из JOIN_PACING_SECONDS (иначе fallback 60с)."""
     raw = os.getenv(_ENV_INTERVAL, "").strip()
     if not raw:
+        logger.info(
+            "%s не задан — fallback %.0fs; задайте явно в .env",
+            _ENV_INTERVAL,
+            _DEFAULT_INTERVAL_SECONDS,
+        )
         return _DEFAULT_INTERVAL_SECONDS
     try:
         value = float(raw)
     except ValueError:
         logger.warning(
-            "%s=%r не число — использую default %.0fs",
+            "%s=%r не число — использую fallback %.0fs",
             _ENV_INTERVAL,
             raw,
             _DEFAULT_INTERVAL_SECONDS,
