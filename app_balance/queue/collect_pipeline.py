@@ -55,6 +55,9 @@ class CollectContext:
     entity: Any = None
     full: Any = None
     joined: bool = False
+    # Уже были участником до этого прогона (UserAlreadyParticipant) —
+    # LeaveChannel НЕ вызываем, иначе сорвём listener assigned-канала.
+    already_member: bool = False
     left: bool = False
     posts: list[dict[str, Any]] = field(default_factory=list)
     members: list[dict[str, Any]] = field(default_factory=list)
@@ -134,10 +137,18 @@ async def _ensure_entity(client: Any, ref: str, ctx: CollectContext) -> None:
 
 
 async def _op_join(client: Any, ref: str, ctx: CollectContext) -> None:
+    from telethon.errors import UserAlreadyParticipantError
     from telethon.tl import functions
 
     await _ensure_entity(client, ref, ctx)
-    await client(functions.channels.JoinChannelRequest(channel=ctx.entity))
+    try:
+        await client(functions.channels.JoinChannelRequest(channel=ctx.entity))
+    except UserAlreadyParticipantError:
+        # Канал уже на аккаунте (типичный update_channel / повтор collect) —
+        # не помечаем joined, чтобы LeaveChannel не снял listener.
+        ctx.already_member = True
+        logger.info("collect: уже участник канала, skip join ref=%s", ref)
+        return
     ctx.joined = True
 
 
@@ -201,10 +212,36 @@ async def _op_get_participants(client: Any, ref: str, ctx: CollectContext) -> No
 
 
 async def _op_leave(client: Any, ref: str, ctx: CollectContext) -> None:
+    """Выход только после временного join в ЭТОМ прогоне.
+
+    Если аккаунт уже был участником (listener / assigned) — Leave пропускаем.
+    «not a member» при Leave — success (идемпотентность).
+    """
+    from telethon.errors import UserNotParticipantError
     from telethon.tl import functions
 
+    if ctx.already_member or not ctx.joined:
+        logger.info(
+            "collect: skip LeaveChannel (already_member=%s joined=%s) ref=%s",
+            ctx.already_member,
+            ctx.joined,
+            ref,
+        )
+        ctx.left = False
+        return
+
     await _ensure_entity(client, ref, ctx)
-    await client(functions.channels.LeaveChannelRequest(channel=ctx.entity))
+    try:
+        await client(functions.channels.LeaveChannelRequest(channel=ctx.entity))
+    except UserNotParticipantError:
+        logger.info("collect: LeaveChannel — уже не участник ref=%s", ref)
+    except Exception as exc:  # noqa: BLE001
+        # Telethon иногда отдаёт RPC с текстом вместо типизированного класса.
+        msg = str(exc).lower()
+        if "not a member" in msg or "not a participant" in msg:
+            logger.info("collect: LeaveChannel soft-ok (%s) ref=%s", exc, ref)
+        else:
+            raise
     ctx.left = True
 
 
