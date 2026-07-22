@@ -12,7 +12,7 @@ name: lidogen-telegram-balancer
 # Тесты все (локальная PG):      docker compose --profile local run --rm test-local
 # Миграции перед первым test:    docker compose run --rm migrate
 # Воркер очереди (Z4):           docker compose up -d queue-worker
-# Продюсеры (F8):                 docker compose --profile producers up -d producer-collect producer-update producer-balancer
+# Продюсеры (F8):                 docker compose --profile producers up -d producer-collect producer-update producer-balancer producer-inactive-remove
 # Мониторинг (G4+G6+G7):          docker compose --profile monitoring up -d queue-monitor
 # Быстрые тесты блока G:          make docker-test-g
 # Полный pytest (shared PG):      make docker-test-safe
@@ -103,10 +103,11 @@ services:
     stop_grace_period: 30s
     command: ["python", "-m", "app_balance.queue_worker"]
 
-  # F8 — планировщики продюсеров. Три job'а на одном образе через subcommands
-  # queue_scheduler: collect (F4), update (F5), balancer (F2). Интервал —
-  # PRODUCER_INTERVAL_SECONDS. balancer восстанавливает clump'ы из стора,
-  # поэтому ему нужны те же session/data-маунты, что и queue-worker.
+  # F8 — планировщики продюсеров. Job'ы на одном образе через subcommands
+  # queue_scheduler: collect (F4), update (F5), balancer (F2), inactive-remove.
+  # Интервал — PRODUCER_INTERVAL_SECONDS. balancer восстанавливает clump'ы из
+  # стора, поэтому ему нужны те же session/data-маунты, что и queue-worker.
+  # inactive-remove читает только parser_jobs.json (без Telethon restore).
   producer-collect:
     <<: *balancer-image
     profiles: [producers]
@@ -165,6 +166,28 @@ services:
     stop_signal: SIGTERM
     stop_grace_period: 30s
     command: ["python", "-m", "app_balance.queue_scheduler", "balancer"]
+
+  producer-inactive-remove:
+    <<: *balancer-image
+    profiles: [producers]
+    restart: unless-stopped
+    # Без restore clump / без открытия .session — совместим с co-located discovery-api.
+    env_file:
+      - path: .env
+        required: false
+      - path: standalone_discovery/.env
+        required: false
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PRODUCER_INTERVAL_SECONDS: ${PRODUCER_INACTIVE_REMOVE_INTERVAL_SECONDS:-86400}
+      INACTIVE_CHANNEL_REMOVE_AFTER_SECONDS: ${INACTIVE_CHANNEL_REMOVE_AFTER_SECONDS:-}
+      INACTIVE_CHANNEL_REMOVE_CLEAR_ORPHAN_ASSIGNED: ${INACTIVE_CHANNEL_REMOVE_CLEAR_ORPHAN_ASSIGNED:-true}
+      PARSER_STORE_PATH: /app/discovery_api/data/parser_jobs.json
+    volumes:
+      - ./standalone_discovery/data:/app/discovery_api/data
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command: ["python", "-m", "app_balance.queue_scheduler", "inactive-remove"]
 
   # G4 + G6 + G7 — мониторинг очереди, алерты §26.4, детектор ошибок, пороги загрузки.
   queue-monitor:
