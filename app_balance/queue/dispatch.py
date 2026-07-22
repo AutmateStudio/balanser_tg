@@ -53,11 +53,15 @@ _ACCOUNT_SCOPED_RETRY_CODES = frozenset(
         ErrorCode.ACCOUNT_UNAUTHORIZED,
     }
 )
+# collect/update тоже фиксируют account_id — при unauthorized нужно
+# сбросить привязку, иначе задача вечно бьётся о мёртвую сессию (test1).
 _AUTO_PICK_TASK_TYPES = frozenset(
     {
         "parser_add_channel",
         "telegram_discover",
         "discover_groups",
+        "collect_extra_data",
+        "update_channel",
     }
 )
 # Типы задач, к которым применяется пейсинг join (минимальный интервал между
@@ -918,4 +922,24 @@ class TaskDispatcher:
                         account.session_name,
                         exc_info=True,
                     )
+            # Иначе producer-collect снова поставит задачи на тот же мёртвый account_id.
+            try:
+                from app_balance.queue.source_channels import SourceChannelsRepo
+
+                cleared = await SourceChannelsRepo().clear_assignments_for_account(
+                    account.id
+                )
+                if cleared:
+                    logger.info(
+                        "dispatch: снято %d assigned_account_id с каналов "
+                        "после unauthorized session=%s",
+                        cleared,
+                        account.session_name,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "dispatch: не удалось clear_assignments_for_account для %s",
+                    account.session_name,
+                    exc_info=True,
+                )
 

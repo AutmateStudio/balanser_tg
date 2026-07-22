@@ -377,7 +377,13 @@ async def _execute_collect_extra_data(
             ErrorCode.INVALID_PAYLOAD, f"channel {channel_id} has no ref"
         )
 
-    client = await client_getter(account.session_name)
+    try:
+        client = await client_getter(account.session_name)
+    except QueueTaskError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise map_telethon_exception(exc) from exc
+
     ctx = CollectContext()
     execute_op = build_collect_op_executor(client, ref, ctx)
 
@@ -428,7 +434,13 @@ async def _execute_update_channel(
             ErrorCode.INVALID_PAYLOAD, f"channel {channel_id} has no ref"
         )
 
-    client = await client_getter(account.session_name)
+    try:
+        client = await client_getter(account.session_name)
+    except QueueTaskError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise map_telethon_exception(exc) from exc
+
     ctx = CollectContext()
     execute_op = build_collect_op_executor(client, ref, ctx)
 

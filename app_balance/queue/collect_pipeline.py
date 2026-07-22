@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
-from app_balance.queue.errors import QueueTaskError, map_telethon_exception
+from app_balance.queue.error_codes import ErrorCode
+from app_balance.queue.errors import PermanentError, QueueTaskError, map_telethon_exception
 from app_balance.queue.per_op_pipeline import OpExecutor, PipelineStep
 
 logger = logging.getLogger(__name__)
@@ -108,12 +109,34 @@ def _extract_post_text(msg: Any) -> str | None:
 
 
 async def _op_get_entity(client: Any, ref: str, ctx: CollectContext) -> None:
-    ctx.entity = await client.get_entity(ref)
+    cleaned = (ref or "").strip()
+    if not cleaned:
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing channel_ref")
+    ctx.entity = await client.get_entity(cleaned)
+    if ctx.entity is None:
+        raise PermanentError(
+            ErrorCode.USERNAME_NOT_FOUND,
+            f"get_entity returned None for ref={cleaned!r}",
+        )
+
+
+async def _ensure_entity(client: Any, ref: str, ctx: CollectContext) -> None:
+    """Гарантирует ctx.entity перед join/get_full/… .
+
+    На retry E6 пропускает уже завершённый get_entity, но CollectContext
+    создаётся заново → entity=None → JoinChannel(None) →
+    «Cannot cast NoneType to any kind of Peer». Перед любым op, которому
+    нужен peer, догружаем entity (без повторной записи last_completed_step).
+    """
+    if ctx.entity is not None:
+        return
+    await _op_get_entity(client, ref, ctx)
 
 
 async def _op_join(client: Any, ref: str, ctx: CollectContext) -> None:
     from telethon.tl import functions
 
+    await _ensure_entity(client, ref, ctx)
     await client(functions.channels.JoinChannelRequest(channel=ctx.entity))
     ctx.joined = True
 
@@ -121,12 +144,14 @@ async def _op_join(client: Any, ref: str, ctx: CollectContext) -> None:
 async def _op_get_full(client: Any, ref: str, ctx: CollectContext) -> None:
     from telethon.tl import functions
 
+    await _ensure_entity(client, ref, ctx)
     ctx.full = await client(
         functions.channels.GetFullChannelRequest(channel=ctx.entity)
     )
 
 
 async def _op_iter_messages(client: Any, ref: str, ctx: CollectContext) -> None:
+    await _ensure_entity(client, ref, ctx)
     limit = _env_int(_POSTS_LIMIT_ENV, DEFAULT_RECENT_POSTS_LIMIT)
     posts: list[dict[str, Any]] = []
     async for msg in client.iter_messages(ctx.entity, limit=limit):
@@ -157,6 +182,7 @@ async def _op_iter_messages(client: Any, ref: str, ctx: CollectContext) -> None:
 async def _op_get_participants(client: Any, ref: str, ctx: CollectContext) -> None:
     # GetParticipants имеет смысл только для megagroup (seed §23). Для broadcast
     # пропускаем без RPC, чтобы не тратить лимит зря.
+    await _ensure_entity(client, ref, ctx)
     if not _is_megagroup(ctx.entity):
         logger.debug("collect: пропуск GetParticipants (не megagroup) ref=%s", ref)
         return
@@ -177,6 +203,7 @@ async def _op_get_participants(client: Any, ref: str, ctx: CollectContext) -> No
 async def _op_leave(client: Any, ref: str, ctx: CollectContext) -> None:
     from telethon.tl import functions
 
+    await _ensure_entity(client, ref, ctx)
     await client(functions.channels.LeaveChannelRequest(channel=ctx.entity))
     ctx.left = True
 

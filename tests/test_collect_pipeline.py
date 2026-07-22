@@ -207,6 +207,42 @@ def test_extract_post_text_empty_returns_none() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resume_without_entity_re_resolves_before_join() -> None:
+    """E6 retry: get_entity уже в last_completed_step, но ctx пустой → re-resolve."""
+    client = _FakeClient(_FakeEntity(megagroup=True))
+    ctx = CollectContext()  # entity=None, как после нового attempt
+    execute_op = build_collect_op_executor(client, "@testch", ctx)
+    steps = ordered_pipeline(_collect_task_type())
+    join_step = next(s for s in steps if s.op_code == "channels.JoinChannel")
+
+    await execute_op(join_step)
+
+    assert client.get_entity_calls == 1
+    assert ctx.entity is not None
+    assert "JoinChannelRequest" in client.requests
+
+
+@pytest.mark.asyncio
+async def test_null_peer_typeerror_is_permanent() -> None:
+    from app_balance.queue.errors import PermanentError
+
+    class _NullPeerClient(_FakeClient):
+        async def __call__(self, request):
+            raise TypeError("Cannot cast NoneType to any kind of Peer.")
+
+    client = _NullPeerClient(_FakeEntity(megagroup=True))
+    ctx = CollectContext()
+    ctx.entity = client.entity
+    execute_op = build_collect_op_executor(client, "@x", ctx)
+    join_step = next(
+        s for s in ordered_pipeline(_collect_task_type()) if s.op_code == "channels.JoinChannel"
+    )
+
+    with pytest.raises(PermanentError):
+        await execute_op(join_step)
+
+
+@pytest.mark.asyncio
 async def test_telethon_error_mapped_to_typed_error() -> None:
     class _BoomClient(_FakeClient):
         async def get_entity(self, ref):
