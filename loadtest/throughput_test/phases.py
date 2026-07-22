@@ -398,7 +398,9 @@ class PhaseOrchestrator:
             self.state.add_task_ids = accepted_task_ids
             self._save()
 
-        # уточнить task_ids из PG, если HTTP не вернул полный список
+        # Источник истины — PG с фильтром created_at >= since.
+        # HTTP task_ids могут включать dedup-hit уже done/старых задач
+        # (_task_id_from_enqueue возвращает existing_task_id) → раздувает done.
         if not self.cfg.dry_run and accepted_refs:
             found = await self.db.find_task_ids_for_channels(
                 parser_id=self.cfg.parser_id,
@@ -406,8 +408,12 @@ class PhaseOrchestrator:
                 task_type="parser_add_channel",
                 since=since,
             )
-            if len(found) >= len(accepted_task_ids):
+            if found:
                 accepted_task_ids = found
+            elif accepted_task_ids:
+                accepted_task_ids = await self.db.filter_task_ids_created_since(
+                    accepted_task_ids, since=since
+                )
 
         self.state.added_channels = accepted_refs[:target]
         self.state.add_task_ids = accepted_task_ids
@@ -505,6 +511,10 @@ class PhaseOrchestrator:
             )
             if found:
                 task_ids = found
+            elif task_ids:
+                task_ids = await self.db.filter_task_ids_created_since(
+                    task_ids, since=since
+                )
 
         self.state.remove_task_ids = task_ids
         result = {
@@ -582,7 +592,12 @@ class PhaseOrchestrator:
                 since = datetime.fromisoformat(ts_map[start_key])
                 if since.tzinfo is None:
                     since = since.replace(tzinfo=timezone.utc)
-                foreign = await self.db.foreign_tasks_in_window(since=since)
+                foreign = await self.db.foreign_tasks_in_window(
+                    since=since,
+                    exclude_task_ids=(
+                        list(self.state.add_task_ids) + list(self.state.remove_task_ids)
+                    ),
+                )
         except Exception as exc:  # noqa: BLE001
             self.errors.add(phase="report", op="foreign_tasks", error=exc)
 
@@ -713,7 +728,9 @@ class PhaseOrchestrator:
         elapsed_final = min(float(window_sec), time.monotonic() - started_mono)
         status_counts = await self.db.task_status_counts(task_ids)
         latency = await self.db.latency_stats(task_ids)
-        hourly = await self.db.hourly_done_counts(task_ids, since=started_at)
+        # Почасово по всем done этих task_ids (без отсечения по старту
+        # монитора — иначе теряются done, завершённые во время enqueue).
+        hourly = await self.db.hourly_done_counts(task_ids, since=None)
         per_account = await self.db.per_account_stats(task_ids)
         errors = await self.db.error_breakdown(task_ids)
         metrics = build_phase_metrics(

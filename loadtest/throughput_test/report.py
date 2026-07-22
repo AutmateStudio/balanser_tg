@@ -152,10 +152,25 @@ def _render_markdown(payload: dict[str, Any]) -> str:
     cfg = payload.get("config") or {}
     lines.append("## Конфиг")
     lines.append("")
-    lines.append(f"- add_count: **{cfg.get('add_count')}**")
-    lines.append(f"- wait_recovery_sec: **{cfg.get('wait_recovery_sec')}**")
-    lines.append(f"- add_window_sec: **{cfg.get('add_window_sec')}**")
-    lines.append(f"- remove_window_sec: **{cfg.get('remove_window_sec')}**")
+    if cfg.get("mode"):
+        lines.append(f"- mode: **{cfg.get('mode')}**")
+    if cfg.get("since") or cfg.get("until"):
+        lines.append(f"- since: `{cfg.get('since')}`")
+        lines.append(f"- until: `{cfg.get('until')}`")
+    if cfg.get("wall_hours") is not None:
+        lines.append(f"- wall_hours: **{cfg.get('wall_hours')}**")
+    if cfg.get("scope"):
+        lines.append(f"- scope: **{cfg.get('scope')}**")
+    if cfg.get("add_count") is not None:
+        lines.append(f"- add_count: **{cfg.get('add_count')}**")
+    if cfg.get("wait_recovery_sec") is not None:
+        lines.append(f"- wait_recovery_sec: **{cfg.get('wait_recovery_sec')}**")
+    if cfg.get("add_window_sec") is not None:
+        lines.append(f"- add_window_sec: **{cfg.get('add_window_sec')}**")
+    if cfg.get("remove_window_sec") is not None:
+        lines.append(f"- remove_window_sec: **{cfg.get('remove_window_sec')}**")
+    if cfg.get("from_run"):
+        lines.append(f"- from_run: `{cfg.get('from_run')}`")
     lines.append("")
 
     ts = payload.get("phase_timestamps") or {}
@@ -232,22 +247,53 @@ def _render_markdown(payload: dict[str, Any]) -> str:
 def _section_metrics(title: str, m: dict[str, Any]) -> list[str]:
     lines = [f"## {title}", ""]
     thr = m.get("throughput") or {}
+    thr_wall = m.get("throughput_over_wall") or {}
+    thr_span = m.get("throughput_over_span") or {}
     lines.append(f"- поставлено: **{m.get('enqueued', 0)}**")
     lines.append(f"- done: **{m.get('done', 0)}**")
     lines.append(f"- failed: **{m.get('failed', 0)}**")
     lines.append(f"- pending (осталось): **{m.get('pending', 0)}**")
     lines.append(f"- completion: **{m.get('completion_ratio', 0):.1%}**")
     lines.append(
-        f"- скорость: **{thr.get('per_hour', 0)} задач/час** "
+        f"- скорость (primary): **{thr.get('per_hour', 0)} задач/час** "
         f"({thr.get('per_minute', 0)} /мин) за {thr.get('elapsed_sec', 0)}s"
+        + (
+            f" [{m.get('elapsed_basis')}]"
+            if m.get("elapsed_basis")
+            else ""
+        )
     )
+    if thr_wall and thr_wall != thr:
+        lines.append(
+            f"- скорость (wall): **{thr_wall.get('per_hour', 0)} задач/час** "
+            f"за {thr_wall.get('elapsed_sec', 0)}s"
+        )
+    if thr_span and thr_span != thr and thr_span != thr_wall:
+        lines.append(
+            f"- скорость (first_created→last_done): "
+            f"**{thr_span.get('per_hour', 0)} задач/час** "
+            f"за {thr_span.get('elapsed_sec', 0)}s"
+        )
+    if m.get("done_finished_in_window") is not None:
+        lines.append(
+            f"- done с finished_at в окне (могут быть созданы раньше): "
+            f"**{m.get('done_finished_in_window')}**"
+        )
     lat = m.get("latency") or {}
     if lat.get("count"):
+        basis = lat.get("basis") or "created→finished"
         lines.append(
-            f"- латентность done: avg={lat.get('avg_sec')}s "
+            f"- латентность ({basis}): avg={lat.get('avg_sec')}s "
             f"p50={lat.get('p50_sec')}s p95={lat.get('p95_sec')}s "
             f"(n={lat.get('count')})"
         )
+        if lat.get("exec_count"):
+            lines.append(
+                f"- латентность exec (started/locked→finished): "
+                f"avg={lat.get('exec_avg_sec')}s "
+                f"p50={lat.get('exec_p50_sec')}s "
+                f"(n={lat.get('exec_count')})"
+            )
     lines.append("")
     hourly = m.get("hourly_done") or []
     if hourly:

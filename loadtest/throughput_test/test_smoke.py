@@ -180,7 +180,77 @@ class TestMetrics(unittest.TestCase):
             self.assertIn("Throughput test report", text)
             self.assertIn("25.0 задач/час", text)
             self.assertIn("FloodWait", text)
+            self.assertIn("add_count: **4000**", text)
             self.assertTrue(js.exists())
+
+    def test_report_postfacto_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            add_m = {
+                "label": "postfacto:parser_add_channel",
+                "enqueued": 100,
+                "done": 50,
+                "failed": 0,
+                "pending": 50,
+                "cancelled": 0,
+                "status_counts": {"done": 50, "queued": 50},
+                "window_sec": 3600,
+                "elapsed_sec": 3600,
+                "elapsed_basis": "wall_since→until",
+                "throughput": {"per_hour": 50.0, "per_minute": 0.833, "elapsed_sec": 3600},
+                "throughput_over_wall": {
+                    "per_hour": 50.0,
+                    "per_minute": 0.833,
+                    "elapsed_sec": 3600,
+                },
+                "throughput_over_span": {
+                    "per_hour": 100.0,
+                    "per_minute": 1.667,
+                    "elapsed_sec": 1800,
+                },
+                "latency": {
+                    "count": 50,
+                    "basis": "created→finished (queue+exec)",
+                    "avg_sec": 120.0,
+                    "p50_sec": 100.0,
+                    "p95_sec": 200.0,
+                    "exec_count": 50,
+                    "exec_avg_sec": 8.0,
+                    "exec_p50_sec": 7.0,
+                },
+                "hourly_done": [],
+                "per_account": [],
+                "top_errors": [],
+                "completion_ratio": 0.5,
+                "scope": "task_ids",
+            }
+            md, _ = write_reports(
+                run_dir=run_dir,
+                run_id="PF",
+                parser_id="pid",
+                config_snapshot={
+                    "mode": "postfacto",
+                    "since": "2026-07-21T00:00:00+00:00",
+                    "until": "2026-07-21T01:00:00+00:00",
+                    "wall_hours": 1.0,
+                    "scope": "task_ids",
+                    "add_count": 100,
+                },
+                add_metrics=add_m,
+                remove_metrics=None,
+                restore_result=None,
+                sync_restore=None,
+                foreign_tasks=None,
+                phase_timestamps={},
+                notes=[],
+            )
+            text = md.read_text(encoding="utf-8")
+            self.assertIn("mode: **postfacto**", text)
+            self.assertIn("add_count: **100**", text)
+            self.assertNotIn("add_count: **None**", text)
+            self.assertIn("wall_since→until", text)
+            self.assertIn("латентность exec", text)
+            self.assertIn("first_created→last_done", text)
 
 
 class TestStateAndSync(unittest.TestCase):

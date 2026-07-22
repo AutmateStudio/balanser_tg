@@ -280,24 +280,29 @@ class ThroughputDb:
         *,
         since: datetime,
         until: datetime | None = None,
-        exclude_created_by_prefix: str = "throughput_test:",
+        exclude_task_ids: list[int] | None = None,
     ) -> dict[str, Any]:
-        """Задачи, созданные внешними источниками в окне теста."""
+        """Задачи add/remove в окне, НЕ входящие в exclude_task_ids прогона.
+
+        API всегда пишет created_by=discovery_api:add-channels — префикс
+        throughput_test: никогда не ставится, поэтому фильтр только по id.
+        """
         assert self.pool
         until = until or datetime.now(timezone.utc)
+        exclude = list(exclude_task_ids or [])
         rows = await self.pool.fetch(
             """
             SELECT task_type_code, created_by, count(*)::int AS cnt
             FROM task_queue
             WHERE created_at >= $1 AND created_at < $2
               AND task_type_code IN ('parser_add_channel', 'parser_remove_channel')
-              AND COALESCE(created_by, '') NOT LIKE $3
+              AND NOT (id = ANY($3::bigint[]))
             GROUP BY task_type_code, created_by
             ORDER BY cnt DESC
             """,
             since,
             until,
-            f"{exclude_created_by_prefix}%",
+            exclude,
         )
         items = [
             {
@@ -310,6 +315,7 @@ class ThroughputDb:
         return {
             "total": sum(i["count"] for i in items),
             "by_source": items,
+            "excluded_task_ids": len(exclude),
         }
 
     async def per_account_stats(self, task_ids: list[int]) -> list[dict[str, Any]]:
@@ -377,6 +383,11 @@ class ThroughputDb:
         return [{"error": r["err"], "count": int(r["cnt"])} for r in rows]
 
     async def latency_stats(self, task_ids: list[int]) -> dict[str, Any]:
+        """Латентность done-задач.
+
+        avg/p50/p95 — время в очереди (created→finished).
+        exec_* — чистое выполнение (COALESCE(started_at, locked_at)→finished), если есть.
+        """
         assert self.pool
         if not task_ids:
             return {"count": 0}
@@ -392,7 +403,39 @@ class ThroughputDb:
                 ORDER BY EXTRACT(EPOCH FROM (finished_at - created_at))
               ) AS p95_sec,
               min(EXTRACT(EPOCH FROM (finished_at - created_at))) AS min_sec,
-              max(EXTRACT(EPOCH FROM (finished_at - created_at))) AS max_sec
+              max(EXTRACT(EPOCH FROM (finished_at - created_at))) AS max_sec,
+              (
+                SELECT count(*)::int
+                FROM task_queue t2
+                WHERE t2.id = ANY($1::bigint[])
+                  AND t2.status = 'done'
+                  AND t2.finished_at IS NOT NULL
+                  AND COALESCE(t2.started_at, t2.locked_at) IS NOT NULL
+              ) AS exec_count,
+              (
+                SELECT avg(
+                  EXTRACT(EPOCH FROM (
+                    t2.finished_at - COALESCE(t2.started_at, t2.locked_at)
+                  ))
+                )
+                FROM task_queue t2
+                WHERE t2.id = ANY($1::bigint[])
+                  AND t2.status = 'done'
+                  AND t2.finished_at IS NOT NULL
+                  AND COALESCE(t2.started_at, t2.locked_at) IS NOT NULL
+              ) AS exec_avg_sec,
+              (
+                SELECT percentile_cont(0.5) WITHIN GROUP (
+                  ORDER BY EXTRACT(EPOCH FROM (
+                    t2.finished_at - COALESCE(t2.started_at, t2.locked_at)
+                  ))
+                )
+                FROM task_queue t2
+                WHERE t2.id = ANY($1::bigint[])
+                  AND t2.status = 'done'
+                  AND t2.finished_at IS NOT NULL
+                  AND COALESCE(t2.started_at, t2.locked_at) IS NOT NULL
+              ) AS exec_p50_sec
             FROM task_queue
             WHERE id = ANY($1::bigint[])
               AND status = 'done'
@@ -405,19 +448,43 @@ class ThroughputDb:
             return {"count": 0}
 
         def _f(v: Any) -> float | None:
-            return float(v) if v is not None else None
+            return round(float(v), 3) if v is not None else None
 
         return {
             "count": int(row["cnt"]),
+            "basis": "created→finished (queue+exec)",
             "avg_sec": _f(row["avg_sec"]),
             "p50_sec": _f(row["p50_sec"]),
             "p95_sec": _f(row["p95_sec"]),
             "min_sec": _f(row["min_sec"]),
             "max_sec": _f(row["max_sec"]),
+            "exec_count": int(row["exec_count"] or 0),
+            "exec_avg_sec": _f(row["exec_avg_sec"]),
+            "exec_p50_sec": _f(row["exec_p50_sec"]),
         }
 
-    async def hourly_done_counts(
+    async def filter_task_ids_created_since(
         self, task_ids: list[int], *, since: datetime
+    ) -> list[int]:
+        """Оставить только задачи, созданные не раньше since (отсечь dedup-hit старых)."""
+        assert self.pool
+        if not task_ids:
+            return []
+        rows = await self.pool.fetch(
+            """
+            SELECT id
+            FROM task_queue
+            WHERE id = ANY($1::bigint[])
+              AND created_at >= $2
+            ORDER BY id
+            """,
+            task_ids,
+            since,
+        )
+        return [int(r["id"]) for r in rows]
+
+    async def hourly_done_counts(
+        self, task_ids: list[int], *, since: datetime | None = None
     ) -> list[dict[str, Any]]:
         assert self.pool
         if not task_ids:
@@ -431,7 +498,7 @@ class ThroughputDb:
             WHERE id = ANY($1::bigint[])
               AND status = 'done'
               AND finished_at IS NOT NULL
-              AND finished_at >= $2
+              AND ($2::timestamptz IS NULL OR finished_at >= $2)
             GROUP BY 1
             ORDER BY 1
             """,
