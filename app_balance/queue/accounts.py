@@ -385,6 +385,39 @@ class AccountsRepo:
             )
         return {str(row["session_name"]): int(row["id"]) for row in rows}
 
+    async def list_by_session_names(
+        self, session_names: list[str]
+    ) -> dict[str, Account]:
+        """Batch: нормализованный session_name → Account (один SELECT).
+
+        Нужен для enqueue-time dedup в add-channels: вместо N×
+        (get_id_by_session_name + get_by_id) — один запрос на весь список
+        владельцев из clump.assignments.
+        """
+        from app_balance.queue.accounts_sync import normalize_session_name
+
+        names: list[str] = []
+        seen: set[str] = set()
+        for raw in session_names:
+            name = normalize_session_name(raw)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        if not names:
+            return {}
+        async with acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, session_name, status, is_enabled, current_task_id,
+                       cooldown_until, last_used_at
+                FROM accounts
+                WHERE session_name = ANY($1::text[])
+                """,
+                names,
+            )
+        return {str(row["session_name"]): _row_to_account(row) for row in rows}
+
     async def list_queue_states(self) -> dict[str, AccountQueueState]:
         """session_name → PG snapshot (один SELECT на весь парк)."""
         async with acquire() as conn:

@@ -78,3 +78,85 @@ async def test_find_id_by_ref_empty_returns_none() -> None:
     with patch("app_balance.queue.source_channels.acquire") as acq:
         assert await SourceChannelsRepo().find_id_by_ref("   ") is None
         acq.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_find_ids_by_refs_batch_ext_id() -> None:
+    """Тир 1 (external_channel_id) закрывает все refs одним fetch."""
+    conn = AsyncMock()
+    conn.fetch = AsyncMock(
+        return_value=[
+            {"needle": "a", "id": 1},
+            {"needle": "b", "id": 2},
+        ]
+    )
+    cm = AsyncMock()
+    cm.__aenter__.return_value = conn
+    cm.__aexit__.return_value = None
+
+    with patch("app_balance.queue.source_channels.acquire", return_value=cm):
+        found = await SourceChannelsRepo().find_ids_by_refs(["@a", "@b"])
+
+    assert found == {"@a": 1, "@b": 2}
+    assert conn.fetch.await_count == 1
+    sql = conn.fetch.await_args_list[0].args[0]
+    assert "external_channel_id" in sql
+
+
+@pytest.mark.asyncio
+async def test_find_ids_by_refs_falls_back_to_name_and_url() -> None:
+    """Непойманные тиром 1 идут в тир 2 (name), затем тир 3 (url exact)."""
+    conn = AsyncMock()
+
+    async def _fetch(sql, *args):
+        if "external_channel_id" in sql:
+            return []
+        if "trim(both '@'" in sql or "trim(both '@' from" in sql:
+            return [{"needle": "named", "id": 10}]
+        if "external_url" in sql:
+            return [{"url": "https://t.me/urled", "id": 20}]
+        return []
+
+    conn.fetch = AsyncMock(side_effect=_fetch)
+    cm = AsyncMock()
+    cm.__aenter__.return_value = conn
+    cm.__aexit__.return_value = None
+
+    with patch("app_balance.queue.source_channels.acquire", return_value=cm), patch.object(
+        SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock
+    ) as mock_single:
+        mock_single.return_value = None
+        found = await SourceChannelsRepo().find_ids_by_refs(
+            ["@named", "https://t.me/urled"]
+        )
+
+    assert found == {"@named": 10, "https://t.me/urled": 20}
+    # Тир 1 + тир 2 + тир 3
+    assert conn.fetch.await_count == 3
+    # Fallback find_id_by_ref не вызывался — всё закрыто batch-тирами
+    mock_single.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_find_ids_by_refs_fallback_per_unresolved() -> None:
+    """Остаток после тиров 1–3 уходит в поштучный find_id_by_ref."""
+    conn = AsyncMock()
+    conn.fetch = AsyncMock(return_value=[])
+    cm = AsyncMock()
+    cm.__aenter__.return_value = conn
+    cm.__aexit__.return_value = None
+
+    with patch("app_balance.queue.source_channels.acquire", return_value=cm), patch.object(
+        SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=77
+    ) as mock_single:
+        found = await SourceChannelsRepo().find_ids_by_refs(["@rare"])
+
+    assert found == {"@rare": 77}
+    mock_single.assert_awaited_once_with("@rare")
+
+
+@pytest.mark.asyncio
+async def test_find_ids_by_refs_empty() -> None:
+    with patch("app_balance.queue.source_channels.acquire") as acq:
+        assert await SourceChannelsRepo().find_ids_by_refs(["", "  "]) == {}
+        acq.assert_not_called()
