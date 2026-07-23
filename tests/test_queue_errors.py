@@ -131,6 +131,34 @@ def test_map_telethon_exception_fatal() -> None:
     assert mapped.code == FATAL
 
 
+def test_map_telethon_exception_channel_private_is_permanent() -> None:
+    """collect_pipeline JoinChannelRequest на приватный канал — не зомби-цикл (B12)."""
+    mapped = map_telethon_exception(te.ChannelPrivateError(None))
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "channel_private"
+
+
+def test_map_telethon_exception_invite_hash_expired_is_permanent() -> None:
+    mapped = map_telethon_exception(te.InviteHashExpiredError(None))
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "channel_private"
+
+
+def test_map_telethon_exception_channels_too_much_is_retryable() -> None:
+    mapped = map_telethon_exception(te.ChannelsTooMuchError(None))
+    assert isinstance(mapped, RetryableError)
+    assert mapped.code == "channels_too_much"
+    assert mapped.retry_after_seconds == 1800
+
+
+def test_map_telethon_exception_username_not_found_is_permanent() -> None:
+    """client.get_entity() бросает ValueError (не RPCError) при мёртвом username."""
+    exc = ValueError('No user has "cpaim_forum" as username')
+    mapped = map_telethon_exception(exc)
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "username_not_found"
+
+
 def test_map_telethon_exception_unauthorized_runtime() -> None:
     msg = "Сессия '/app/sessions/test4' не авторизована; войдите в аккаунт"
     mapped = map_telethon_exception(RuntimeError(msg))

@@ -200,6 +200,33 @@ def map_telethon_exception(exc: BaseException) -> QueueTaskError:
     ):
         return PermanentError(ErrorCode.INVALID_PAYLOAD, str(exc) or "null_peer")
 
+    # Ошибки конкретного канала (JoinChannelRequest/get_entity в collect_pipeline,
+    # F6/F7) — не про здоровье сессии, поэтому классифицируем ДО
+    # classify_telethon_error: тот заточен под сессию/сеть и любой
+    # нераспознанный тип свалит их в общий "fatal" (не входит в
+    # task_queue.FATAL_ERROR_CODES → продюсер пересоздаёт задачу на тот же
+    # мёртвый канал раз за разом — зомби-цикл при внешне "fatal" попытке).
+    try:
+        import telethon.errors as te
+    except ImportError:
+        te = None  # type: ignore[assignment]
+
+    if te is not None:
+        if isinstance(exc, (te.ChannelPrivateError, te.InviteHashExpiredError)):
+            return PermanentError(ErrorCode.CHANNEL_PRIVATE, str(exc))
+        if isinstance(exc, te.ChannelsTooMuchError):
+            return RetryableError(
+                ErrorCode.CHANNELS_TOO_MUCH,
+                str(exc),
+                retry_after_seconds=1800,
+            )
+
+    # Telethon utils.get_entity: username не занят никем (удалён/сменён) —
+    # ResolveUsernameRequest стабильно вернёт то же самое, retry не поможет.
+    # См. telethon/client/users.py: 'No user has "{}" as username'.
+    if "no user has" in msg_lower and "as username" in msg_lower:
+        return PermanentError(ErrorCode.USERNAME_NOT_FOUND, str(exc))
+
     try:
         from discovery_api.session_health import (
             classify_telethon_error,
