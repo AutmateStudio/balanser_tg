@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app_balance.queue.source_channels import (
+    _MAX_INDIVIDUAL_FALLBACK_REFS,
     SourceChannelsRepo,
     _normalize_channel_ref_needle,
     _telegram_url_candidates,
@@ -153,6 +154,32 @@ async def test_find_ids_by_refs_fallback_per_unresolved() -> None:
 
     assert found == {"@rare": 77}
     mock_single.assert_awaited_once_with("@rare")
+
+
+@pytest.mark.asyncio
+async def test_find_ids_by_refs_caps_individual_fallback() -> None:
+    """Bulk remainder (> лимита) не уходит в неограниченный поштучный fallback.
+
+    Защита от таймаута на массовых add/remove (сотни-тысячи каналов):
+    find_id_by_ref (до 1.5с на ILIKE-тир) вызывается не более
+    _MAX_INDIVIDUAL_FALLBACK_REFS раз за вызов find_ids_by_refs, остаток
+    остаётся без channel_id (лениво дорезолвится при выполнении задачи).
+    """
+    conn = AsyncMock()
+    conn.fetch = AsyncMock(return_value=[])
+    cm = AsyncMock()
+    cm.__aenter__.return_value = conn
+    cm.__aexit__.return_value = None
+
+    refs = [f"@rare{i}" for i in range(_MAX_INDIVIDUAL_FALLBACK_REFS + 10)]
+
+    with patch("app_balance.queue.source_channels.acquire", return_value=cm), patch.object(
+        SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=1
+    ) as mock_single:
+        found = await SourceChannelsRepo().find_ids_by_refs(refs)
+
+    assert mock_single.await_count == _MAX_INDIVIDUAL_FALLBACK_REFS
+    assert len(found) == _MAX_INDIVIDUAL_FALLBACK_REFS
 
 
 @pytest.mark.asyncio

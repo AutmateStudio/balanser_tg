@@ -112,9 +112,9 @@ async def test_d9_enqueue_parser_remove_creates_tasks_in_pg(d9_clean) -> None:
     with (
         patch("discovery_api.session_registry.get_clump", return_value=clump),
         patch(
-            "app_balance.queue.source_channels.SourceChannelsRepo.find_id_by_ref",
+            "app_balance.queue.source_channels.SourceChannelsRepo.find_ids_by_refs",
             new_callable=AsyncMock,
-            return_value=None,
+            return_value={},
         ),
     ):
         result = await enqueue_parser_remove_channels(
