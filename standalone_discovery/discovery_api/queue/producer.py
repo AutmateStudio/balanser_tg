@@ -262,7 +262,15 @@ async def enqueue_parser_remove_channels(
     channel_list: list[str],
     action_id: str,
 ) -> EnqueueRemoveChannelsResult:
-    """Создаёт по одной задаче parser_remove_channel на канал с fixed account_id владельца."""
+    """Создаёт по одной задаче parser_remove_channel на канал с fixed account_id владельца.
+
+    Batch-путь (без N× round-trip на канал), как в enqueue_parser_add_channels:
+      1) owner-in-clump — в памяти (_resolve_owner_session_name)
+      2) get_ids_by_session_names — один batch-запрос вместо N
+      3) find_ids_by_refs — batch тиры 1–3 + fallback на остаток
+      4) enqueue_many — один INSERT + lookup конфликтов
+    """
+    from app_balance.queue.accounts_sync import normalize_session_name
     from discovery_api.session_registry import get_clump
 
     clump = get_clump(parser_id)
@@ -276,7 +284,10 @@ async def enqueue_parser_remove_channels(
     repo = TaskQueueRepo()
     accounts = AccountsRepo()
     channels_repo = SourceChannelsRepo()
-    task_ids: list[int] = []
+
+    # --- шаг 0: нормализация refs, owner session в памяти ---
+    owner_by_ref: dict[str, str] = {}
+    seen_norm: set[str] = set()
 
     for raw in channel_list:
         channel_ref = (raw or "").strip()
@@ -285,11 +296,15 @@ async def enqueue_parser_remove_channels(
         normalized = _normalize_channel_ref(channel_ref)
         if not normalized:
             log.warning(
-                "enqueue_parser_remove_channels: пропуск некорректного канала parser_id=%s ref=%r",
+                "enqueue_parser_remove_channels: пропуск некорректного канала "
+                "parser_id=%s ref=%r",
                 parser_id,
                 raw,
             )
             continue
+        if normalized in seen_norm:
+            continue
+        seen_norm.add(normalized)
 
         session_name = _resolve_owner_session_name(clump, channel_ref)
         if not session_name:
@@ -299,35 +314,63 @@ async def enqueue_parser_remove_channels(
                 channel_ref,
             )
             continue
+        owner_by_ref[channel_ref] = session_name
 
-        account_id = await accounts.get_id_by_session_name(session_name)
+    if not owner_by_ref:
+        return EnqueueRemoveChannelsResult(task_ids=[], action_id=action_id)
+
+    # --- шаг 1: batch account_id по владельцам ---
+    account_ids_by_session = await accounts.get_ids_by_session_names(
+        list(owner_by_ref.values())
+    )
+
+    refs_with_account: list[str] = []
+    account_id_by_ref: dict[str, int] = {}
+    for channel_ref, session_name in owner_by_ref.items():
+        account_id = account_ids_by_session.get(
+            normalize_session_name(session_name)
+        )
         if account_id is None:
             log.warning(
-                "enqueue_parser_remove_channels: аккаунт не в PG session=%s parser_id=%s ref=%r",
+                "enqueue_parser_remove_channels: аккаунт не в PG session=%s "
+                "parser_id=%s ref=%r",
                 session_name,
                 parser_id,
                 channel_ref,
             )
             continue
+        refs_with_account.append(channel_ref)
+        account_id_by_ref[channel_ref] = account_id
 
-        channel_id = await channels_repo.find_id_by_ref(channel_ref)
+    if not refs_with_account:
+        return EnqueueRemoveChannelsResult(task_ids=[], action_id=action_id)
 
+    # --- шаг 2: batch channel_id lookup ---
+    channel_ids = await channels_repo.find_ids_by_refs(refs_with_account)
+
+    # --- шаг 3–4: fatal-history + INSERT через enqueue_many ---
+    inputs: list[EnqueueInput] = []
+    for channel_ref in refs_with_account:
         payload: dict[str, str] = {
             "parser_id": parser_id,
             "channel_ref": channel_ref,
             "action_id": action_id,
         }
-
-        result = await repo.enqueue(
+        inputs.append(
             EnqueueInput(
                 task_type_code=PARSER_REMOVE_CHANNEL,
                 payload=payload,
                 dedup_key=_dedup_key(PARSER_REMOVE_CHANNEL, parser_id, channel_ref),
                 created_by=CREATED_BY_REMOVE,
-                account_id=account_id,
-                channel_id=channel_id,
+                account_id=account_id_by_ref[channel_ref],
+                channel_id=channel_ids.get(channel_ref),
             )
         )
+
+    enqueue_results = await repo.enqueue_many(inputs)
+
+    task_ids: list[int] = []
+    for result in enqueue_results:
         task_id = _task_id_from_enqueue(result)
         if task_id is not None:
             task_ids.append(task_id)

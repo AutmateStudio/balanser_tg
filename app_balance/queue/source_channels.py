@@ -2,11 +2,22 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from app_balance.queue.db import acquire
+
+log = logging.getLogger(__name__)
+
+# find_ids_by_refs: поштучный fallback (тиры 4-5, до 1.5с на ILIKE) — не более
+# этого числа remainder-refs за вызов. При bulk-операциях (add/remove сотен-
+# тысяч каналов) неограниченный fallback может растянуть один HTTP-запрос на
+# минуты. channel_id не критичен для выполнения parser_add/remove_channel
+# (worker использует channel_ref из payload) — не найденный здесь id
+# лениво дорезолвится в channel_assignment_sync при выполнении задачи.
+_MAX_INDIVIDUAL_FALLBACK_REFS = 25
 
 
 _GET_ASSIGNED_SQL = """
@@ -526,7 +537,21 @@ class SourceChannelsRepo:
 
         # Тиры 4–5: поштучный fallback только для остатка (вне batch-conn,
         # т.к. find_id_by_ref сам берёт acquire + statement_timeout).
-        for n in list(unresolved):
+        # Ограничено _MAX_INDIVIDUAL_FALLBACK_REFS — при большом remainder
+        # (bulk add/remove) не резолвим весь хвост поштучно (см. модульный
+        # docstring константы); остаток просто не попадёт в результат,
+        # channel_id для него будет None.
+        fallback_targets = list(unresolved)[:_MAX_INDIVIDUAL_FALLBACK_REFS]
+        if len(unresolved) > _MAX_INDIVIDUAL_FALLBACK_REFS:
+            log.warning(
+                "find_ids_by_refs: remainder=%s превышает лимит поштучного "
+                "fallback=%s — %s refs останутся без channel_id (дорезолвится "
+                "лениво при выполнении задачи)",
+                len(unresolved),
+                _MAX_INDIVIDUAL_FALLBACK_REFS,
+                len(unresolved) - _MAX_INDIVIDUAL_FALLBACK_REFS,
+            )
+        for n in fallback_targets:
             # Берём любой исходный ref с этим needle — find_id_by_ref
             # нормализует сам.
             sample_ref = needle_to_refs[n][0]

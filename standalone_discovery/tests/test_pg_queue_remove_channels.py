@@ -128,20 +128,20 @@ class ProducerRemoveUnitTests(unittest.IsolatedAsyncioTestCase):
                 return_value=clump,
             ),
             patch.object(
-                TaskQueueRepo, "enqueue", new_callable=AsyncMock
-            ) as mock_enqueue,
+                TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+            ) as mock_enqueue_many,
             patch(
-                "app_balance.queue.accounts.AccountsRepo.get_id_by_session_name",
+                "app_balance.queue.accounts.AccountsRepo.get_ids_by_session_names",
                 new_callable=AsyncMock,
-                return_value=5,
+                return_value={"s1": 5},
             ),
             patch(
-                "app_balance.queue.source_channels.SourceChannelsRepo.find_id_by_ref",
+                "app_balance.queue.source_channels.SourceChannelsRepo.find_ids_by_refs",
                 new_callable=AsyncMock,
-                side_effect=[10, 11],
+                return_value={"@a": 10, "@b": 11},
             ),
         ):
-            mock_enqueue.side_effect = [
+            mock_enqueue_many.return_value = [
                 EnqueueResult(created=True, task_id=20),
                 EnqueueResult(created=False, task_id=None, existing_task_id=21),
             ]
@@ -154,9 +154,11 @@ class ProducerRemoveUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.task_ids, [20, 21])
         self.assertEqual(result.action_id, "act-rm")
-        self.assertEqual(mock_enqueue.await_count, 2)
+        mock_enqueue_many.assert_awaited_once()
 
-        first_call: EnqueueInput = mock_enqueue.await_args_list[0].args[0]
+        inputs: list[EnqueueInput] = mock_enqueue_many.await_args.args[0]
+        self.assertEqual(len(inputs), 2)
+        first_call = inputs[0]
         self.assertEqual(first_call.task_type_code, "parser_remove_channel")
         self.assertEqual(first_call.dedup_key, "parser_remove_channel:p1:a")
         self.assertEqual(first_call.payload["parser_id"], "p1")
@@ -181,20 +183,22 @@ class ProducerRemoveUnitTests(unittest.IsolatedAsyncioTestCase):
                 return_value=clump,
             ),
             patch.object(
-                TaskQueueRepo, "enqueue", new_callable=AsyncMock
-            ) as mock_enqueue,
+                TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+            ) as mock_enqueue_many,
             patch(
-                "app_balance.queue.accounts.AccountsRepo.get_id_by_session_name",
+                "app_balance.queue.accounts.AccountsRepo.get_ids_by_session_names",
                 new_callable=AsyncMock,
-                return_value=5,
+                return_value={"s1": 5},
             ),
             patch(
-                "app_balance.queue.source_channels.SourceChannelsRepo.find_id_by_ref",
+                "app_balance.queue.source_channels.SourceChannelsRepo.find_ids_by_refs",
                 new_callable=AsyncMock,
-                return_value=99,
+                return_value={"@known": 99},
             ),
         ):
-            mock_enqueue.return_value = EnqueueResult(created=True, task_id=30)
+            mock_enqueue_many.return_value = [
+                EnqueueResult(created=True, task_id=30),
+            ]
 
             result = await enqueue_parser_remove_channels(
                 parser_id="p1",
@@ -203,7 +207,40 @@ class ProducerRemoveUnitTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.task_ids, [30])
-        mock_enqueue.assert_awaited_once()
+        mock_enqueue_many.assert_awaited_once()
+        inputs = mock_enqueue_many.await_args.args[0]
+        self.assertEqual(len(inputs), 1)
+        self.assertEqual(inputs[0].payload["channel_ref"], "@known")
+
+    async def test_enqueue_skips_channel_without_account_in_pg(self) -> None:
+        from app_balance.queue.task_queue import TaskQueueRepo
+        from discovery_api.queue.producer import enqueue_parser_remove_channels
+
+        clump = MagicMock()
+        clump.assignments = {"@a": "/s1"}
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_clump",
+                return_value=clump,
+            ),
+            patch.object(
+                TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+            ) as mock_enqueue_many,
+            patch(
+                "app_balance.queue.accounts.AccountsRepo.get_ids_by_session_names",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+        ):
+            result = await enqueue_parser_remove_channels(
+                parser_id="p1",
+                channel_list=["@a"],
+                action_id="act-3",
+            )
+
+        self.assertEqual(result.task_ids, [])
+        mock_enqueue_many.assert_not_awaited()
 
     async def test_enqueue_empty_when_clump_missing(self) -> None:
         from discovery_api.queue.producer import enqueue_parser_remove_channels
