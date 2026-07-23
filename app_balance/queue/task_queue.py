@@ -184,6 +184,95 @@ ORDER BY id ASC
 LIMIT 1
 """
 
+# B12 batch: последняя задача по каждому dedup_key (любой статус).
+_FIND_LAST_BY_DEDUP_KEYS_SQL = """
+SELECT DISTINCT ON (dedup_key)
+    id, dedup_key, status::text AS status, last_error
+FROM task_queue
+WHERE dedup_key = ANY($1::text[])
+ORDER BY dedup_key, id DESC
+"""
+
+_FIND_ACTIVE_BY_DEDUP_KEYS_SQL = f"""
+SELECT DISTINCT ON (dedup_key)
+    id, dedup_key
+FROM task_queue
+WHERE dedup_key = ANY($1::text[])
+  AND status IN {ACTIVE_STATUSES}
+ORDER BY dedup_key, id ASC
+"""
+
+# Batch INSERT: ON CONFLICT по partial unique idx_task_queue_dedup_active.
+# Предикат WHERE должен совпадать с определением индекса (prod: status = ANY(...::task_status)).
+# Элементы батча должны иметь уникальные ненулевые dedup_key.
+_INSERT_MANY_SQL = """
+INSERT INTO task_queue (
+    task_type_id,
+    task_type_code,
+    status,
+    priority,
+    channel_id,
+    account_id,
+    source_account_id,
+    target_account_id,
+    payload,
+    dedup_key,
+    run_after,
+    max_attempts,
+    created_by
+)
+SELECT
+    t.task_type_id,
+    t.task_type_code,
+    'queued'::task_status,
+    t.priority,
+    t.channel_id,
+    t.account_id,
+    t.source_account_id,
+    t.target_account_id,
+    t.payload::jsonb,
+    t.dedup_key,
+    COALESCE(t.run_after, now()),
+    t.max_attempts,
+    t.created_by
+FROM UNNEST(
+    $1::bigint[],
+    $2::text[],
+    $3::int[],
+    $4::bigint[],
+    $5::bigint[],
+    $6::bigint[],
+    $7::bigint[],
+    $8::text[],
+    $9::text[],
+    $10::timestamptz[],
+    $11::int[],
+    $12::text[]
+) AS t(
+    task_type_id,
+    task_type_code,
+    priority,
+    channel_id,
+    account_id,
+    source_account_id,
+    target_account_id,
+    payload,
+    dedup_key,
+    run_after,
+    max_attempts,
+    created_by
+)
+ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL
+  AND status = ANY (ARRAY[
+      'queued'::task_status,
+      'scheduled'::task_status,
+      'retry'::task_status,
+      'in_progress'::task_status
+  ])
+DO NOTHING
+RETURNING id, dedup_key
+"""
+
 # B12: последняя по времени задача с этим dedup_key (любой статус). Если это
 # terminal failed с постоянной причиной — новую задачу создавать не будем.
 _FIND_LAST_BY_DEDUP_SQL = """
@@ -569,6 +658,40 @@ class TaskQueueRepo:
             task_id=row["id"], error_code=code, last_error=row["last_error"]
         )
 
+    async def find_fatal_history_batch(
+        self, dedup_keys: list[str]
+    ) -> dict[str, FatalHistoryInfo]:
+        """B12 batch: dedup_key → FatalHistoryInfo для ключей с terminal fatal.
+
+        Один DISTINCT ON (dedup_key) ... ORDER BY id DESC; фильтрация
+        status=failed + FATAL_ERROR_CODES — в Python (как в find_fatal_history).
+        """
+        keys: list[str] = []
+        seen: set[str] = set()
+        for raw in dedup_keys:
+            key = (raw or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            keys.append(key)
+        if not keys:
+            return {}
+        async with acquire() as conn:
+            rows = await conn.fetch(_FIND_LAST_BY_DEDUP_KEYS_SQL, keys)
+        result: dict[str, FatalHistoryInfo] = {}
+        for row in rows:
+            if row["status"] != "failed":
+                continue
+            code = error_code_prefix(row["last_error"])
+            if code not in FATAL_ERROR_CODES:
+                continue
+            result[str(row["dedup_key"])] = FatalHistoryInfo(
+                task_id=int(row["id"]),
+                error_code=code,
+                last_error=row["last_error"],
+            )
+        return result
+
     async def enqueue(
         self, data: EnqueueInput, *, skip_known_fatal: bool = True
     ) -> EnqueueResult:
@@ -627,6 +750,161 @@ class TaskQueueRepo:
                 )
 
         return EnqueueResult(created=True, task_id=task_id)
+
+    async def enqueue_many(
+        self,
+        items: list[EnqueueInput],
+        *,
+        skip_known_fatal: bool = True,
+    ) -> list[EnqueueResult]:
+        """Batch-постановка задач (один INSERT + lookup конфликтов).
+
+        Ограничения:
+        - у элементов батча должны быть уникальные ненулевые ``dedup_key``
+          (гарантируется вызывающим, напр. enqueue_parser_add_channels);
+        - результат — список ``EnqueueResult`` в том же порядке, что ``items``.
+
+        Семантика совпадает с ``enqueue``: fatal-history skip (B12),
+        conflict по partial unique idx_task_queue_dedup_active → existing_task_id.
+        ``task_type`` подтягивается один раз на уникальный ``task_type_code``.
+        """
+        if not items:
+            return []
+
+        # task_type_code → TaskType (один get_by_code на код).
+        type_cache: dict[str, Any] = {}
+        for data in items:
+            code = data.task_type_code
+            if code in type_cache:
+                continue
+            task_type = await self._task_types.get_by_code(code)
+            if task_type is None or not task_type.is_enabled:
+                raise UnknownTaskTypeError(
+                    f"Тип задачи '{code}' не найден или выключен"
+                )
+            type_cache[code] = task_type
+
+        results: list[EnqueueResult | None] = [None] * len(items)
+        pending_indices: list[int] = list(range(len(items)))
+
+        if skip_known_fatal:
+            keys = [
+                items[i].dedup_key
+                for i in pending_indices
+                if items[i].dedup_key
+            ]
+            fatals = await self.find_fatal_history_batch(
+                [k for k in keys if k is not None]
+            )
+            still_pending: list[int] = []
+            for i in pending_indices:
+                key = items[i].dedup_key
+                fatal = fatals.get(key) if key else None
+                if fatal is not None:
+                    logger.info(
+                        "enqueue_many: пропуск dedup_key=%s — прошлая задача "
+                        "id=%s завершилась фатально (%s), новая не создана",
+                        key,
+                        fatal.task_id,
+                        fatal.error_code,
+                    )
+                    results[i] = EnqueueResult(
+                        created=False,
+                        task_id=None,
+                        existing_task_id=fatal.task_id,
+                        skipped_reason="fatal_history",
+                        fatal_error_code=fatal.error_code,
+                    )
+                else:
+                    still_pending.append(i)
+            pending_indices = still_pending
+
+        if not pending_indices:
+            return [r for r in results if r is not None]
+
+        task_type_ids: list[int] = []
+        task_type_codes: list[str] = []
+        priorities: list[int] = []
+        channel_ids: list[int | None] = []
+        account_ids: list[int | None] = []
+        source_account_ids: list[int | None] = []
+        target_account_ids: list[int | None] = []
+        payloads: list[str] = []
+        dedup_keys: list[str] = []
+        run_afters: list[datetime | None] = []
+        max_attempts_list: list[int] = []
+        created_bys: list[str | None] = []
+
+        for i in pending_indices:
+            data = items[i]
+            tt = type_cache[data.task_type_code]
+            priority = (
+                data.priority
+                if data.priority is not None
+                else tt.default_priority
+            )
+            key = data.dedup_key
+            if not key:
+                raise ValueError(
+                    "enqueue_many: dedup_key обязателен и должен быть уникален"
+                )
+            task_type_ids.append(int(tt.id))
+            task_type_codes.append(str(tt.code))
+            priorities.append(int(priority))
+            channel_ids.append(data.channel_id)
+            account_ids.append(data.account_id)
+            source_account_ids.append(data.source_account_id)
+            target_account_ids.append(data.target_account_id)
+            payloads.append(json.dumps(data.payload or {}))
+            dedup_keys.append(key)
+            run_afters.append(data.run_after)
+            max_attempts_list.append(int(tt.max_attempts))
+            created_bys.append(data.created_by)
+
+        async with acquire() as conn:
+            inserted_rows = await conn.fetch(
+                _INSERT_MANY_SQL,
+                task_type_ids,
+                task_type_codes,
+                priorities,
+                channel_ids,
+                account_ids,
+                source_account_ids,
+                target_account_ids,
+                payloads,
+                dedup_keys,
+                run_afters,
+                max_attempts_list,
+                created_bys,
+            )
+            created_by_key = {
+                str(row["dedup_key"]): int(row["id"]) for row in inserted_rows
+            }
+            missing_keys = [k for k in dedup_keys if k not in created_by_key]
+            existing_by_key: dict[str, int] = {}
+            if missing_keys:
+                existing_rows = await conn.fetch(
+                    _FIND_ACTIVE_BY_DEDUP_KEYS_SQL, missing_keys
+                )
+                existing_by_key = {
+                    str(row["dedup_key"]): int(row["id"])
+                    for row in existing_rows
+                }
+
+        for i, key in zip(pending_indices, dedup_keys):
+            if key in created_by_key:
+                results[i] = EnqueueResult(
+                    created=True, task_id=created_by_key[key]
+                )
+            else:
+                results[i] = EnqueueResult(
+                    created=False,
+                    task_id=None,
+                    existing_task_id=existing_by_key.get(key),
+                )
+
+        return [r if r is not None else EnqueueResult(created=False, task_id=None)
+                for r in results]
 
     async def get_by_id(self, task_id: int) -> TaskSnapshot | None:
         """D10: read-only снимок задачи по id."""

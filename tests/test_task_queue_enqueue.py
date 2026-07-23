@@ -288,3 +288,117 @@ async def test_enqueue_force_retry_bypasses_fatal_history(clean_queue) -> None:
 
     assert second.created is True
     assert second.task_id != first.task_id
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_enqueue_many_creates_batch(clean_queue) -> None:
+    repo = TaskQueueRepo()
+    k1, k2 = _unique_key(), _unique_key()
+    results = await repo.enqueue_many(
+        [
+            EnqueueInput(
+                task_type_code="parser_add_channel",
+                payload={"channel_ref": "@a"},
+                dedup_key=k1,
+                created_by="test_batch",
+            ),
+            EnqueueInput(
+                task_type_code="parser_add_channel",
+                payload={"channel_ref": "@b"},
+                dedup_key=k2,
+                created_by="test_batch",
+            ),
+        ]
+    )
+    assert len(results) == 2
+    assert results[0].created and results[1].created
+    assert results[0].task_id != results[1].task_id
+
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT priority, max_attempts, task_type_code FROM task_queue WHERE id = $1",
+            results[0].task_id,
+        )
+    assert row["task_type_code"] == "parser_add_channel"
+    assert row["priority"] == 500
+    assert row["max_attempts"] >= 1
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_enqueue_many_dedup_within_and_across_batches(clean_queue) -> None:
+    """Повторный enqueue_many с тем же dedup_key → existing_task_id, без нового INSERT."""
+    repo = TaskQueueRepo()
+    key = _unique_key()
+    first = await repo.enqueue_many(
+        [EnqueueInput(task_type_code="parser_add_channel", dedup_key=key)]
+    )
+    assert first[0].created is True
+
+    second = await repo.enqueue_many(
+        [EnqueueInput(task_type_code="parser_add_channel", dedup_key=key)]
+    )
+    assert second[0].created is False
+    assert second[0].existing_task_id == first[0].task_id
+
+    async with db.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM task_queue WHERE dedup_key = $1", key
+        )
+    assert count == 1
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_enqueue_many_partial_conflict(clean_queue) -> None:
+    """Часть ключей уже активна — создаётся только свободная."""
+    repo = TaskQueueRepo()
+    existing_key = _unique_key()
+    fresh_key = _unique_key()
+    existing = await repo.enqueue(
+        EnqueueInput(task_type_code="parser_add_channel", dedup_key=existing_key)
+    )
+    assert existing.created
+
+    results = await repo.enqueue_many(
+        [
+            EnqueueInput(
+                task_type_code="parser_add_channel", dedup_key=existing_key
+            ),
+            EnqueueInput(
+                task_type_code="parser_add_channel", dedup_key=fresh_key
+            ),
+        ]
+    )
+    assert results[0].created is False
+    assert results[0].existing_task_id == existing.task_id
+    assert results[1].created is True
+    assert results[1].task_id is not None
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_enqueue_many_skips_fatal_history(clean_queue) -> None:
+    repo = TaskQueueRepo()
+    key = _unique_key()
+    first = await repo.enqueue(
+        EnqueueInput(task_type_code="parser_add_channel", dedup_key=key)
+    )
+    async with db.acquire() as conn:
+        await conn.execute(
+            "UPDATE task_queue SET status = 'failed', "
+            "last_error = 'channel_private:hidden' WHERE id = $1",
+            first.task_id,
+        )
+
+    results = await repo.enqueue_many(
+        [EnqueueInput(task_type_code="parser_add_channel", dedup_key=key)]
+    )
+    assert results[0].created is False
+    assert results[0].skipped_reason == "fatal_history"
+    assert results[0].fatal_error_code == "channel_private"

@@ -75,6 +75,32 @@ ORDER BY id DESC
 LIMIT 1
 """
 
+# Batch-тиры для find_ids_by_refs (один ANY-запрос на тир).
+_FIND_IDS_BY_EXT_BATCH_SQL = """
+SELECT DISTINCT ON (lower(external_channel_id))
+    lower(external_channel_id) AS needle,
+    id
+FROM source_channels
+WHERE lower(external_channel_id) = ANY($1::text[])
+ORDER BY lower(external_channel_id), id DESC
+"""
+
+_FIND_IDS_BY_NAME_BATCH_SQL = """
+SELECT DISTINCT ON (lower(trim(both '@' from coalesce(name, ''))))
+    lower(trim(both '@' from coalesce(name, ''))) AS needle,
+    id
+FROM source_channels
+WHERE lower(trim(both '@' from coalesce(name, ''))) = ANY($1::text[])
+ORDER BY lower(trim(both '@' from coalesce(name, ''))), id DESC
+"""
+
+_FIND_IDS_BY_URL_EXACT_BATCH_SQL = """
+SELECT lower(external_url) AS url, id
+FROM source_channels
+WHERE lower(external_url) = ANY($1::text[])
+ORDER BY id DESC
+"""
+
 
 def _normalize_channel_ref_needle(ref: str) -> str:
     """Нормализует ref к username/id без @ и без t.me-префикса."""
@@ -434,6 +460,86 @@ class SourceChannelsRepo:
             except Exception:  # noqa: BLE001 — timeout/отмена → как «не найден»
                 return None
             return int(val) if val is not None else None
+
+    async def find_ids_by_refs(self, refs: list[str]) -> dict[str, int]:
+        """Batch: исходный ref → source_channels.id (тиры 1–3 batch, 4–5 fallback).
+
+        Возвращает только найденные refs (ключ — исходная строка из refs,
+        как передана вызывающим). Семантика совпадает с find_id_by_ref:
+        при коллизиях побеждает максимальный id.
+        Тиры 4–5 (URL-prefix + ILIKE) выполняются поштучно только для
+        остатка, не пойманного точными тирами.
+        """
+        # ref → needle; несколько refs могут дать один needle — берём первый.
+        needle_to_refs: dict[str, list[str]] = {}
+        for ref in refs:
+            needle = _normalize_channel_ref_needle(ref)
+            if not needle:
+                continue
+            key = needle.lower()
+            needle_to_refs.setdefault(key, []).append(ref)
+
+        if not needle_to_refs:
+            return {}
+
+        unresolved: set[str] = set(needle_to_refs.keys())
+        needle_to_id: dict[str, int] = {}
+
+        async with acquire() as conn:
+            needles = list(unresolved)
+            rows = await conn.fetch(_FIND_IDS_BY_EXT_BATCH_SQL, needles)
+            for row in rows:
+                n = str(row["needle"])
+                if n in unresolved:
+                    needle_to_id[n] = int(row["id"])
+                    unresolved.discard(n)
+
+            if unresolved:
+                rows = await conn.fetch(
+                    _FIND_IDS_BY_NAME_BATCH_SQL, list(unresolved)
+                )
+                for row in rows:
+                    n = str(row["needle"])
+                    if n in unresolved:
+                        needle_to_id[n] = int(row["id"])
+                        unresolved.discard(n)
+
+            if unresolved:
+                all_urls: list[str] = []
+                url_to_needle: dict[str, str] = {}
+                for n in unresolved:
+                    for url in _telegram_url_candidates(n):
+                        all_urls.append(url)
+                        url_to_needle[url] = n
+                if all_urls:
+                    rows = await conn.fetch(
+                        _FIND_IDS_BY_URL_EXACT_BATCH_SQL, all_urls
+                    )
+                    # ORDER BY id DESC — первый hit на needle побеждает.
+                    for row in rows:
+                        url = str(row["url"])
+                        n = url_to_needle.get(url)
+                        if n is None or n not in unresolved:
+                            continue
+                        needle_to_id[n] = int(row["id"])
+                        unresolved.discard(n)
+
+        # Тиры 4–5: поштучный fallback только для остатка (вне batch-conn,
+        # т.к. find_id_by_ref сам берёт acquire + statement_timeout).
+        for n in list(unresolved):
+            # Берём любой исходный ref с этим needle — find_id_by_ref
+            # нормализует сам.
+            sample_ref = needle_to_refs[n][0]
+            found = await self.find_id_by_ref(sample_ref)
+            if found is not None:
+                needle_to_id[n] = found
+                unresolved.discard(n)
+
+        result: dict[str, int] = {}
+        for needle, channel_id in needle_to_id.items():
+            for ref in needle_to_refs.get(needle, ()):
+                result[ref] = channel_id
+        return result
 
     async def list_pending_collect(self, limit: int) -> list[PendingChannel]:
         """Каналы с assigned_account_id и extra_data_collected=false (F4)."""

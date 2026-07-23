@@ -1,4 +1,4 @@
-"""D8 — тесты USE_PG_QUEUE для async add-channels."""
+"""D8 — тесты USE_PG_QUEUE для async add-channels (+ batch enqueue)."""
 from __future__ import annotations
 
 import os
@@ -99,17 +99,20 @@ class PgQueueAddChannelsApiTests(unittest.TestCase):
 
 class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
     async def test_enqueue_one_task_per_channel(self) -> None:
+        from app_balance.queue.accounts import AccountsRepo
         from app_balance.queue.source_channels import SourceChannelsRepo
         from app_balance.queue.task_queue import EnqueueInput, EnqueueResult, TaskQueueRepo
         from discovery_api.queue.producer import enqueue_parser_add_channels
 
         with patch.object(
-            TaskQueueRepo, "enqueue", new_callable=AsyncMock
-        ) as mock_enqueue, patch.object(
-            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock
-        ) as mock_find:
-            mock_find.side_effect = [101, 102]
-            mock_enqueue.side_effect = [
+            TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+        ) as mock_enqueue_many, patch.object(
+            SourceChannelsRepo, "find_ids_by_refs", new_callable=AsyncMock
+        ) as mock_find, patch.object(
+            AccountsRepo, "list_by_session_names", new_callable=AsyncMock, return_value={}
+        ):
+            mock_find.return_value = {"@a": 101, "@b": 102}
+            mock_enqueue_many.return_value = [
                 EnqueueResult(created=True, task_id=10),
                 EnqueueResult(created=False, task_id=None, existing_task_id=11),
             ]
@@ -123,10 +126,12 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.task_ids, [10, 11])
         self.assertEqual(result.action_id, "act-1")
-        self.assertEqual(mock_enqueue.await_count, 2)
-        self.assertEqual(mock_find.await_count, 2)
+        mock_enqueue_many.assert_awaited_once()
+        mock_find.assert_awaited_once_with(["@a", "@b"])
 
-        first_call: EnqueueInput = mock_enqueue.await_args_list[0].args[0]
+        items: list[EnqueueInput] = mock_enqueue_many.await_args.args[0]
+        self.assertEqual(len(items), 2)
+        first_call = items[0]
         self.assertEqual(first_call.task_type_code, "parser_add_channel")
         self.assertEqual(first_call.dedup_key, "parser_add_channel:p1:a")
         self.assertEqual(first_call.channel_id, 101)
@@ -135,20 +140,24 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_call.payload["action_id"], "act-1")
         self.assertEqual(first_call.payload["webhook_url"], "http://wh")
         self.assertEqual(first_call.created_by, "discovery_api:add-channels")
+        self.assertTrue(mock_enqueue_many.await_args.kwargs["skip_known_fatal"])
 
     async def test_enqueue_skips_channel_with_fatal_history(self) -> None:
         """B12: канал с фатальной историей не создаёт новую задачу."""
+        from app_balance.queue.accounts import AccountsRepo
         from app_balance.queue.source_channels import SourceChannelsRepo
         from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
         from discovery_api.queue.producer import enqueue_parser_add_channels
 
         with patch.object(
-            TaskQueueRepo, "enqueue", new_callable=AsyncMock
-        ) as mock_enqueue, patch.object(
-            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock
-        ) as mock_find:
-            mock_find.side_effect = [101, 102]
-            mock_enqueue.side_effect = [
+            TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+        ) as mock_enqueue_many, patch.object(
+            SourceChannelsRepo, "find_ids_by_refs", new_callable=AsyncMock
+        ) as mock_find, patch.object(
+            AccountsRepo, "list_by_session_names", new_callable=AsyncMock, return_value={}
+        ):
+            mock_find.return_value = {"@dead": 101, "@ok": 102}
+            mock_enqueue_many.return_value = [
                 EnqueueResult(
                     created=False,
                     task_id=None,
@@ -167,21 +176,28 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.task_ids, [10])
         self.assertEqual(result.skipped_fatal, {"@dead": "banned"})
-        # skip_known_fatal=True (default) прокидывается в TaskQueueRepo.enqueue.
-        self.assertTrue(mock_enqueue.await_args_list[0].kwargs["skip_known_fatal"])
+        self.assertTrue(mock_enqueue_many.await_args.kwargs["skip_known_fatal"])
 
     async def test_enqueue_force_retry_disables_fatal_skip(self) -> None:
         """B12: force_retry=True (skip_known_fatal=False) — ручной override."""
+        from app_balance.queue.accounts import AccountsRepo
         from app_balance.queue.source_channels import SourceChannelsRepo
         from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
         from discovery_api.queue.producer import enqueue_parser_add_channels
 
         with patch.object(
-            TaskQueueRepo, "enqueue", new_callable=AsyncMock
-        ) as mock_enqueue, patch.object(
-            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=1
+            TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+        ) as mock_enqueue_many, patch.object(
+            SourceChannelsRepo,
+            "find_ids_by_refs",
+            new_callable=AsyncMock,
+            return_value={"@retry_me": 1},
+        ), patch.object(
+            AccountsRepo, "list_by_session_names", new_callable=AsyncMock, return_value={}
         ):
-            mock_enqueue.return_value = EnqueueResult(created=True, task_id=99)
+            mock_enqueue_many.return_value = [
+                EnqueueResult(created=True, task_id=99)
+            ]
 
             result = await enqueue_parser_add_channels(
                 parser_id="p1",
@@ -192,7 +208,7 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.task_ids, [99])
         self.assertEqual(result.skipped_fatal, {})
-        self.assertFalse(mock_enqueue.await_args_list[0].kwargs["skip_known_fatal"])
+        self.assertFalse(mock_enqueue_many.await_args.kwargs["skip_known_fatal"])
 
     async def test_enqueue_skips_channel_on_active_clump_owner(self) -> None:
         """Канал уже слушается active+enabled аккаунтом clump → задача не ставится."""
@@ -218,15 +234,21 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "discovery_api.session_registry.get_clump", return_value=clump
         ), patch.object(
-            AccountsRepo, "get_id_by_session_name", new_callable=AsyncMock, return_value=5
+            AccountsRepo,
+            "list_by_session_names",
+            new_callable=AsyncMock,
+            return_value={"s2": active},
         ), patch.object(
-            AccountsRepo, "get_by_id", new_callable=AsyncMock, return_value=active
-        ), patch.object(
-            TaskQueueRepo, "enqueue", new_callable=AsyncMock
-        ) as mock_enqueue, patch.object(
-            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=1
+            TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+        ) as mock_enqueue_many, patch.object(
+            SourceChannelsRepo,
+            "find_ids_by_refs",
+            new_callable=AsyncMock,
+            return_value={"@fresh": 1},
         ):
-            mock_enqueue.return_value = EnqueueResult(created=True, task_id=7)
+            mock_enqueue_many.return_value = [
+                EnqueueResult(created=True, task_id=7)
+            ]
 
             result = await enqueue_parser_add_channels(
                 parser_id="p1",
@@ -236,9 +258,10 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.task_ids, [7])
         self.assertEqual(result.skipped_in_clump, {"@busy": "/s2"})
-        mock_enqueue.assert_awaited_once()
-        enqueued: object = mock_enqueue.await_args_list[0].args[0]
-        self.assertEqual(enqueued.payload["channel_ref"], "@fresh")
+        mock_enqueue_many.assert_awaited_once()
+        items = mock_enqueue_many.await_args.args[0]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].payload["channel_ref"], "@fresh")
 
     async def test_enqueue_keeps_channel_when_owner_not_active(self) -> None:
         """Владелец в clump, но аккаунт disabled → задачу всё равно ставим."""
@@ -264,15 +287,21 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "discovery_api.session_registry.get_clump", return_value=clump
         ), patch.object(
-            AccountsRepo, "get_id_by_session_name", new_callable=AsyncMock, return_value=5
+            AccountsRepo,
+            "list_by_session_names",
+            new_callable=AsyncMock,
+            return_value={"s2": disabled},
         ), patch.object(
-            AccountsRepo, "get_by_id", new_callable=AsyncMock, return_value=disabled
-        ), patch.object(
-            TaskQueueRepo, "enqueue", new_callable=AsyncMock
-        ) as mock_enqueue, patch.object(
-            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=1
+            TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+        ) as mock_enqueue_many, patch.object(
+            SourceChannelsRepo,
+            "find_ids_by_refs",
+            new_callable=AsyncMock,
+            return_value={"@busy": 1},
         ):
-            mock_enqueue.return_value = EnqueueResult(created=True, task_id=8)
+            mock_enqueue_many.return_value = [
+                EnqueueResult(created=True, task_id=8)
+            ]
 
             result = await enqueue_parser_add_channels(
                 parser_id="p1",
@@ -282,19 +311,27 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.task_ids, [8])
         self.assertEqual(result.skipped_in_clump, {})
-        mock_enqueue.assert_awaited_once()
+        mock_enqueue_many.assert_awaited_once()
 
     async def test_enqueue_skips_empty_channels(self) -> None:
+        from app_balance.queue.accounts import AccountsRepo
         from app_balance.queue.source_channels import SourceChannelsRepo
         from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
         from discovery_api.queue.producer import enqueue_parser_add_channels
 
         with patch.object(
-            TaskQueueRepo, "enqueue", new_callable=AsyncMock
-        ) as mock_enqueue, patch.object(
-            SourceChannelsRepo, "find_id_by_ref", new_callable=AsyncMock, return_value=999
+            TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+        ) as mock_enqueue_many, patch.object(
+            SourceChannelsRepo,
+            "find_ids_by_refs",
+            new_callable=AsyncMock,
+            return_value={"@ok": 999},
+        ), patch.object(
+            AccountsRepo, "list_by_session_names", new_callable=AsyncMock, return_value={}
         ):
-            mock_enqueue.return_value = EnqueueResult(created=True, task_id=7)
+            mock_enqueue_many.return_value = [
+                EnqueueResult(created=True, task_id=7)
+            ]
 
             result = await enqueue_parser_add_channels(
                 parser_id="p1",
@@ -303,7 +340,9 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.task_ids, [7])
-        mock_enqueue.assert_awaited_once()
+        mock_enqueue_many.assert_awaited_once()
+        items = mock_enqueue_many.await_args.args[0]
+        self.assertEqual(len(items), 1)
 
 
 if __name__ == "__main__":
