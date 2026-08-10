@@ -121,12 +121,13 @@ async def test_set_banned_excludes_from_pick(cooldown_account) -> None:
             account_id,
         )
         row = await conn.fetchrow(
-            "SELECT status, last_error, cooldown_until, current_task_id "
+            "SELECT status, is_enabled, last_error, cooldown_until, current_task_id "
             "FROM accounts WHERE id = $1",
             account_id,
         )
     assert pickable is False
     assert row["status"] == "banned"
+    assert row["is_enabled"] is False
     assert row["last_error"] == "UserDeactivatedBanError"
     assert row["cooldown_until"] is None
     assert row["current_task_id"] is None

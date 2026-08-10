@@ -175,6 +175,7 @@ RETURNING session_name
 _SET_BANNED_SQL = """
 UPDATE accounts
 SET status = 'banned',
+    is_enabled = false,
     cooldown_until = NULL,
     current_task_id = NULL,
     last_error = $2,
