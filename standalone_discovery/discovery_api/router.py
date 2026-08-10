@@ -520,6 +520,10 @@ async def send_bot_message_endpoint(req: BotMessageRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
+        log.exception(
+            "send_bot_message упал: chat_id=%s layout=%s has_image=%s buttons=%d",
+            req.chat_id, req.layout, bool(req.image_url), len(req.buttons or []),
+        )
         raise HTTPException(status_code=502, detail=f"Ошибка отправки сообщения ботом: {e}") from e
 
     result_chat = getattr(result, "chat", None)
