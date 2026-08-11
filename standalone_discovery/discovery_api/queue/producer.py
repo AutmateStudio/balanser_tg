@@ -264,6 +264,40 @@ async def enqueue_parser_add_channels(
             skipped_already_queued=skipped_already_queued,
         )
 
+    # --- шаг 2.6: резолвим владельца clump (account_id) ---
+    # Регресс "Сессия не найдена в clump": без явного account_id задача
+    # уходит на dispatch.py::_reserve_auto_pick_account — auto-pick берёт
+    # ЛЮБОЙ доступный аккаунт, а не тот единственный, что реально держит
+    # session в этом конкретном clump (1 clump = 1 сессия). Итог — почти
+    # каждый диспатч падает с clump_error "Сессия не найдена в clump: X",
+    # т.к. auto-pick'нутый X почти никогда не совпадает с владельцем
+    # parser_id. Явный account_id → _reserve_fixed_account резервирует
+    # ИМЕННО владельца (busy → postpone, не падение). См.
+    # docs/discovery-vps104.local.md (throughput join, 2026-08-11).
+    owning_account_id: int | None = None
+    if clump is not None:
+        owner_sessions = list(getattr(clump, "session_name_list", None) or [])
+        if len(owner_sessions) == 1:
+            try:
+                owning_account_id = await accounts_repo.get_id_by_session_name(
+                    owner_sessions[0]
+                )
+            except Exception:  # noqa: BLE001 — best-effort, не блокируем enqueue
+                log.warning(
+                    "enqueue_parser_add_channels: не удалось резолвить "
+                    "account_id владельца parser_id=%s session=%s",
+                    parser_id,
+                    owner_sessions[0],
+                    exc_info=True,
+                )
+        elif len(owner_sessions) > 1:
+            log.debug(
+                "enqueue_parser_add_channels: у parser_id=%s несколько сессий "
+                "(%d) — account_id не резолвим однозначно, остаётся auto-pick",
+                parser_id,
+                len(owner_sessions),
+            )
+
     # --- шаг 3–4: fatal-history + INSERT через enqueue_many ---
     inputs: list[EnqueueInput] = []
     for channel_ref in to_enqueue_refs:
@@ -281,6 +315,7 @@ async def enqueue_parser_add_channels(
                 dedup_key=_dedup_key(PARSER_ADD_CHANNEL, parser_id, channel_ref),
                 created_by=CREATED_BY_ADD,
                 channel_id=channel_ids.get(channel_ref),
+                account_id=owning_account_id,
             )
         )
 

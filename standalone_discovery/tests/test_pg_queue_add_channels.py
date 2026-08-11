@@ -371,6 +371,109 @@ class ProducerUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].payload["channel_ref"], "@fresh")
 
+    async def test_enqueue_sets_account_id_to_clump_owner(self) -> None:
+        """Регресс "Сессия не найдена в clump": без явного account_id задача
+
+        уходит на auto-pick в dispatch.py, который берёт ЛЮБОЙ доступный
+        аккаунт — почти никогда совпадающий с единственной сессией, реально
+        держащей этот clump. enqueue_parser_add_channels должен резолвить
+        владельца clump (session_name_list из одной сессии) в account_id,
+        чтобы dispatch.py::_reserve_account пошёл по _reserve_fixed_account
+        и зарезервировал именно его."""
+        from app_balance.queue.accounts import AccountsRepo
+        from app_balance.queue.source_channels import SourceChannelsRepo
+        from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
+        from discovery_api.session_registry import SessionClump
+        from discovery_api.queue.producer import enqueue_parser_add_channels
+
+        clump = SessionClump(["/s1"], "c", webhook_url="http://h")
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_clump", return_value=clump
+            ),
+            patch.object(
+                TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+            ) as mock_enqueue_many,
+            patch.object(
+                SourceChannelsRepo,
+                "find_ids_by_refs",
+                new_callable=AsyncMock,
+                return_value={"@fresh": 101},
+            ),
+            patch.object(
+                AccountsRepo, "list_by_session_names", new_callable=AsyncMock, return_value={}
+            ),
+            patch.object(
+                AccountsRepo,
+                "get_id_by_session_name",
+                new_callable=AsyncMock,
+                return_value=777,
+            ) as mock_get_id,
+        ):
+            mock_enqueue_many.return_value = [
+                EnqueueResult(created=True, task_id=10)
+            ]
+
+            result = await enqueue_parser_add_channels(
+                parser_id="p1",
+                channel_list=["@fresh"],
+                action_id="act-owner",
+            )
+
+        self.assertEqual(result.task_ids, [10])
+        mock_get_id.assert_awaited_once_with("/s1")
+        items = mock_enqueue_many.await_args.args[0]
+        self.assertEqual(items[0].account_id, 777)
+
+    async def test_enqueue_leaves_auto_pick_when_clump_has_multiple_sessions(
+        self,
+    ) -> None:
+        """Несколько сессий в clump — нет единственного владельца, account_id
+
+        не резолвим (остаётся auto-pick, как раньше)."""
+        from app_balance.queue.accounts import AccountsRepo
+        from app_balance.queue.source_channels import SourceChannelsRepo
+        from app_balance.queue.task_queue import EnqueueResult, TaskQueueRepo
+        from discovery_api.session_registry import SessionClump
+        from discovery_api.queue.producer import enqueue_parser_add_channels
+
+        clump = SessionClump(["/s1", "/s2"], "c", webhook_url="http://h")
+
+        with (
+            patch(
+                "discovery_api.session_registry.get_clump", return_value=clump
+            ),
+            patch.object(
+                TaskQueueRepo, "enqueue_many", new_callable=AsyncMock
+            ) as mock_enqueue_many,
+            patch.object(
+                SourceChannelsRepo,
+                "find_ids_by_refs",
+                new_callable=AsyncMock,
+                return_value={"@fresh": 101},
+            ),
+            patch.object(
+                AccountsRepo, "list_by_session_names", new_callable=AsyncMock, return_value={}
+            ),
+            patch.object(
+                AccountsRepo, "get_id_by_session_name", new_callable=AsyncMock
+            ) as mock_get_id,
+        ):
+            mock_enqueue_many.return_value = [
+                EnqueueResult(created=True, task_id=11)
+            ]
+
+            await enqueue_parser_add_channels(
+                parser_id="p1",
+                channel_list=["@fresh"],
+                action_id="act-multi",
+            )
+
+        mock_get_id.assert_not_awaited()
+        items = mock_enqueue_many.await_args.args[0]
+        self.assertIsNone(items[0].account_id)
+
     async def test_enqueue_skips_empty_channels(self) -> None:
         from app_balance.queue.accounts import AccountsRepo
         from app_balance.queue.source_channels import SourceChannelsRepo
