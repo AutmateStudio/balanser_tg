@@ -68,6 +68,18 @@ _AUTO_PICK_TASK_TYPES = frozenset(
 # Типы задач, к которым применяется пейсинг join (минимальный интервал между
 # join на одном аккаунте, чтобы бурст не гнал аккаунты в FloodWait).
 _PACED_TASK_TYPES = frozenset({"parser_add_channel"})
+# account_id для этих типов — НЕ взаимозаменяемый выбор auto-pick, а
+# единственный владелец ресурса (1 clump = 1 фиксированная сессия для
+# parser_add_channel). "Занят" здесь означает "уже выполняет другую задачу
+# на этом же аккаунте прямо сейчас" — временно, а не "аккаунт непригоден".
+# unassign на reserve-fail в этом случае был бы неверным: следующая попытка
+# уйдёт на auto-pick и почти гарантированно получит ЧУЖОЙ аккаунт, не
+# входящий в целевой clump ("Сессия не найдена в clump: X" — см.
+# docs/discovery-vps104.local.md, Баг №6). Просто postpone и повтор на ТОМ
+# ЖЕ account_id — верное поведение. Не влияет на
+# _maybe_unassign_account_on_retry (ACCOUNT_UNAUTHORIZED/CHANNELS_TOO_MUCH
+# по-прежнему освобождают account_id — там аккаунт реально непригоден).
+_FIXED_ACCOUNT_NO_UNASSIGN_ON_BUSY_TASK_TYPES = frozenset({"parser_add_channel"})
 
 
 class DispatchResult(str, Enum):
@@ -790,6 +802,14 @@ class TaskDispatcher:
         if task_type.code not in _AUTO_PICK_TASK_TYPES:
             return
         if task_type.uses_two_accounts:
+            return
+        if task_type.code in _FIXED_ACCOUNT_NO_UNASSIGN_ON_BUSY_TASK_TYPES:
+            logger.debug(
+                "dispatch: account_id не сбрасываем при reserve_failed "
+                "task_id=%s (%s) — аккаунт занят временно, а не непригоден",
+                task.id,
+                task_type.code,
+            )
             return
         try:
             await self._queue.unassign_account(task.id)

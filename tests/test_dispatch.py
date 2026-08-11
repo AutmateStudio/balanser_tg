@@ -98,6 +98,7 @@ class FakeQueue:
     permanent_failed: list[tuple[int, str | None]] = field(default_factory=list)
     retry_delays: list[int] = field(default_factory=list)
     begin_calls: list[int] = field(default_factory=list)
+    unassigned: list[int] = field(default_factory=list)
     complete_raises: Exception | None = None
 
     def __post_init__(self) -> None:
@@ -129,6 +130,9 @@ class FakeQueue:
 
     async def assign_account(self, task_id: int, account_id: int) -> None:
         self.assigned.append((task_id, account_id))
+
+    async def unassign_account(self, task_id: int) -> None:
+        self.unassigned.append(task_id)
 
     async def begin_execution_attempt(self, task_id: int) -> int:
         self.begin_calls.append(task_id)
@@ -386,6 +390,54 @@ async def test_fixed_account_id_reserve_fail_postpones() -> None:
     assert queue.postponed == [(9, 300, "account_reserve_failed:99")]
     assert adapter.executions == []
     assert accounts.released == []
+
+
+@pytest.mark.asyncio
+async def test_fixed_account_id_reserve_fail_keeps_account_for_parser_add_channel() -> None:
+    """Регресс "Сессия не найдена в clump" (docs/discovery-vps104.local.md,
+
+    Баг №6): для parser_add_channel account_id — единственный владелец
+    ресурса (1 clump = 1 фиксированная сессия), а не взаимозаменяемый выбор
+    auto-pick. "Занят" (reserve fail) — временно, не "непригоден"; unassign
+    здесь гарантированно роняет следующую попытку на чужой аккаунт вне
+    целевого clump. Должен просто postpone на ТОМ ЖЕ account_id."""
+    queue = _fake_queue()
+    accounts = FakeAccounts(reserve_ok=False)
+    adapter = MockTaskAdapter()
+    dispatcher = _dispatcher(
+        queue, accounts, FakeTaskTypes(_task_type()), adapter
+    )
+
+    result = await dispatcher.dispatch(
+        _claimed(90, account_id=99, task_type_code="parser_add_channel")
+    )
+
+    assert result == DispatchResult.POSTPONED
+    assert queue.unassigned == []
+
+
+@pytest.mark.asyncio
+async def test_fixed_account_id_reserve_fail_unassigns_for_other_auto_pick_types() -> None:
+    """Контроль: для ДРУГИХ auto-pick типов (взаимозаменяемый аккаунт) старое
+
+    поведение (unassign на busy → следующая попытка auto-pick) сохранено —
+    фикс сужен именно до parser_add_channel, не выключен глобально."""
+    queue = _fake_queue()
+    accounts = FakeAccounts(reserve_ok=False)
+    adapter = MockTaskAdapter()
+    dispatcher = _dispatcher(
+        queue,
+        accounts,
+        FakeTaskTypes(_task_type(code="collect_extra_data")),
+        adapter,
+    )
+
+    result = await dispatcher.dispatch(
+        _claimed(91, account_id=99, task_type_code="collect_extra_data")
+    )
+
+    assert result == DispatchResult.POSTPONED
+    assert queue.unassigned == [91]
 
 
 @pytest.mark.asyncio
