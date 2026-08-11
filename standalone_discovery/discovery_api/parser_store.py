@@ -21,6 +21,18 @@ DEFAULT_FILENAME = "parser_jobs.json"
 SCHEMA_VERSION = 3
 
 
+class ParserStoreCorruptedError(RuntimeError):
+    """Файл хранилища СУЩЕСТВУЕТ, но не читается/не парсится/пуст.
+
+    Отдельно от легитимного случая "файла нет" (первый запуск, restored=0 —
+    это нормально). Если файл есть, но испорчен — это потеря состояния
+    clump, и вызывающий код должен явно узнать об этом и залогировать как
+    авария, а не тихо продолжить как будто restored=0 — штатное состояние.
+    См. инцидент 2026-08-11 (docs/discovery-vps104.local.md в lidogen_site) —
+    файл обнулился, restore тихо вернул [], авария не была замечена 6+ часов.
+    """
+
+
 def _store_path() -> str:
     raw = (os.getenv("PARSER_STORE_PATH") or "").strip()
     if raw:
@@ -41,17 +53,38 @@ def is_persistence_enabled() -> bool:
 
 
 def load_persisted_jobs(*, store_path: Optional[str] = None) -> List[dict[str, Any]]:
+    """Возвращает список сохранённых clump-записей.
+
+    Если файла нет — возвращает [] (легитимно, например первый запуск).
+    Если файл ЕСТЬ, но пуст/повреждён/не парсится — кидает
+    ParserStoreCorruptedError, а не тихо возвращает []. Раньше оба случая
+    были неотличимы, из-за чего потеря состояния (0-байтовый файл) выглядела
+    как "восстанавливать нечего" вместо "авария, требуется вмешательство".
+    """
     path = store_path or _store_path()
     if not os.path.isfile(path):
         return []
     try:
         with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        log.warning("Не удалось прочитать %s: %s", path, e)
-        return []
+            raw = f.read()
+    except OSError as e:
+        raise ParserStoreCorruptedError(f"Не удалось открыть {path}: {e}") from e
+
+    if not raw.strip():
+        raise ParserStoreCorruptedError(
+            f"{path} существует, но пуст (0 байт) — состояние clump потеряно"
+        )
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ParserStoreCorruptedError(f"Не удалось распарсить {path}: {e}") from e
+
     if not isinstance(data, list):
-        return []
+        raise ParserStoreCorruptedError(
+            f"{path}: ожидался list верхнего уровня, получено {type(data).__name__}"
+        )
+
     return [normalize_persisted_record(x) for x in data if isinstance(x, dict)]
 
 
@@ -92,7 +125,17 @@ def upsert_job(
     pid = record.get("parser_id")
     if not pid:
         return
-    jobs = load_persisted_jobs(store_path=store_path)
+    try:
+        jobs = load_persisted_jobs(store_path=store_path)
+    except ParserStoreCorruptedError:
+        log.critical(
+            "parser_store: хранилище повреждено при upsert_job — перезаписываю "
+            "с нуля только текущей записью (parser_id=%s), остальное состояние "
+            "потеряно и не восстановится автоматически",
+            pid,
+            exc_info=True,
+        )
+        jobs = []
     others = [j for j in jobs if j.get("parser_id") != pid]
     others.append(normalize_persisted_record(dict(record)))
     save_persisted_jobs(others, store_path=store_path)
@@ -101,7 +144,16 @@ def upsert_job(
 def delete_job(parser_id: str, *, store_path: Optional[str] = None) -> None:
     if not is_persistence_enabled():
         return
-    jobs = load_persisted_jobs(store_path=store_path)
+    try:
+        jobs = load_persisted_jobs(store_path=store_path)
+    except ParserStoreCorruptedError:
+        log.critical(
+            "parser_store: хранилище повреждено при delete_job(parser_id=%s) — "
+            "нечего фильтровать, оставляю файл как есть для ручного разбора",
+            parser_id,
+            exc_info=True,
+        )
+        return
     filtered = [j for j in jobs if j.get("parser_id") != parser_id]
     if len(filtered) != len(jobs):
         save_persisted_jobs(filtered, store_path=store_path)

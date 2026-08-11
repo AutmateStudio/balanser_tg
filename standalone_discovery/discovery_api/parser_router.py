@@ -87,6 +87,7 @@ from discovery_api.queue.account_queue_overlay import (
 )
 from discovery_api.queue.status import get_task_snapshot
 from discovery_api.parser_store import (
+    ParserStoreCorruptedError,
     clump_to_record,
     delete_job as persist_delete_job,
     is_persistence_enabled,
@@ -1566,7 +1567,19 @@ async def restore_persisted_parsers() -> None:
         )
         return
 
-    records = load_persisted_jobs()
+    try:
+        records = load_persisted_jobs()
+    except ParserStoreCorruptedError:
+        log.critical(
+            "restore_persisted_parsers: ХРАНИЛИЩЕ CLUMP ПОВРЕЖДЕНО ИЛИ ПУСТО — "
+            "состояние всех ранее запущенных парсеров потеряно. Это НЕ штатное "
+            "'нечего восстанавливать' (той ситуации отвечает отсутствующий файл, "
+            "не битый). Нужно пересоздать clump вручную/через n8n "
+            "'Создать слушатель телеграм' — см. docs/discovery-vps104.local.md "
+            "(инцидент 2026-08-11) в репозитории lidogen_site.",
+            exc_info=True,
+        )
+        return
     for rec in records:
         rec = normalize_persisted_record(rec)
         parser_id = rec.get("parser_id")

@@ -197,3 +197,65 @@ class ParserRestoreTests(unittest.TestCase):
             except OSError:
                 pass
             parser_router._jobs.clear()
+
+
+class ParserStoreCorruptionTests(unittest.TestCase):
+    """Регрессия на инцидент 2026-08-11: 0-байтовый parser_jobs.json после
+    рестарта тихо трактовался как 'restored 0 clump(s)' — авария оставалась
+    незамеченной 6+ часов. См. docs/discovery-vps104.local.md (lidogen_site)."""
+
+    def tearDown(self) -> None:
+        for key in ("PARSER_STORE_PATH", "PARSER_PERSISTENCE_ENABLED"):
+            os.environ.pop(key, None)
+
+    def test_missing_file_is_not_an_error(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        os.unlink(path)
+        os.environ["PARSER_STORE_PATH"] = path
+        os.environ["PARSER_PERSISTENCE_ENABLED"] = "1"
+        self.assertEqual(parser_store.load_persisted_jobs(), [])
+
+    def test_empty_file_raises_corrupted(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        try:
+            os.environ["PARSER_STORE_PATH"] = path
+            os.environ["PARSER_PERSISTENCE_ENABLED"] = "1"
+            with self.assertRaises(parser_store.ParserStoreCorruptedError):
+                parser_store.load_persisted_jobs()
+        finally:
+            os.unlink(path)
+
+    def test_malformed_json_raises_corrupted(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("{not valid json")
+            os.environ["PARSER_STORE_PATH"] = path
+            os.environ["PARSER_PERSISTENCE_ENABLED"] = "1"
+            with self.assertRaises(parser_store.ParserStoreCorruptedError):
+                parser_store.load_persisted_jobs()
+        finally:
+            os.unlink(path)
+
+    def test_upsert_recovers_from_corrupted_store(self) -> None:
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        try:
+            os.environ["PARSER_STORE_PATH"] = path
+            os.environ["PARSER_PERSISTENCE_ENABLED"] = "1"
+            parser_store.upsert_job(
+                parser_store.job_to_record(
+                    parser_id="rec1",
+                    session_name="/s",
+                    webhook_url="http://h",
+                    channel_list=["@x"],
+                    allowed_chat_ids={-1001},
+                )
+            )
+            jobs = parser_store.load_persisted_jobs()
+            self.assertEqual(len(jobs), 1)
+        finally:
+            os.unlink(path)

@@ -104,3 +104,29 @@ async def test_restore_all_restores_empty_channel_list(
     assert count == 1
     mock_create.assert_awaited_once()
     fake_clump.start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_restore_all_handles_corrupted_store(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Регрессия на инцидент 2026-08-11: повреждённое/пустое хранилище должно
+    логироваться как CRITICAL и возвращать 0, а не падать и не выглядеть как
+    штатное 'restored 0 clump(s)' без объяснения причины."""
+    monkeypatch.setattr(clump_bootstrap, "is_persistence_enabled", lambda: True)
+    monkeypatch.setenv("API_ID", "1")
+    monkeypatch.setenv("API_HASH", "hash")
+
+    from discovery_api.parser_store import ParserStoreCorruptedError
+
+    def _raise():
+        raise ParserStoreCorruptedError("тест: файл пуст")
+
+    with patch.object(clump_bootstrap, "load_persisted_jobs", side_effect=_raise):
+        with caplog.at_level("CRITICAL"):
+            count = await clump_bootstrap.restore_all_clumps_from_store()
+
+    assert count == 0
+    assert any(
+        "ПОВРЕЖДЕНО" in record.message for record in caplog.records
+    ), "ожидался CRITICAL-лог с явным упоминанием повреждения хранилища"
