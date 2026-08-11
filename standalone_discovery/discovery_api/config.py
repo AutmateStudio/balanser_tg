@@ -180,6 +180,22 @@ def get_channel_count_refresh_interval_seconds() -> float:
     return max(60.0, _get_float_env("CHANNEL_COUNT_REFRESH_INTERVAL_SECONDS", 1800.0))
 
 
+def get_bootstrap_restore_stagger_seconds() -> float:
+    """Пауза (сек) между стартами clump'ов при массовом restore после рестарта.
+
+    Инцидент 2026-08-11: Parser_client.start() только создаёт asyncio-таску
+    (asyncio.create_task) и сразу возвращается — не ждёт реального подключения.
+    Внешний цикл restore_all_clumps_from_store()/restore_persisted_parsers()
+    поэтому пробегает все ~47 записей почти мгновенно, и все supervisor-таски
+    стартуют практически одновременно — thundering herd на одновременное
+    подключение к Telegram, приводивший к sqlite3.OperationalError:
+    database is locked внутри самого Telethon (per-account .session файлы) и
+    к WARNING/TimeoutError лавине. См. docs/discovery-vps104.local.md
+    (lidogen_site) — root cause и разбор.
+    """
+    return max(0.0, _get_float_env("BOOTSTRAP_RESTORE_STAGGER_SECONDS", 1.5))
+
+
 def get_channel_count_refresh_stagger_seconds() -> float:
     """Пауза (сек) между сессиями внутри одного прохода — не бить Telegram пачкой."""
     return max(0.0, _get_float_env("CHANNEL_COUNT_REFRESH_STAGGER_SECONDS", 2.0))

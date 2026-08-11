@@ -1,6 +1,7 @@
 """HTTP-маршруты для запуска и остановки Telegram-парсера (SessionClump)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -31,6 +32,7 @@ from discovery_api.action_queue import (
 )
 from discovery_api.config import (
     get_add_channels_per_hour,
+    get_bootstrap_restore_stagger_seconds,
     get_max_channels_per_session,
     get_rebalance_cooldown_hours,
     get_rebalance_enabled,
@@ -1610,6 +1612,9 @@ async def restore_persisted_parsers() -> None:
             await clump.start()
             _jobs[parser_id] = _ClumpJob(clump=clump, parser_id=parser_id)
             log.info("Восстановлен clump parser_id=%s sessions=%s", parser_id, len(session_list))
+            stagger = get_bootstrap_restore_stagger_seconds()
+            if stagger > 0:
+                await asyncio.sleep(stagger)
         except Exception:
             log.exception(
                 "Не удалось восстановить clump из хранилища (id=%s)", parser_id

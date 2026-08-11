@@ -1,5 +1,6 @@
 """D3 — unit-тесты clump_bootstrap (без Telethon)."""
 from __future__ import annotations
+import time
 
 from unittest.mock import AsyncMock, patch
 
@@ -130,3 +131,54 @@ async def test_restore_all_handles_corrupted_store(
     assert any(
         "ПОВРЕЖДЕНО" in record.message for record in caplog.records
     ), "ожидался CRITICAL-лог с явным упоминанием повреждения хранилища"
+
+
+@pytest.mark.asyncio
+async def test_restore_all_staggers_between_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Регрессия на инцидент 2026-08-11 (продолжение): без паузы между стартами
+    все clump'ы запускаются практически одновременно (Parser_client.start()
+    только создаёт таску и сразу возвращается) — thundering herd на подключение
+    к Telegram, sqlite3.OperationalError: database is locked внутри Telethon."""
+    monkeypatch.setattr(clump_bootstrap, "is_persistence_enabled", lambda: True)
+    monkeypatch.setenv("API_ID", "1")
+    monkeypatch.setenv("API_HASH", "hash")
+    monkeypatch.setattr(
+        clump_bootstrap, "get_bootstrap_restore_stagger_seconds", lambda: 0.05
+    )
+
+    records = [
+        {
+            "parser_id": f"p-{i}",
+            "session_name_list": [f"/s{i}"],
+            "webhook_url": "https://hook.example/",
+            "channel_list": ["@ch"],
+            "clump_name": f"c{i}",
+        }
+        for i in range(3)
+    ]
+
+    fake_clumps = []
+
+    async def _fake_get_or_create_clump(parser_id, session_list, webhook_url, clump_name=None):
+        clump = AsyncMock()
+        clump.restore_from_record = lambda _rec: None
+        fake_clumps.append(clump)
+        return clump
+
+    with (
+        patch.object(clump_bootstrap, "load_persisted_jobs", return_value=records),
+        patch.object(clump_bootstrap, "normalize_persisted_record", side_effect=lambda r: r),
+        patch.object(clump_bootstrap, "get_clump", return_value=None),
+        patch.object(
+            clump_bootstrap, "get_or_create_clump", side_effect=_fake_get_or_create_clump
+        ),
+    ):
+        start = time.monotonic()
+        count = await clump_bootstrap.restore_all_clumps_from_store()
+        elapsed = time.monotonic() - start
+
+    assert count == 3
+    for c in fake_clumps:
+        c.start.assert_awaited_once()
+    # 3 записи, пауза 0.05с между стартами — минимум ~2 паузы должны набежать.
+    assert elapsed >= 0.09, f"пауза между стартами не применилась: {elapsed:.3f}s"

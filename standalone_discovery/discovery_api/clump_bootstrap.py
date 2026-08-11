@@ -1,6 +1,7 @@
 """D3 — восстановление SessionClump из parser_jobs.json для queue-worker (без FastAPI _jobs)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -10,6 +11,7 @@ from discovery_api.parser_store import (
     load_persisted_jobs,
     normalize_persisted_record,
 )
+from discovery_api.config import get_bootstrap_restore_stagger_seconds
 from discovery_api.session_registry import get_clump, get_or_create_clump
 
 log = logging.getLogger(__name__)
@@ -74,6 +76,9 @@ async def restore_all_clumps_from_store() -> int:
             clump.restore_from_record(rec)
             await clump.start()
             restored += 1
+            stagger = get_bootstrap_restore_stagger_seconds()
+            if stagger > 0:
+                await asyncio.sleep(stagger)
             log.info(
                 "clump_bootstrap: восстановлен parser_id=%s sessions=%s",
                 parser_id,
