@@ -445,6 +445,15 @@ class AddChannelsResponse(BaseModel):
             "?force_retry=1"
         ),
     )
+    skipped_already_queued: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Канал -> id уже существующей активной задачи; новая задача НЕ "
+            "поставлена, т.к. для этого канала уже есть queued/scheduled/"
+            "retry/in_progress parser_add_channel под другим parser_id "
+            "(dedup по channel_id, а не только по dedup_key)"
+        ),
+    )
     async_mode: bool = False
 
 
@@ -714,6 +723,7 @@ async def parser_add_channels(
                 action_id=pg_result.action_id,
                 task_ids=pg_result.task_ids,
                 skipped_fatal=pg_result.skipped_fatal,
+                skipped_already_queued=pg_result.skipped_already_queued,
                 async_mode=True,
             )
 

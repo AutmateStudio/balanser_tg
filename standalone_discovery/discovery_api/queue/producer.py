@@ -31,6 +31,13 @@ class EnqueueAddChannelsResult:
     # создаётся (цель уже достигнута), иначе воркер уводит её в бесконечный
     # RETRYABLE «Канал уже на другой сессии».
     skipped_in_clump: dict[str, str] = field(default_factory=dict)
+    # У канала уже есть активная (queued/scheduled/retry/in_progress)
+    # parser_add_channel-задача под ДРУГИМ parser_id — новая не создаётся.
+    # dedup_key включает parser_id, поэтому без этой проверки повторный
+    # вызов с иным target-парсером (напр. n8n tg-parser-sync на следующем
+    # тике выбирает другой парсер для того же ещё не подключённого канала)
+    # плодит дубли-«близнецы», раздувающие очередь без всякой пользы.
+    skipped_already_queued: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,10 +112,16 @@ async def enqueue_parser_add_channels(
     B12: если для канала последняя попытка уже terminal failed с постоянной
     причиной (banned, channel_private, invalid_payload, ...) — новая задача
     не создаётся (см. TaskQueueRepo.find_fatal_history/FATAL_ERROR_CODES).
-    Каналы, уже активные (queued/scheduled/retry/in_progress), и так не
-    дублируются — это гарантирует partial unique index dedup_key.
-    Источник вызова (n8n tg-parser-sync и т.п.) не меняется: он продолжает
-    присылать один и тот же список каналов каждый тик, фильтрация — здесь.
+    Каналы, для которых уже есть активная (queued/scheduled/retry/
+    in_progress) задача — под ЭТИМ ЖЕ ИЛИ ДРУГИМ parser_id — не дублируются
+    (см. find_active_task_ids_by_channel_ids). Раньше защита была только на
+    уровне partial unique index dedup_key, а dedup_key включает parser_id —
+    если вызывающий (n8n tg-parser-sync и т.п.) на следующем тике выбирал
+    другой target-парсер для ещё не подключённого канала, индекс не срабатывал
+    и очередь копила дубли-«близнецы» без ограничения (см. инцидент в
+    docs/discovery-vps104.local.md, lidogen_site). Источник вызова не
+    меняется: он продолжает присылать один и тот же список каналов каждый
+    тик, фильтрация — здесь.
     `skip_known_fatal=False` — принудительный повтор (ручной override оператора).
 
     Batch-путь (без N× round-trip на канал):
@@ -125,6 +138,7 @@ async def enqueue_parser_add_channels(
     clump = get_clump(parser_id)
     skipped_fatal: dict[str, str] = {}
     skipped_in_clump: dict[str, str] = {}
+    skipped_already_queued: dict[str, str] = {}
     wh = (webhook_url or "").strip() or None
 
     # --- шаг 0: нормализация refs, owner session в памяти ---
@@ -202,10 +216,53 @@ async def enqueue_parser_add_channels(
             action_id=action_id,
             skipped_fatal=skipped_fatal,
             skipped_in_clump=skipped_in_clump,
+            skipped_already_queued=skipped_already_queued,
         )
 
     # --- шаг 2: batch channel_id lookup ---
     channel_ids = await channels_repo.find_ids_by_refs(to_enqueue_refs)
+
+    # --- шаг 2.5: канал уже под активной задачей у ДРУГОГО parser_id? ---
+    # dedup_key = f"{task_type}:{parser_id}:{channel}" — partial unique index
+    # по dedup_key не ловит эту ситуацию, т.к. parser_id входит в ключ.
+    try:
+        active_by_channel_id = await repo.find_active_task_ids_by_channel_ids(
+            list(channel_ids.values()), PARSER_ADD_CHANNEL
+        )
+    except Exception:  # noqa: BLE001 — PG недоступен → не блокируем enqueue
+        log.warning(
+            "enqueue dedup: не удалось batch-проверить активные задачи по "
+            "channel_id — пропускаю проверку на этот раз",
+            exc_info=True,
+        )
+        active_by_channel_id = {}
+    if active_by_channel_id:
+        still_to_enqueue: list[str] = []
+        for channel_ref in to_enqueue_refs:
+            cid = channel_ids.get(channel_ref)
+            existing_task_id = active_by_channel_id.get(cid) if cid is not None else None
+            if existing_task_id is not None:
+                log.info(
+                    "enqueue_parser_add_channels: канал ref=%r parser_id=%s не "
+                    "поставлен — уже есть активная задача id=%s под другим "
+                    "parser_id для того же канала (dedup по channel_id)",
+                    channel_ref,
+                    parser_id,
+                    existing_task_id,
+                )
+                skipped_already_queued[channel_ref] = str(existing_task_id)
+                continue
+            still_to_enqueue.append(channel_ref)
+        to_enqueue_refs = still_to_enqueue
+
+    if not to_enqueue_refs:
+        return EnqueueAddChannelsResult(
+            task_ids=[],
+            action_id=action_id,
+            skipped_fatal=skipped_fatal,
+            skipped_in_clump=skipped_in_clump,
+            skipped_already_queued=skipped_already_queued,
+        )
 
     # --- шаг 3–4: fatal-history + INSERT через enqueue_many ---
     inputs: list[EnqueueInput] = []
@@ -253,6 +310,7 @@ async def enqueue_parser_add_channels(
         action_id=action_id,
         skipped_fatal=skipped_fatal,
         skipped_in_clump=skipped_in_clump,
+        skipped_already_queued=skipped_already_queued,
     )
 
 

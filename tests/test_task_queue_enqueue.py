@@ -402,3 +402,95 @@ async def test_enqueue_many_skips_fatal_history(clean_queue) -> None:
     assert results[0].created is False
     assert results[0].skipped_reason == "fatal_history"
     assert results[0].fatal_error_code == "channel_private"
+
+
+@pytest.fixture
+async def dedup_channel_row(pg_pool):
+    """Одноразовый source_channels-канал для тестов channel_id-дедупа."""
+    suffix = uuid.uuid4().hex
+    async with db.acquire() as conn:
+        platform_id = await conn.fetchval(
+            "INSERT INTO platforms (code, name) VALUES ($1, $2) RETURNING id",
+            f"{_DEDUP_PREFIX}platform_{suffix}",
+            "B3 dedup test platform",
+        )
+        channel_id = await conn.fetchval(
+            "INSERT INTO source_channels (platform_id, external_channel_id, name) "
+            "VALUES ($1, $2, $3) RETURNING id",
+            platform_id,
+            f"{_DEDUP_PREFIX}channel_{suffix}",
+            "B3 dedup test channel",
+        )
+    yield channel_id
+    async with db.acquire() as conn:
+        await conn.execute("DELETE FROM source_channels WHERE id = $1", channel_id)
+        await conn.execute("DELETE FROM platforms WHERE id = $1", platform_id)
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_find_active_by_channel_ids_catches_dedup_key_blind_spot(
+    clean_queue, dedup_channel_row
+) -> None:
+    """Регрессия: dedup_key = f"{type}:{parser_id}:{channel}" считает задачи под
+
+    РАЗНЫМИ parser_id разными ключами — partial unique index их не схлопнет,
+    хотя канал у них один и тот же. find_active_task_ids_by_channel_ids должен
+    находить такую активную задачу по channel_id независимо от parser_id,
+    зашитого в dedup_key (см. discovery_api/queue/producer.py — иначе
+    повторный вызов add-channels с другим target-парсером плодит дубли).
+    """
+    repo = TaskQueueRepo()
+    channel_id = dedup_channel_row
+
+    # Два РАЗНЫХ dedup_key (как если бы один и тот же канал добавляли под
+    # parser_id="p0", затем под parser_id="p1") — но один и тот же channel_id.
+    first = await repo.enqueue(
+        EnqueueInput(
+            task_type_code="parser_add_channel",
+            dedup_key=f"parser_add_channel:p0:{_unique_key()}",
+            channel_id=channel_id,
+        )
+    )
+    assert first.created is True
+
+    found = await repo.find_active_task_ids_by_channel_ids(
+        [channel_id], "parser_add_channel"
+    )
+    assert found == {channel_id: first.task_id}
+
+    second = await repo.enqueue(
+        EnqueueInput(
+            task_type_code="parser_add_channel",
+            dedup_key=f"parser_add_channel:p1:{_unique_key()}",
+            channel_id=channel_id,
+        )
+    )
+    # dedup_key разный → partial unique index НЕ мешает вставке (это и есть
+    # блайндспот, который должен закрываться проверкой на уровне producer'а,
+    # а не на уровне БД).
+    assert second.created is True
+    assert second.task_id != first.task_id
+
+    async with db.acquire() as conn:
+        await conn.execute(
+            "UPDATE task_queue SET status = 'done' WHERE id = $1", first.task_id
+        )
+
+    found_after_done = await repo.find_active_task_ids_by_channel_ids(
+        [channel_id], "parser_add_channel"
+    )
+    # first — не активна; должна вернуться только вторая (ещё активная) задача.
+    assert found_after_done == {channel_id: second.task_id}
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_find_active_by_channel_ids_empty_for_unknown_channel(
+    clean_queue,
+) -> None:
+    repo = TaskQueueRepo()
+    result = await repo.find_active_task_ids_by_channel_ids([], "parser_add_channel")
+    assert result == {}

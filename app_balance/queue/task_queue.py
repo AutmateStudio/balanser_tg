@@ -202,6 +202,22 @@ WHERE dedup_key = ANY($1::text[])
 ORDER BY dedup_key, id ASC
 """
 
+# dedup_key у parser_add_channel включает parser_id (см. producer._dedup_key) —
+# partial unique index по dedup_key не страхует от повторной постановки ОДНОГО
+# И ТОГО ЖЕ канала под другим parser_id (см. инцидент "очередь растёт из
+# дублей", docs/discovery-vps104.local.md). Этот запрос ищет активную задачу
+# task_type_code для channel_id независимо от parser_id/dedup_key, используя
+# idx_task_queue_channel_active.
+_FIND_ACTIVE_BY_CHANNEL_IDS_SQL = f"""
+SELECT DISTINCT ON (channel_id)
+    id, channel_id
+FROM task_queue
+WHERE channel_id = ANY($1::bigint[])
+  AND task_type_code = $2
+  AND status IN {ACTIVE_STATUSES}
+ORDER BY channel_id, id ASC
+"""
+
 # Batch INSERT: ON CONFLICT по partial unique idx_task_queue_dedup_active.
 # Предикат WHERE должен совпадать с определением индекса (prod: status = ANY(...::task_status)).
 # Элементы батча должны иметь уникальные ненулевые dedup_key.
@@ -691,6 +707,27 @@ class TaskQueueRepo:
                 last_error=row["last_error"],
             )
         return result
+
+    async def find_active_task_ids_by_channel_ids(
+        self, channel_ids: list[int], task_type_code: str
+    ) -> dict[int, int]:
+        """Активная (queued/scheduled/retry/in_progress) задача task_type_code
+        для channel_id — независимо от parser_id/dedup_key.
+
+        Использует idx_task_queue_channel_active. Нужен там, где один и тот же
+        channel_id может прийти на повторный enqueue под другим parser_id
+        (см. enqueue_parser_add_channels в discovery_api/queue/producer.py) —
+        partial unique index по dedup_key там не защищает от дублей, т.к.
+        dedup_key включает parser_id.
+        """
+        ids = sorted({int(c) for c in channel_ids if c is not None})
+        if not ids:
+            return {}
+        async with acquire() as conn:
+            rows = await conn.fetch(
+                _FIND_ACTIVE_BY_CHANNEL_IDS_SQL, ids, task_type_code
+            )
+        return {int(row["channel_id"]): int(row["id"]) for row in rows}
 
     async def enqueue(
         self, data: EnqueueInput, *, skip_known_fatal: bool = True
