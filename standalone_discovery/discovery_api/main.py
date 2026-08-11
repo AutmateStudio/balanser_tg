@@ -18,8 +18,10 @@ from discovery_api.router import router
 from discovery_api.lead_intent.router import router as lead_intent_router
 from discovery_api.session_registry import (
     release_all,
+    start_accounts_pg_resync,
     start_channel_count_refresher,
     start_health_monitor,
+    stop_accounts_pg_resync,
     stop_channel_count_refresher,
 )
 from discovery_api.account_registry import sync_accounts_from_disk
@@ -267,6 +269,7 @@ async def on_startup() -> None:
     setup_parser_services()
     start_health_monitor()
     start_channel_count_refresher()
+    start_accounts_pg_resync()
     if get_use_pg_queue():
         if get_inprocess_worker():
             await _start_inprocess_worker()
@@ -285,6 +288,7 @@ async def on_shutdown() -> None:
     await stop_action_worker()
     await _stop_inprocess_worker()
     await stop_channel_count_refresher()
+    await stop_accounts_pg_resync()
     await release_all()
     try:
         from discovery_api.parser_functions import shutdown_webhook_dispatch

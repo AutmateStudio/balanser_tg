@@ -180,6 +180,37 @@ def get_channel_count_refresh_interval_seconds() -> float:
     return max(60.0, _get_float_env("CHANNEL_COUNT_REFRESH_INTERVAL_SECONDS", 1800.0))
 
 
+def get_accounts_pg_resync_enabled() -> bool:
+    """Периодически пересчитывать accounts.status/is_enabled из SQLite+диск+clump в PG."""
+    return _get_bool_env("ACCOUNTS_PG_RESYNC_ENABLED", True)
+
+
+def get_accounts_pg_resync_interval_seconds() -> float:
+    """Интервал (сек) полного self-healing sync SQLite+disk+clump → PG accounts.
+
+    Баг 2026-08-11: единственные вызовы sync_accounts_to_pg_best_effort были
+    привязаны к событиям (parser-start/enroll/add-session/QR-login и т.п.), а
+    не к таймеру. Один неудачный вызов с неверным parser_store_path (см.
+    discovery_api/auth.py) один раз выставил ~31 из 47 реально живых аккаунтов
+    в is_enabled=false — и они оставались в этом состоянии часами, потому что
+    ничего не пересчитывало их состояние заново, пока не произойдёт то же
+    самое событие повторно для конкретно этого аккаунта. Периодический полный
+    проход самостоятельно возвращает в active любой аккаунт, который на самом
+    деле in_clump и не admin_blocked. См. docs/discovery-vps104.local.md
+    (lidogen_site, Баг №5).
+    """
+    return max(30.0, _get_float_env("ACCOUNTS_PG_RESYNC_INTERVAL_SECONDS", 300.0))
+
+
+def get_accounts_pg_resync_initial_delay_seconds() -> float:
+    """Задержка (сек) перед первым проходом после старта процесса.
+
+    Небольшая, а не нулевая — чтобы restore_persisted_parsers успел поднять
+    clump'ы перед тем, как sync будет читать in_clump-принадлежность.
+    """
+    return max(0.0, _get_float_env("ACCOUNTS_PG_RESYNC_INITIAL_DELAY_SECONDS", 30.0))
+
+
 def get_bootstrap_restore_stagger_seconds() -> float:
     """Пауза (сек) между стартами clump'ов при массовом restore после рестарта.
 

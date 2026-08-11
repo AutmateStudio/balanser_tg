@@ -27,6 +27,9 @@ from telethon.sessions import StringSession
 from discovery_api.config import (
     get_account_auth_recheck_enabled,
     get_account_auth_recheck_interval_seconds,
+    get_accounts_pg_resync_enabled,
+    get_accounts_pg_resync_initial_delay_seconds,
+    get_accounts_pg_resync_interval_seconds,
     get_api_hash,
     get_api_id,
     get_add_channels_per_hour,
@@ -54,6 +57,7 @@ from discovery_api.config import (
 )
 from app_balance.queue.monitoring.watchdog_heartbeat import (
     WATCHDOG_ACCOUNT_AUTH,
+    WATCHDOG_ACCOUNTS_PG_RESYNC,
     WATCHDOG_CHANNEL_COUNT,
     WATCHDOG_SESSION_HEALTH,
     TickTimer,
@@ -74,6 +78,7 @@ _locks: dict[str, asyncio.Lock] = {}
 _clumps: dict[str, "SessionClump"] = {}
 _health_monitor_task: asyncio.Task[None] | None = None
 _channel_count_refresh_task: asyncio.Task[None] | None = None
+_accounts_pg_resync_task: asyncio.Task[None] | None = None
 
 # F3: однократный warning о выключении idle-rebalance при активном PG-балансере.
 _warned_rebalance_disabled = False
@@ -832,6 +837,127 @@ async def stop_channel_count_refresher() -> None:
     global _channel_count_refresh_task
     task = _channel_count_refresh_task
     _channel_count_refresh_task = None
+    if task is None or task.done():
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+async def _accounts_pg_resync_once() -> None:
+    """Полный self-healing sync SQLite+disk+clump → PG accounts (Баг №5, 2026-08-11).
+
+    Единственные вызовы sync_accounts_to_pg_best_effort в проекте привязаны к
+    событиям (parser-start/enroll/add-session/remove-session/delete-account/
+    QR-login) — ни один не выполняется просто по таймеру. Если ОДИН такой
+    вызов отработает с неверным parser_store_path (см. discovery_api/auth.py
+    до фикса) или застанет clump в промежуточном состоянии при restore, он
+    может выставить is_enabled=false реально живым, in_clump=true аккаунтам —
+    и они останутся disabled сколько угодно долго, пока то же самое событие
+    не произойдёт для них ещё раз. Этот периодический проход самостоятельно
+    возвращает в active/enabled любой аккаунт, который на текущий момент
+    реально in_clump и не admin_blocked — без необходимости ручного
+    вмешательства. См. docs/discovery-vps104.local.md.
+    """
+    import os
+
+    from app_balance.queue.accounts_sync import sync_accounts_to_pg, SyncConfig, default_account_store_path
+    from discovery_api.parser_store import _store_path
+
+    timer = TickTimer()
+    error: str | None = None
+    result_summary: dict[str, Any] = {}
+    try:
+        cfg = SyncConfig(
+            account_store_path=default_account_store_path(),
+            sessions_dir=os.getenv("SESSIONS_DIR", "/app/sessions"),
+            parser_store_path=_store_path(),
+        )
+        result = await sync_accounts_to_pg(cfg)
+        result_summary = {
+            "inserted": result.inserted,
+            "updated": result.updated,
+            "unchanged": result.unchanged,
+            "total": result.total,
+        }
+        if result.updated:
+            log.info(
+                "accounts_pg_resync: обновлено %d из %d accounts (inserted=%d)",
+                result.updated,
+                result.total,
+                result.inserted,
+            )
+    except Exception as exc:  # noqa: BLE001 — периодический sync не должен ронять процесс
+        error = str(exc)
+        log.warning("accounts_pg_resync: ошибка прохода", exc_info=True)
+    finally:
+        registry = get_watchdog_registry()
+        await registry.record_tick(
+            WATCHDOG_ACCOUNTS_PG_RESYNC,
+            duration_ms=timer.duration_ms(),
+            result=result_summary,
+            error=error,
+            interval_seconds=get_accounts_pg_resync_interval_seconds(),
+            enabled=get_accounts_pg_resync_enabled(),
+            process="discovery-api",
+        )
+
+
+async def _accounts_pg_resync_loop() -> None:
+    registry = get_watchdog_registry()
+    registry.configure(
+        WATCHDOG_ACCOUNTS_PG_RESYNC,
+        interval_seconds=get_accounts_pg_resync_interval_seconds(),
+        enabled=get_accounts_pg_resync_enabled(),
+        process="discovery-api",
+    )
+    try:
+        await asyncio.sleep(get_accounts_pg_resync_initial_delay_seconds())
+        if get_accounts_pg_resync_enabled():
+            await _accounts_pg_resync_once()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("Ошибка в первом проходе accounts-pg-resync")
+
+    while True:
+        interval = get_accounts_pg_resync_interval_seconds()
+        registry.configure(
+            WATCHDOG_ACCOUNTS_PG_RESYNC,
+            interval_seconds=interval,
+            enabled=get_accounts_pg_resync_enabled(),
+            process="discovery-api",
+        )
+        try:
+            await asyncio.sleep(interval)
+            if get_accounts_pg_resync_enabled():
+                await _accounts_pg_resync_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Ошибка в цикле accounts-pg-resync")
+
+
+def start_accounts_pg_resync() -> None:
+    """Запускает периодический self-healing sync accounts → PG (идемпотентно)."""
+    global _accounts_pg_resync_task
+    if _accounts_pg_resync_task is not None and not _accounts_pg_resync_task.done():
+        return
+    try:
+        _accounts_pg_resync_task = asyncio.create_task(
+            _accounts_pg_resync_loop(), name="accounts-pg-resync"
+        )
+        log.info("AccountsPgResync запущен")
+    except RuntimeError:
+        log.debug("AccountsPgResync не запущен: нет активного event loop")
+
+
+async def stop_accounts_pg_resync() -> None:
+    global _accounts_pg_resync_task
+    task = _accounts_pg_resync_task
+    _accounts_pg_resync_task = None
     if task is None or task.done():
         return
     task.cancel()

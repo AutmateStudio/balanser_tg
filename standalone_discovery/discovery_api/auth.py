@@ -156,6 +156,7 @@ async def _wait_for_scan(session: QRSession) -> None:
             if session.session_name:
                 from discovery_api.account_registry import register_account_after_qr
                 from app_balance.queue.accounts_sync import sync_accounts_to_pg_best_effort
+                from discovery_api.parser_store import _store_path
                 from discovery_api.session_registry import (
                     find_clump_for_session,
                     notify_session_reauthorized,
@@ -163,8 +164,16 @@ async def _wait_for_scan(session: QRSession) -> None:
                 from discovery_api.session_dialogs import scan_client_channel_membership
 
                 register_account_after_qr(session.session_name)
+                # Баг 2026-08-11: без явного parser_store_path резолвер шёл по
+                # дефолтному пути, который в контейнере с уплощённым layout
+                # (/app/discovery_api/... вместо .../standalone_discovery/...)
+                # не совпадает с реальным parser_jobs.json. load_clump_sessions
+                # читал несуществующий файл → in_clump=False ДЛЯ ВСЕХ аккаунтов
+                # (sync обходит всю таблицу, не только текущую QR-сессию) →
+                # массовое disabled. См. docs/discovery-vps104.local.md (Баг №5).
                 await sync_accounts_to_pg_best_effort(
-                    context=f"qr:{session.session_name}"
+                    context=f"qr:{session.session_name}",
+                    parser_store_path=_store_path(),
                 )
                 await notify_session_reauthorized(session.session_name)
 

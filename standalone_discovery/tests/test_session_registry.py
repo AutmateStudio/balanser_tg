@@ -549,6 +549,92 @@ class AccountAuthWatchdogHealthCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pc.health.status, SessionStatus.ERROR)
 
 
+class AccountsPgResyncLoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_first_pass_uses_initial_delay_not_full_interval(self) -> None:
+        """Тот же паттерн, что у channel-count-refresher: первый self-healing
+        проход должен приходить после initial-delay, а не после полного
+        интервала (иначе только что "потерянные" is_enabled-аккаунты (Баг №5,
+        docs/discovery-vps104.local.md) ждали бы восстановления до 5 минут
+        после каждого деплоя/рестарта)."""
+        from discovery_api import session_registry as sr
+
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            if len(sleep_calls) >= 2:
+                raise asyncio.CancelledError()
+
+        with (
+            patch("discovery_api.session_registry.get_accounts_pg_resync_initial_delay_seconds", return_value=30.0),
+            patch("discovery_api.session_registry.get_accounts_pg_resync_interval_seconds", return_value=300.0),
+            patch("discovery_api.session_registry.get_accounts_pg_resync_enabled", return_value=True),
+            patch("discovery_api.session_registry.asyncio.sleep", side_effect=_fake_sleep),
+            patch.object(sr, "_accounts_pg_resync_once", new_callable=AsyncMock) as once_mock,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await sr._accounts_pg_resync_loop()
+
+        self.assertEqual(sleep_calls, [30.0, 300.0])
+        once_mock.assert_awaited_once()
+
+    async def test_disabled_skips_the_actual_sync_call(self) -> None:
+        from discovery_api import session_registry as sr
+
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            if len(sleep_calls) >= 1:
+                raise asyncio.CancelledError()
+
+        with (
+            patch("discovery_api.session_registry.get_accounts_pg_resync_initial_delay_seconds", return_value=0.0),
+            patch("discovery_api.session_registry.get_accounts_pg_resync_interval_seconds", return_value=300.0),
+            patch("discovery_api.session_registry.get_accounts_pg_resync_enabled", return_value=False),
+            patch("discovery_api.session_registry.asyncio.sleep", side_effect=_fake_sleep),
+            patch.object(sr, "_accounts_pg_resync_once", new_callable=AsyncMock) as once_mock,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await sr._accounts_pg_resync_loop()
+
+        once_mock.assert_not_awaited()
+
+
+class AccountsPgResyncOnceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_uses_store_path_resolver_not_default(self) -> None:
+        """Регресс Бага №5: sync ОБЯЗАН получать parser_store_path через тот
+        же резолвер, что и запись (parser_store._store_path()) — иначе в
+        контейнере с уплощённым layout (/app/discovery_api/... вместо
+        .../standalone_discovery/...) sync читает несуществующий файл,
+        in_clump становится False для ВСЕХ аккаунтов, и реально живые
+        аккаунты массово получают is_enabled=false."""
+        from discovery_api import session_registry as sr
+        from app_balance.queue.accounts_sync import SyncResult
+
+        captured: dict[str, object] = {}
+
+        async def _fake_sync_accounts_to_pg(config):
+            captured["parser_store_path"] = config.parser_store_path
+            return SyncResult(inserted=0, updated=3, unchanged=44, total=47)
+
+        with (
+            patch(
+                "app_balance.queue.accounts_sync.sync_accounts_to_pg",
+                side_effect=_fake_sync_accounts_to_pg,
+            ),
+            patch(
+                "discovery_api.parser_store._store_path",
+                return_value="/app/discovery_api/data/parser_jobs.json",
+            ),
+        ):
+            await sr._accounts_pg_resync_once()
+
+        self.assertEqual(
+            captured["parser_store_path"], "/app/discovery_api/data/parser_jobs.json"
+        )
+
+
 class ChannelCountRefreshLoopTests(unittest.IsolatedAsyncioTestCase):
     async def test_first_pass_uses_initial_delay_not_full_interval(self) -> None:
         """Регресс: без initial-delay первый тик приходил только через полный
