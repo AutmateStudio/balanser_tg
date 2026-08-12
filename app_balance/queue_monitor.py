@@ -22,6 +22,10 @@ from app_balance.queue.monitoring.alert_rules import evaluate_alerts
 from app_balance.queue.monitoring.config import AlertConfig, ErrorDetectorConfig
 from app_balance.queue.monitoring.error_detector import run_detector_tick
 from app_balance.queue.monitoring.error_detector_repo import ErrorDetectorRepo
+from app_balance.queue.monitoring.idle_transaction_reaper import (
+    IdleTransactionReaperConfig,
+    reap_idle_transactions,
+)
 from app_balance.queue.monitoring.metrics_repo import MetricsRepo
 from app_balance.queue.monitoring.notify import AlertNotifier
 from app_balance.queue.monitoring.queue_growth import QueueGrowthTracker
@@ -103,6 +107,14 @@ async def run_combined_tick(
                 notifier=notifier,
                 alert_config=alert_config,
             )
+        # Self-healing safety net (не завязан на mode — актуален всегда):
+        # зависшие 'idle in transaction' после ungraceful shutdown/OOM-kill
+        # держат блокировки часами, пока не истечёт TCP keepalive. См.
+        # docs/discovery-vps104.local.md (инцидент 2026-08-11).
+        reaper_cfg = IdleTransactionReaperConfig.from_env()
+        if reaper_cfg.enabled:
+            reaped = await reap_idle_transactions(reaper_cfg.max_age_seconds)
+            total += len(reaped)
     except Exception as exc:  # noqa: BLE001
         error = str(exc)
         raise
