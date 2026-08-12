@@ -276,6 +276,22 @@ def get_inprocess_worker_count() -> int:
     return max(1, _get_int_env("INPROCESS_WORKER_COUNT", 4))
 
 
+def get_inprocess_balancer_producer() -> bool:
+    """D2* — крутить продюсер F2 channel_balancer в процессе discovery.
+
+    Читает живые clump реестра (iter_clumps, read-only) — не требует
+    restore_all_clumps_from_store(), поэтому совместимо с co-located
+    discovery-api (в отличие от отдельного контейнера producer-balancer,
+    который под co-located топологией конфликтует с .session, см.
+    docker-compose.yml). Требует USE_PG_QUEUE=true.
+    """
+    return _get_bool_env("DISCOVERY_INPROCESS_BALANCER_PRODUCER", False)
+
+
+def get_inprocess_balancer_producer_interval_seconds() -> int:
+    return _get_int_env("PRODUCER_BALANCER_INTERVAL_SECONDS", 300)
+
+
 def get_rebalance_enabled() -> bool:
     return _get_bool_env("REBALANCE_ENABLED", False)
 

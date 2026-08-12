@@ -144,7 +144,8 @@ async def d7_move_ctx(pg_pool):
             target_account_id=target_id,
             channel_id=channel_id,
             payload={
-                "parser_id": "p1",
+                "source_parser_id": "p1",
+                "target_parser_id": "p1",
                 "channel_ref": "@d7_move",
                 "webhook_url": "https://hook.example/d7",
             },

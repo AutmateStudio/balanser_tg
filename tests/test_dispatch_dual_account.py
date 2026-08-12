@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -337,6 +338,181 @@ async def test_reserve_pair_rolls_back_when_target_busy(dual_accounts_and_task) 
     assert await _current_task(ctx["target_id"]) == other.task_id
 
     await repo.release(ctx["target_id"])
+
+
+async def _insert_account(
+    conn,
+    name: str,
+    *,
+    status: str = "active",
+    is_enabled: bool = True,
+    cooldown_until: "datetime | None" = None,
+) -> int:
+    return await conn.fetchval(
+        "INSERT INTO accounts (session_name, status, is_enabled, cooldown_until) "
+        "VALUES ($1, $2, $3, $4) RETURNING id",
+        name,
+        status,
+        is_enabled,
+        cooldown_until,
+    )
+
+
+async def _dual_task(source_id: int, target_id: int, *, key_suffix: str) -> int:
+    dedup_key = f"{_PREFIX}{key_suffix}_{uuid.uuid4().hex}"
+    enqueue = await TaskQueueRepo().enqueue(
+        EnqueueInput(
+            task_type_code="move_channel",
+            dedup_key=dedup_key,
+            priority=_TEST_PRIO,
+            source_account_id=source_id,
+            target_account_id=target_id,
+            channel_id=None,
+        )
+    )
+    assert enqueue.created and enqueue.task_id is not None
+    return enqueue.task_id
+
+
+async def _cleanup_dual_test_data() -> None:
+    await cleanup_queue_test_data(
+        dedup_key_like=f"{_PREFIX}%", session_name_like=f"{_PREFIX}%"
+    )
+
+
+# --- reserve_pair: source может быть постоянно мёртвым (banned/disabled/error) ---
+# F2 channel_balancer дренирует такие аккаунты — см. accounts.py::_PAIR_LOCK_SQL.
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dead_status", ["banned", "disabled", "error"])
+async def test_reserve_pair_allows_dead_source(dead_status: str, pg_pool) -> None:
+    """source в постоянно мёртвом статусе всё равно резервируется — target
+    остаётся строго живым (active/cooldown+is_enabled)."""
+    await _cleanup_dual_test_data()
+    repo = AccountsRepo()
+    try:
+        async with db.acquire() as conn:
+            source_id = await _insert_account(
+                conn,
+                f"{_PREFIX}src_{uuid.uuid4().hex}",
+                status=dead_status,
+                is_enabled=False,
+            )
+            target_id = await _insert_account(
+                conn, f"{_PREFIX}tgt_{uuid.uuid4().hex}", status="active"
+            )
+        task_id = await _dual_task(source_id, target_id, key_suffix=dead_status)
+
+        dual = await repo.reserve_pair(source_id, target_id, task_id)
+
+        assert dual is not None
+        assert await _current_task(source_id) == task_id
+        assert await _current_task(target_id) == task_id
+
+        await repo.release(source_id)
+        await repo.release(target_id)
+    finally:
+        await _cleanup_dual_test_data()
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_reserve_pair_still_rejects_banned_target(pg_pool) -> None:
+    """Регресс-guard: dead-bypass применяется ТОЛЬКО к source, не к target —
+    мёртвый аккаунт не может стать получателем канала."""
+    await _cleanup_dual_test_data()
+    repo = AccountsRepo()
+    try:
+        async with db.acquire() as conn:
+            source_id = await _insert_account(
+                conn, f"{_PREFIX}src_{uuid.uuid4().hex}", status="active"
+            )
+            target_id = await _insert_account(
+                conn,
+                f"{_PREFIX}tgt_{uuid.uuid4().hex}",
+                status="banned",
+                is_enabled=False,
+            )
+        task_id = await _dual_task(source_id, target_id, key_suffix="target_banned")
+
+        dual = await repo.reserve_pair(source_id, target_id, task_id)
+
+        assert dual is None
+        assert await _current_task(source_id) is None
+        assert await _current_task(target_id) is None
+    finally:
+        await _cleanup_dual_test_data()
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_reserve_pair_rejects_cooldown_source_still_in_cooldown(pg_pool) -> None:
+    """Регресс-guard: dead-bypass не должен случайно проглотить cooldown —
+    временный flood-cooldown source по-прежнему ждёт общей очереди, как раньше."""
+    await _cleanup_dual_test_data()
+    repo = AccountsRepo()
+    try:
+        async with db.acquire() as conn:
+            source_id = await _insert_account(
+                conn,
+                f"{_PREFIX}src_{uuid.uuid4().hex}",
+                status="cooldown",
+                cooldown_until=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+            target_id = await _insert_account(
+                conn, f"{_PREFIX}tgt_{uuid.uuid4().hex}", status="active"
+            )
+        task_id = await _dual_task(source_id, target_id, key_suffix="cooldown_source")
+
+        dual = await repo.reserve_pair(source_id, target_id, task_id)
+
+        assert dual is None
+    finally:
+        await _cleanup_dual_test_data()
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_reserve_pair_source_already_busy_still_rejected_even_if_dead(pg_pool) -> None:
+    """current_task_id IS NULL по-прежнему обязателен для ОБЕИХ ролей — dead-
+    bypass не снимает защиту от двойного резерва."""
+    await _cleanup_dual_test_data()
+    repo = AccountsRepo()
+    try:
+        async with db.acquire() as conn:
+            source_id = await _insert_account(
+                conn,
+                f"{_PREFIX}src_{uuid.uuid4().hex}",
+                status="banned",
+                is_enabled=False,
+            )
+            target_id = await _insert_account(
+                conn, f"{_PREFIX}tgt_{uuid.uuid4().hex}", status="active"
+            )
+
+        other_key = f"{_PREFIX}other_{uuid.uuid4().hex}"
+        other = await TaskQueueRepo().enqueue(
+            EnqueueInput(task_type_code="parser_add_channel", dedup_key=other_key)
+        )
+        assert other.task_id is not None
+        assert await repo.reserve(source_id, other.task_id) is True
+
+        task_id = await _dual_task(source_id, target_id, key_suffix="busy_dead_source")
+
+        dual = await repo.reserve_pair(source_id, target_id, task_id)
+
+        assert dual is None
+        assert await _current_task(source_id) == other.task_id
+
+        await repo.release(source_id)
+    finally:
+        await _cleanup_dual_test_data()
 
 
 @requires_pg

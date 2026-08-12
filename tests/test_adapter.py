@@ -1,7 +1,7 @@
 """D3/D4 — unit-тесты ClumpTaskAdapter + execute_task (без Telethon)."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -58,7 +58,8 @@ def _move_claimed(
         task_type_code="move_channel",
         payload=payload
         or {
-            "parser_id": "p1",
+            "source_parser_id": "p1",
+            "target_parser_id": "p1",
             "channel_ref": "@ch",
         },
         source_account_id=source_account_id,
@@ -104,6 +105,7 @@ class FakeClump:
         )
         self.remove_channel = AsyncMock(return_value=True)
         self.start = AsyncMock()
+        self.persist_state = MagicMock()
 
 
 @pytest.mark.asyncio
@@ -239,7 +241,8 @@ async def test_move_channel_happy_path() -> None:
     clump = FakeClump()
     task = _move_claimed(
         payload={
-            "parser_id": "p1",
+            "source_parser_id": "p1",
+            "target_parser_id": "p1",
             "channel_ref": "@move",
             "webhook_url": "https://hook.example/",
         }
@@ -265,7 +268,9 @@ async def test_move_channel_happy_path() -> None:
 @pytest.mark.asyncio
 async def test_move_channel_accepts_ref_alias() -> None:
     clump = FakeClump()
-    task = _move_claimed(payload={"parser_id": "p1", "ref": "@alias"})
+    task = _move_claimed(
+        payload={"source_parser_id": "p1", "target_parser_id": "p1", "ref": "@alias"}
+    )
     getter = await _account_getter(_move_accounts())
 
     await execute_task(
@@ -399,7 +404,9 @@ async def test_clump_task_adapter_delegates_move() -> None:
         clump_getter=lambda _pid: clump,
         account_getter=(await _account_getter(accounts)),
     )
-    task = _move_claimed(payload={"parser_id": "p1", "ref": "@via_adapter"})
+    task = _move_claimed(
+        payload={"source_parser_id": "p1", "target_parser_id": "p1", "ref": "@via_adapter"}
+    )
 
     await adapter.execute(task, account=accounts[20])
 
@@ -469,7 +476,13 @@ async def test_execute_resolves_pg_basename_to_clump_path() -> None:
 @pytest.mark.asyncio
 async def test_move_channel_resolves_pg_basename_to_clump_path() -> None:
     clump = ClumpWithIndex(["/app/sessions/Src", "/app/sessions/Tgt"])
-    task = _move_claimed(payload={"parser_id": "p1", "channel_ref": "@move"})
+    task = _move_claimed(
+        payload={
+            "source_parser_id": "p1",
+            "target_parser_id": "p1",
+            "channel_ref": "@move",
+        }
+    )
     getter = await _account_getter(
         {10: _account(10, "Src"), 20: _account(20, "Tgt")}
     )

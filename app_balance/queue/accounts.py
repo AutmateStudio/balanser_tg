@@ -53,6 +53,12 @@ class AccountQueueState:
     last_error_at: datetime | None
 
 
+# "Мёртвый" аккаунт — постоянно непригоден как получатель задач. Используется
+# F2 channel_balancer (классификация фермы) и reserve_pair (C4, ниже) — такой
+# аккаунт всё ещё может быть source для move_channel (drain), но никогда target.
+DEAD_ACCOUNT_STATUSES = frozenset({"banned", "disabled", "error"})
+
+
 _LIST_QUEUE_STATES_SQL = """
 SELECT id, session_name, status, is_enabled, cooldown_until,
        current_task_id, last_error, last_error_at
@@ -211,14 +217,41 @@ RETURNING id
 """
 
 # C4: блокировка пары аккаунтов перед атомарным dual reserve.
+#
+# target ($2) — требование не меняется: строго active/cooldown+is_enabled без
+# активного cooldown, как и раньше (не может достаться мёртвому аккаунту).
+#
+# source ($1) — F2 channel_balancer должен уметь дренировать каналы с мёртвого
+# (banned/disabled/error) аккаунта на живой target, поэтому source
+# дополнительно разрешён и в постоянно мёртвых статусах — единственное общее
+# требование для обеих ролей остаётся current_task_id IS NULL (без двойного
+# резерва). Cooldown НЕ входит в bypass — временный flood-cooldown source
+# по-прежнему должен ждать общей очереди, обходят проверку только постоянно
+# мёртвые статусы (move_channel — единственный uses_two_accounts=true тип
+# задачи, так что это не затрагивает остальные типы).
 _PAIR_LOCK_SQL = """
 SELECT id, session_name, status, is_enabled, current_task_id, cooldown_until, last_used_at
 FROM accounts
-WHERE id IN ($1, $2)
-  AND status IN ('active', 'cooldown')
-  AND is_enabled = true
-  AND current_task_id IS NULL
-  AND (cooldown_until IS NULL OR cooldown_until <= now())
+WHERE current_task_id IS NULL
+  AND (
+    (
+      id = $1
+      AND (
+        status IN ('banned', 'disabled', 'error')
+        OR (
+          status IN ('active', 'cooldown')
+          AND is_enabled = true
+          AND (cooldown_until IS NULL OR cooldown_until <= now())
+        )
+      )
+    )
+    OR (
+      id = $2
+      AND status IN ('active', 'cooldown')
+      AND is_enabled = true
+      AND (cooldown_until IS NULL OR cooldown_until <= now())
+    )
+  )
 FOR UPDATE
 """
 
@@ -272,6 +305,11 @@ class AccountsRepo:
         self, source_id: int, target_id: int, task_id: int
     ) -> DualReserveResult | None:
         """C4: атомарно резервирует source + target в одной транзакции.
+
+        target должен быть живым (active/cooldown+is_enabled, cooldown истёк).
+        source может быть постоянно мёртвым (banned/disabled/error) — F2
+        channel_balancer дренирует такие аккаунты; временный cooldown source
+        по-прежнему ждёт общей очереди (см. _PAIR_LOCK_SQL).
 
         None — аккаунт недоступен, занят или пара не прошла валидацию.
         """

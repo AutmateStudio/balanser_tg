@@ -61,11 +61,18 @@ INSERT INTO task_types (
     'HTTP #12/#19: resolve_listen_target() — join source + discussion, проверка доступа. Одна строка task_queue = один канал. RPH seed A14 + порог 0% (использовать effective RPH до исчерпания).',
     true, 500, 0, false, NULL
   ),
+  -- default_priority=600 (> parser_add_channel=500, максимум в системе): claim_next
+  -- (task_queue.py) строго приоритетный — забирает только задачи с максимальным
+  -- priority среди claimable, без взвешивания/round-robin. При более низком
+  -- приоритете move_channel систематически проигрывал бы диспетчеризацию
+  -- непрерывно пополняемому parser_add_channel и никогда не исполнялся бы —
+  -- критично для drain мёртвых аккаунтов и skew-балансировки F2. Самоограничение —
+  -- target_queue_size=20 ниже, поэтому высокий приоритет не крадёт диспетчер надолго.
   (
     'move_channel',
     'Перенос канала между аккаунтами',
     'HTTP #16 migrate, #23 rebalance_idle → PG F2: join на target; проверка на source. §18–19 ТЗ.',
-    true, 100, 20, true, 20
+    true, 600, 20, true, 20
   ),
   (
     'collect_extra_data',

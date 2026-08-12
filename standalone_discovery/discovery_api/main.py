@@ -12,7 +12,13 @@ from starlette.requests import Request
 from discovery_api.auth import restore_active_sessions
 from discovery_api.api_key_auth import require_api_key
 from discovery_api.bot_registry import start_bot_polling_once, stop_bot_polling
-from discovery_api.config import get_inprocess_worker, get_inprocess_worker_count, get_use_pg_queue
+from discovery_api.config import (
+    get_inprocess_balancer_producer,
+    get_inprocess_balancer_producer_interval_seconds,
+    get_inprocess_worker,
+    get_inprocess_worker_count,
+    get_use_pg_queue,
+)
 from discovery_api.parser_router import parser_router, restore_persisted_parsers, setup_parser_services
 from discovery_api.router import router
 from discovery_api.lead_intent.router import router as lead_intent_router
@@ -56,6 +62,12 @@ _inprocess_worker_task: "asyncio.Task[None] | None" = None  # совместим
 _inprocess_worker_pool: "list[Any]" = []
 _inprocess_worker_tasks: "list[asyncio.Task[None]]" = []
 _inprocess_pool_stop: "asyncio.Event | None" = None  # сигнал остановки watchdog
+
+# D2* — продюсер F2 channel_balancer в процессе discovery (read-only iter_clumps,
+# не требует restore — совместим с co-located, в отличие от отдельного контейнера
+# producer-balancer). См. get_inprocess_balancer_producer() в config.py.
+_inprocess_balancer_task: "asyncio.Task[None] | None" = None
+_inprocess_balancer_stop: "asyncio.Event | None" = None
 
 
 def _worker_task_done_callback(task: "asyncio.Task[None]") -> None:
@@ -204,6 +216,44 @@ async def _stop_inprocess_worker() -> None:
     _inprocess_worker_task = None
 
 
+async def _start_inprocess_balancer_producer() -> None:
+    """D2*: тик F2 channel_balancer в текущем event loop (общий iter_clumps).
+
+    В отличие от _start_inprocess_worker (пул claim-воркеров), это один
+    периодический цикл продюсера — он только СОЗДАЁТ задачи move_channel в PG,
+    исполняют их уже существующие claim-воркеры (in-process или queue-worker).
+    """
+    global _inprocess_balancer_task, _inprocess_balancer_stop
+    from app_balance.queue.producers.channel_balancer import ChannelBalancerProducer
+    from app_balance.queue_scheduler import run_loop
+
+    stop = asyncio.Event()
+    _inprocess_balancer_stop = stop
+    producer = ChannelBalancerProducer()
+    interval = get_inprocess_balancer_producer_interval_seconds()
+    _inprocess_balancer_task = asyncio.create_task(
+        run_loop(producer, interval, stop),
+        name="inprocess-balancer-producer",
+    )
+    log.info(
+        "D2*: in-process продюсер channel_balancer запущен (interval=%ss)",
+        interval,
+    )
+
+
+async def _stop_inprocess_balancer_producer() -> None:
+    global _inprocess_balancer_task, _inprocess_balancer_stop
+
+    if _inprocess_balancer_stop is not None:
+        _inprocess_balancer_stop.set()
+    if _inprocess_balancer_task is not None:
+        with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError):
+            await asyncio.wait_for(_inprocess_balancer_task, timeout=30)
+
+    _inprocess_balancer_task = None
+    _inprocess_balancer_stop = None
+
+
 app = FastAPI(
     title="API Telegram discovery и скоринга",
     description="API для поиска и скоринга кандидатов Telegram каналов/групп",
@@ -278,6 +328,15 @@ async def on_startup() -> None:
                 "D12: in-process worker НЕ запущен — задайте DISCOVERY_INPROCESS_WORKER=true "
                 "в .env и пересоздайте контейнер (docker compose up -d --force-recreate discovery-api)"
             )
+        if get_inprocess_balancer_producer():
+            await _start_inprocess_balancer_producer()
+        else:
+            log.warning(
+                "D2*: in-process продюсер channel_balancer НЕ запущен — задайте "
+                "DISCOVERY_INPROCESS_BALANCER_PRODUCER=true в .env и пересоздайте "
+                "контейнер, иначе F2 не создаёт задачи move_channel вообще "
+                "(отдельный контейнер producer-balancer несовместим с co-located)"
+            )
 
 
 @app.on_event("shutdown")
@@ -287,6 +346,7 @@ async def on_shutdown() -> None:
     stop_bot_polling()
     await stop_action_worker()
     await _stop_inprocess_worker()
+    await _stop_inprocess_balancer_producer()
     await stop_channel_count_refresher()
     await stop_accounts_pg_resync()
     await release_all()

@@ -37,10 +37,11 @@ def _claimed_move_dispatch(
         id=task_id,
         task_type_id=11,
         task_type_code="move_channel",
-        priority=100,
+        priority=600,
         payload=payload
         or {
-            "parser_id": "p1",
+            "source_parser_id": "p1",
+            "target_parser_id": "p1",
             "channel_ref": "@move",
         },
         channel_id=555,
@@ -106,7 +107,13 @@ async def test_move_uses_task_account_ids_not_execute_account_param() -> None:
     """D4: session names берутся из source/target ID, а не из account dispatch."""
     clump = FakeClump()
     accounts = _move_accounts()
-    task = _move_claimed(payload={"parser_id": "p1", "channel_ref": "@mv"})
+    task = _move_claimed(
+        payload={
+            "source_parser_id": "p1",
+            "target_parser_id": "p1",
+            "channel_ref": "@mv",
+        }
+    )
 
     await execute_task(
         task,
@@ -152,10 +159,23 @@ async def test_move_missing_source_account_id_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_move_missing_parser_id_raises() -> None:
-    task = _move_claimed(payload={"channel_ref": "@ch"})
+async def test_move_missing_source_parser_id_raises() -> None:
+    task = _move_claimed(payload={"target_parser_id": "p1", "channel_ref": "@ch"})
 
-    with pytest.raises(PermanentError, match="missing parser_id"):
+    with pytest.raises(PermanentError, match="missing source_parser_id"):
+        await execute_task(
+            task,
+            account=_account(20, "/tgt"),
+            clump_getter=lambda _pid: FakeClump(),
+            account_getter=await _account_getter(_move_accounts()),
+        )
+
+
+@pytest.mark.asyncio
+async def test_move_missing_target_parser_id_raises() -> None:
+    task = _move_claimed(payload={"source_parser_id": "p1", "channel_ref": "@ch"})
+
+    with pytest.raises(PermanentError, match="missing target_parser_id"):
         await execute_task(
             task,
             account=_account(20, "/tgt"),
@@ -166,7 +186,7 @@ async def test_move_missing_parser_id_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_move_missing_channel_ref_raises() -> None:
-    task = _move_claimed(payload={"parser_id": "p1"})
+    task = _move_claimed(payload={"source_parser_id": "p1", "target_parser_id": "p1"})
 
     with pytest.raises(PermanentError, match="missing channel_ref"):
         await execute_task(
@@ -236,6 +256,197 @@ async def test_unsupported_task_type_raises() -> None:
             clump_getter=lambda _pid: FakeClump(),
             account_getter=await _account_getter(_move_accounts()),
         )
+
+
+# --- unit: execute_task — cross-clump move_channel (D2*, fleet-wide F2) ---
+
+
+def _cross_clump_task(
+    *,
+    source_parser_id: str = "p1",
+    target_parser_id: str = "p2",
+    channel_ref: str = "@cross",
+) -> ClaimedTask:
+    return _move_claimed(
+        payload={
+            "source_parser_id": source_parser_id,
+            "target_parser_id": target_parser_id,
+            "channel_ref": channel_ref,
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_move_same_clump_uses_atomic_move_channel_path() -> None:
+    """Регресс: source_parser_id == target_parser_id → clump_getter возвращает
+    ОДИН и тот же объект → используется прежний атомарный clump.move_channel(),
+    а НЕ add_channel_on_session/remove_channel (cross-clump путь)."""
+    clump = FakeClump()
+    task = _cross_clump_task(source_parser_id="p1", target_parser_id="p1")
+
+    await execute_task(
+        task,
+        account=_account(20, "/tgt"),
+        clump_getter=lambda _pid: clump,
+        account_getter=await _account_getter(_move_accounts()),
+        sync_after_move=_noop_sync_after_move,
+    )
+
+    clump.move_channel.assert_awaited_once_with(
+        "@cross", "/src", "/tgt", webhook_url=None
+    )
+    clump.add_channel_on_session.assert_not_awaited()
+    clump.remove_channel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_move_cross_clump_success_add_then_remove_order() -> None:
+    """D2*: add-to-target ДО remove-from-source — при сбое add канал не теряется."""
+    order: list[str] = []
+    source_clump = FakeClump()
+    target_clump = FakeClump()
+
+    async def _add(*_args, **_kwargs):
+        order.append("add")
+        return {
+            "channel": "@cross",
+            "session_name": "/tgt",
+            "chat_id": 1,
+            "error": None,
+            "already_present": False,
+        }
+
+    async def _remove(*_args, **_kwargs):
+        order.append("remove")
+        return True
+
+    target_clump.add_channel_on_session.side_effect = _add
+    source_clump.remove_channel.side_effect = _remove
+    clumps = {"p1": source_clump, "p2": target_clump}
+    task = _cross_clump_task()
+
+    await execute_task(
+        task,
+        account=_account(20, "/tgt"),
+        clump_getter=lambda pid: clumps[pid],
+        account_getter=await _account_getter(_move_accounts()),
+        sync_after_move=_noop_sync_after_move,
+    )
+
+    assert order == ["add", "remove"]
+    target_clump.add_channel_on_session.assert_awaited_once_with(
+        "/tgt", "@cross", webhook_url=None
+    )
+    source_clump.remove_channel.assert_awaited_once_with("@cross")
+    source_clump.persist_state.assert_called_once()
+    source_clump.start.assert_awaited_once()
+    target_clump.start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_move_cross_clump_add_fails_source_not_touched() -> None:
+    """Если add на target падает — source НЕ трогаем, канал не теряется."""
+    source_clump = FakeClump()
+    target_clump = FakeClump()
+    target_clump.add_channel_on_session.return_value = {
+        "channel": "@cross",
+        "session_name": None,
+        "chat_id": None,
+        "error": "unexpected_owner",
+    }
+    clumps = {"p1": source_clump, "p2": target_clump}
+    task = _cross_clump_task()
+
+    with pytest.raises(RetryableError, match="unexpected_owner"):
+        await execute_task(
+            task,
+            account=_account(20, "/tgt"),
+            clump_getter=lambda pid: clumps[pid],
+            account_getter=await _account_getter(_move_accounts()),
+        )
+
+    source_clump.remove_channel.assert_not_awaited()
+    source_clump.persist_state.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_move_cross_clump_owner_conflict_logs_and_still_removes_source() -> None:
+    """owner_conflict на target — идемпотентный успех (не ошибка), source всё
+    равно освобождается."""
+    source_clump = FakeClump()
+    target_clump = FakeClump()
+    target_clump.add_channel_on_session.return_value = {
+        "channel": "@cross",
+        "session_name": "/other",
+        "chat_id": 1,
+        "error": None,
+        "already_present": True,
+        "owner_conflict": True,
+    }
+    clumps = {"p1": source_clump, "p2": target_clump}
+    task = _cross_clump_task()
+
+    await execute_task(
+        task,
+        account=_account(20, "/tgt"),
+        clump_getter=lambda pid: clumps[pid],
+        account_getter=await _account_getter(_move_accounts()),
+        sync_after_move=_noop_sync_after_move,
+    )
+
+    source_clump.remove_channel.assert_awaited_once_with("@cross")
+
+
+@pytest.mark.asyncio
+async def test_move_cross_clump_source_remove_returns_false_logs_info_not_error() -> None:
+    """Канал уже отсутствовал на source (идемпотентный повтор) — не ошибка."""
+    source_clump = FakeClump()
+    source_clump.remove_channel.return_value = False
+    target_clump = FakeClump()
+    clumps = {"p1": source_clump, "p2": target_clump}
+    task = _cross_clump_task()
+
+    await execute_task(
+        task,
+        account=_account(20, "/tgt"),
+        clump_getter=lambda pid: clumps[pid],
+        account_getter=await _account_getter(_move_accounts()),
+        sync_after_move=_noop_sync_after_move,
+    )
+
+    source_clump.persist_state.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_move_cross_clump_source_clump_not_loaded_raises_retryable() -> None:
+    target_clump = FakeClump()
+    clumps = {"p2": target_clump}
+    task = _cross_clump_task()
+
+    with pytest.raises(RetryableError, match="clump_not_loaded:p1") as exc_info:
+        await execute_task(
+            task,
+            account=_account(20, "/tgt"),
+            clump_getter=lambda pid: clumps.get(pid),
+            account_getter=await _account_getter(_move_accounts()),
+        )
+    assert exc_info.value.code == "clump_not_loaded"
+
+
+@pytest.mark.asyncio
+async def test_move_cross_clump_target_clump_not_loaded_raises_retryable() -> None:
+    source_clump = FakeClump()
+    clumps = {"p1": source_clump}
+    task = _cross_clump_task()
+
+    with pytest.raises(RetryableError, match="clump_not_loaded:p2") as exc_info:
+        await execute_task(
+            task,
+            account=_account(20, "/tgt"),
+            clump_getter=lambda pid: clumps.get(pid),
+            account_getter=await _account_getter(_move_accounts()),
+        )
+    assert exc_info.value.code == "clump_not_loaded"
 
 
 # --- unit: dispatch + ClumpTaskAdapter (без PG) ---
@@ -366,7 +577,8 @@ async def move_channel_adapter_ctx(pg_pool):
             source_account_id=source_id,
             target_account_id=target_id,
             payload={
-                "parser_id": "p1",
+                "source_parser_id": "p1",
+                "target_parser_id": "p1",
                 "channel_ref": "@pg_move",
                 "webhook_url": "https://hook.example/move",
             },

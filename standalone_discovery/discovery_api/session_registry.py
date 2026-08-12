@@ -2194,6 +2194,14 @@ class SessionClump:
         self._persist_safe()
         return {"removed": True, "migrated": []}
 
+    def persist_state(self) -> None:
+        """D2*: публичная обёртка над _persist_safe() для внешних вызовов —
+        нужна adapter.py при cross-clump move_channel, где source-clump
+        мутируется напрямую (remove_channel), а не через собственный метод
+        move_channel/add_channel_on_session, которые уже персистят себя сами.
+        """
+        self._persist_safe()
+
     def _persist_safe(self) -> None:
         """Перезаписывает persistence для clump'а (best-effort, без исключений)."""
         parser_id = None

@@ -74,6 +74,8 @@ class ClumpLike(Protocol):
 
     async def start(self) -> None: ...
 
+    def persist_state(self) -> None: ...
+
 
 AccountGetter = Callable[[int], Awaitable[Account | None]]
 ClumpGetter = Callable[[str], ClumpLike | None]
@@ -100,6 +102,39 @@ def _parse_parser_channel_payload(
     return parser_id.strip(), channel_ref.strip(), webhook
 
 
+def _parse_move_channel_payload(
+    payload: dict[str, Any],
+) -> tuple[str, str, str, str | None]:
+    """D2*: move_channel — ДВА parser_id (source/target могут быть в разных
+    clump — F2 channel_balancer теперь балансирует по всей ферме, не только
+    внутри одного clump)."""
+    source_parser_id = payload.get("source_parser_id")
+    if not isinstance(source_parser_id, str) or not source_parser_id.strip():
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing source_parser_id")
+
+    target_parser_id = payload.get("target_parser_id")
+    if not isinstance(target_parser_id, str) or not target_parser_id.strip():
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing target_parser_id")
+
+    channel_ref = payload.get("channel_ref")
+    if not isinstance(channel_ref, str) or not channel_ref.strip():
+        channel_ref = payload.get("ref")
+    if not isinstance(channel_ref, str) or not channel_ref.strip():
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing channel_ref")
+
+    webhook_url = payload.get("webhook_url")
+    if webhook_url is not None and not isinstance(webhook_url, str):
+        raise PermanentError(ErrorCode.INVALID_PAYLOAD, "invalid webhook_url")
+    webhook = (webhook_url or "").strip() or None
+
+    return (
+        source_parser_id.strip(),
+        target_parser_id.strip(),
+        channel_ref.strip(),
+        webhook,
+    )
+
+
 def validate_task(
     task_type_code: str,
     payload: dict[str, Any],
@@ -107,8 +142,10 @@ def validate_task(
     task: ClaimedTask | None = None,
 ) -> None:
     """Лёгкая проверка payload до списания ресурса (без RPC / clump)."""
-    if task_type_code in (PARSER_ADD_CHANNEL, PARSER_REMOVE_CHANNEL, MOVE_CHANNEL):
+    if task_type_code in (PARSER_ADD_CHANNEL, PARSER_REMOVE_CHANNEL):
         _parse_parser_channel_payload(payload)
+    if task_type_code == MOVE_CHANNEL:
+        _parse_move_channel_payload(payload)
     if task_type_code == MOVE_CHANNEL and task is not None:
         if task.source_account_id is None or task.target_account_id is None:
             raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing dual account ids")
@@ -270,7 +307,9 @@ async def _execute_move_channel(
     if source_id is None or target_id is None:
         raise PermanentError(ErrorCode.INVALID_PAYLOAD, "missing dual account ids")
 
-    parser_id, channel_ref, webhook_url = _parse_parser_channel_payload(dict(task.payload))
+    source_parser_id, target_parser_id, channel_ref, webhook_url = (
+        _parse_move_channel_payload(dict(task.payload))
+    )
 
     source = await account_getter(source_id)
     if source is None:
@@ -286,32 +325,98 @@ async def _execute_move_channel(
             f"{ErrorCode.ACCOUNT_NOT_FOUND}:{target_id}",
         )
 
-    clump = clump_getter(parser_id)
-    if clump is None:
+    source_clump = clump_getter(source_parser_id)
+    if source_clump is None:
         raise RetryableError(
             ErrorCode.CLUMP_NOT_LOADED,
-            f"{ErrorCode.CLUMP_NOT_LOADED}:{parser_id}",
+            f"{ErrorCode.CLUMP_NOT_LOADED}:{source_parser_id}",
+        )
+    target_clump = clump_getter(target_parser_id)
+    if target_clump is None:
+        raise RetryableError(
+            ErrorCode.CLUMP_NOT_LOADED,
+            f"{ErrorCode.CLUMP_NOT_LOADED}:{target_parser_id}",
         )
 
-    from_session = _resolve_clump_session_name(clump, source.session_name)
-    to_session = _resolve_clump_session_name(clump, target.session_name)
+    from_session = _resolve_clump_session_name(source_clump, source.session_name)
+    to_session = _resolve_clump_session_name(target_clump, target.session_name)
+
+    if source_clump is target_clump:
+        # Прежний атомарный путь (source/target в одном clump) — поведение не
+        # меняется, регресс-тесты должны это подтверждать.
+        try:
+            result = await source_clump.move_channel(
+                channel_ref,
+                from_session,
+                to_session,
+                webhook_url=webhook_url,
+            )
+        except QueueTaskError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise map_telethon_exception(exc) from exc
+        if result.get("error"):
+            _raise_clump_result_error(result)
+
+        await sync_after_move(task, target, target_clump)
+        await _start_clump_after_execute(parser_id=target_parser_id, clump=target_clump)
+        return
+
+    # Cross-clump: add-to-target ПЕРЕД remove-from-source — если add падает,
+    # канал остаётся на source, ничего не теряется.
     try:
-        result = await clump.move_channel(
-            channel_ref,
-            from_session,
+        add_result = await target_clump.add_channel_on_session(
             to_session,
+            channel_ref,
             webhook_url=webhook_url,
         )
     except QueueTaskError:
         raise
     except Exception as exc:  # noqa: BLE001
         raise map_telethon_exception(exc) from exc
-    error = result.get("error")
-    if error:
-        _raise_clump_result_error(result)
+    if add_result.get("error"):
+        _raise_clump_result_error(add_result)
+    if add_result.get("owner_conflict"):
+        # Канал уже есть в target clump под другой сессией — цель (канал
+        # в этом clump) уже достигнута, идемпотентный успех (см.
+        # add_channel_on_session). Продолжаем снимать его с source.
+        log.info(
+            "execute_task: move_channel cross-clump — канал уже в target clump "
+            "под другой сессией (task_id=%s ref=%s owner=%s)",
+            task.id,
+            channel_ref,
+            add_result.get("session_name"),
+        )
 
-    await sync_after_move(task, target, clump)
-    await _start_clump_after_execute(parser_id=parser_id, clump=clump)
+    try:
+        removed = await source_clump.remove_channel(channel_ref)
+    except QueueTaskError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise map_telethon_exception(exc) from exc
+    if not removed:
+        log.info(
+            "execute_task: move_channel cross-clump — канал уже отсутствовал "
+            "в source clump ref=%s parser_id=%s",
+            channel_ref,
+            source_parser_id,
+        )
+
+    persist = getattr(source_clump, "persist_state", None)
+    if callable(persist):
+        try:
+            persist()
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "execute_task: persist_state(source_clump) не удался "
+                "(parser_id=%s)",
+                source_parser_id,
+                exc_info=True,
+            )
+
+    await sync_after_move(task, target, target_clump)
+    await _start_clump_after_execute(parser_id=source_parser_id, clump=source_clump)
+    await _start_clump_after_execute(parser_id=target_parser_id, clump=target_clump)
 
 
 async def _execute_parser_remove_channel(
