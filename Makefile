@@ -34,13 +34,29 @@ docker-test:
 
 ## docker-test-safe: безопасный прогон на shared PG. Останавливает ВСЕ источники
 ## claim (queue-worker + in-process worker внутри discovery-api), гоняет полный
-## pytest (guard сам делает probe-проверку), затем возвращает контейнеры.
+## pytest (guard сам делает probe-проверку), затем возвращает контейнеры В ТО ЖЕ
+## СОСТОЯНИЕ, в котором они были ДО прогона (не безусловно up -d queue-worker —
+## на co-located хостах вроде vps-104 queue-worker вообще не должен запускаться
+## параллельно с discovery-api, см. Баг №8 в docs/discovery-vps104.local.md
+## репозитория lidogen_site: 12.08.2026 безусловный up -d queue-worker в этом
+## таргете/раннбуке — часть причины, почему легаси-воркер 14ч конкурировал за
+## Telethon session-файлы и диспетчер встал).
 docker-test-safe:
-	-docker compose stop queue-worker
-	-docker stop standalone-discovery-api
-	docker compose run --rm test; \
+	@qw_was_running="false"; \
+	  if [ "$$(docker compose ps -q queue-worker 2>/dev/null)" != "" ] && \
+	     [ "$$(docker inspect -f '{{.State.Running}}' $$(docker compose ps -q queue-worker) 2>/dev/null)" = "true" ]; then \
+	    qw_was_running="true"; \
+	  fi; \
+	  echo "queue-worker was_running=$$qw_was_running"; \
+	  docker compose stop queue-worker 2>/dev/null || true; \
+	  docker stop standalone-discovery-api 2>/dev/null || true; \
+	  docker compose run --rm test; \
 	  status=$$?; \
-	  docker compose up -d queue-worker; \
+	  if [ "$$qw_was_running" = "true" ]; then \
+	    docker compose up -d queue-worker; \
+	  else \
+	    echo "queue-worker не был запущен до теста — оставляю остановленным (co-located режим)"; \
+	  fi; \
 	  docker start standalone-discovery-api 2>/dev/null || true; \
 	  exit $$status
 

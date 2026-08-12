@@ -19,6 +19,18 @@
    `USE_PG_QUEUE=true` + `INPROCESS_WORKER=true` (см.
    `standalone_discovery/discovery_api/main.py`).
 
+> ⚠️ **На co-located хостах (напр. vps-104, D12 Вариант A) команды ниже вида
+> `docker compose up -d queue-worker` в конце прогона выполнять НЕ НАДО** —
+> `queue-worker` там не должен работать параллельно с discovery-api вообще
+> (два claimer'а дерутся за .session SQLite). `make docker-test-safe`
+> с 12.08.2026 это учитывает сам (см. Баг №8, `docs/discovery-vps104.local.md`
+> в репозитории `lidogen_site`: безусловный `up -d queue-worker` в этом же
+> раннбуке — часть причины 14-часового простоя диспетчера на проде) — таргет
+> запоминает, был ли `queue-worker` запущен ДО прогона, и поднимает его
+> обратно только если был. При ручном (не через `make`) прогоне на
+> co-located хосте — просто не выполняйте шаги `docker compose up -d
+> queue-worker` из примеров ниже.
+
 Любой из них перехватывает тестовые задачи (claim_next берёт MAX(priority)
 первым) и создаёт FK-гонки при очистке — отсюда `TimeoutError`,
 `'in_progress' == 'queued'`, `assert 4 == 5`, `'unexpected_error' == 'flood_wait'`,
@@ -48,11 +60,13 @@ make docker-test-safe
 ```
 
 `docker-test-safe`:
-1. `docker compose stop queue-worker`
-2. `docker stop standalone-discovery-api` (его in-process worker)
-3. `docker compose run --rm test` (guard сам сделает probe-проверку)
-4. `docker compose up -d queue-worker` + `docker start standalone-discovery-api`
-   (даже если тесты упали)
+1. Запоминает, был ли `queue-worker` запущен ДО прогона.
+2. `docker compose stop queue-worker`
+3. `docker stop standalone-discovery-api` (его in-process worker)
+4. `docker compose run --rm test` (guard сам сделает probe-проверку)
+5. `docker start standalone-discovery-api` (даже если тесты упали) + `docker
+   compose up -d queue-worker` **только если он был запущен на шаге 1** (на
+   co-located хостах вроде vps-104 — не был, значит и не поднимется).
 
 Ручной эквивалент:
 

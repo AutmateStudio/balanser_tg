@@ -12,6 +12,11 @@ name: lidogen-telegram-balancer
 # Тесты все (локальная PG):      docker compose --profile local run --rm test-local
 # Миграции перед первым test:    docker compose run --rm migrate
 # Воркер очереди (Z4):           docker compose up -d queue-worker
+#   ⚠️ НЕ на co-located хостах (напр. vps-104, DISCOVERY_INPROCESS_WORKER=true) —
+#   discovery-api уже claim'ит очередь in-process, второй claimer подерётся за
+#   .session SQLite-файлы (см. Баг №8, docs/discovery-vps104.local.md в lidogen_site,
+#   12.08.2026 — 14ч простоя диспетчера от этой самой команды).
+#   На таких хостах — см. scripts/apply_inprocess_worker_colocated.sh
 # Продюсеры (F8):                 docker compose --profile producers up -d producer-collect producer-update producer-balancer producer-inactive-remove
 # Мониторинг (G4+G6+G7):          docker compose --profile monitoring up -d queue-monitor
 # Быстрые тесты блока G:          make docker-test-g
