@@ -491,6 +491,23 @@ def iter_clumps() -> list[tuple[str, "SessionClump"]]:
     return list(_clumps.items())
 
 
+def find_clump_by_session(session_name: str) -> Optional["SessionClump"]:
+    """D3*: находит ЖИВОЙ clump, реально держащий эту сессию, прямо сейчас.
+
+    payload.parser_id, зашитый в task_queue при enqueue, протухает КАЖДЫЙ раз,
+    когда clump пересоздаётся (новый UUID при /parser/start) — а это происходит
+    регулярно при восстановлении после потери parser_jobs.json. Резолв через
+    account.session_name всегда актуален (session_registry — источник истины
+    прямо сейчас), в отличие от закэшированного в очереди значения.
+    """
+    if not session_name:
+        return None
+    for _parser_id, clump in _clumps.items():
+        if clump.has_session(session_name):
+            return clump
+    return None
+
+
 async def get_or_create_clump(
     parser_id: str,
     session_names: list[str],

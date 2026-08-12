@@ -184,6 +184,30 @@ def _default_clump_getter() -> ClumpGetter:
     return get_clump
 
 
+def _clump_has_session(clump: Any, session_name: str) -> bool:
+    """True если у clump ЕСТЬ способ проверить (`has_session`) и сессия найдена.
+
+    Если способа проверить нет (напр. тестовые фейки без has_session) — не
+    мешаем существующему поведению, считаем "неизвестно = похоже на своё".
+    """
+    has_session = getattr(clump, "has_session", None)
+    if not callable(has_session):
+        return True
+    return bool(has_session(session_name))
+
+
+def _find_live_clump_by_session(session_name: str) -> Any | None:
+    """D3*: резолв clump по session_name напрямую из реестра — актуален ВСЕГДА,
+    в отличие от payload.parser_id, который протухает при пересоздании clump
+    (новый UUID на каждый /parser/start, регулярно случается при восстановлении
+    после потери parser_jobs.json — см. docs/discovery-vps104.local.md)."""
+    try:
+        from discovery_api.session_registry import find_clump_by_session
+    except ImportError:
+        return None
+    return find_clump_by_session(session_name)
+
+
 def _default_account_getter() -> AccountGetter:
     repo = AccountsRepo()
     return repo.get_by_id
@@ -246,6 +270,13 @@ async def _execute_parser_add_channel(
 ) -> None:
     parser_id, channel_ref, webhook_url = _parse_parser_channel_payload(dict(task.payload))
     clump = clump_getter(parser_id)
+    if clump is None or not _clump_has_session(clump, account.session_name):
+        # payload.parser_id мог протухнуть (clump пересоздан с новым UUID после
+        # потери persisted-состояния — регулярный сценарий восстановления) —
+        # резолвим по account.session_name, это источник истины прямо сейчас.
+        fallback = _find_live_clump_by_session(account.session_name)
+        if fallback is not None:
+            clump = fallback
     if clump is None:
         raise RetryableError(
             ErrorCode.CLUMP_NOT_LOADED,
@@ -428,6 +459,10 @@ async def _execute_parser_remove_channel(
 ) -> None:
     parser_id, channel_ref, _webhook_url = _parse_parser_channel_payload(dict(task.payload))
     clump = clump_getter(parser_id)
+    if clump is None or not _clump_has_session(clump, account.session_name):
+        fallback = _find_live_clump_by_session(account.session_name)
+        if fallback is not None:
+            clump = fallback
     if clump is None:
         raise RetryableError(
             ErrorCode.CLUMP_NOT_LOADED,
