@@ -132,6 +132,7 @@ _RESERVE_SQL = """
 UPDATE accounts
 SET current_task_id = $2, last_used_at = now()
 WHERE id = $1 AND current_task_id IS NULL
+  AND (cooldown_until IS NULL OR cooldown_until <= now())
 RETURNING id
 """
 
@@ -296,7 +297,15 @@ class AccountsRepo:
             return _row_to_account(row) if row is not None else None
 
     async def reserve(self, account_id: int, task_id: int) -> bool:
-        """Атомарно занимает аккаунт под задачу. False — уже занят."""
+        """Атомарно занимает аккаунт под задачу.
+
+        False — аккаунт уже занят ИЛИ ещё в cooldown (flood_wait не истёк).
+        Баг №9 (13.08.2026): раньше cooldown_until здесь не проверялся —
+        задачи с фиксированным account_id (parser_add_channel и т.п., с Бага
+        №6 — все) резервировали аккаунт в cooldown, ловили flood_wait от
+        Telegram заново, продлевали cooldown и повторяли это каждые ~30с —
+        самоподдерживающийся livelock без единого успешного done.
+        """
         async with acquire() as conn:
             reserved = await conn.fetchval(_RESERVE_SQL, account_id, task_id)
             return reserved is not None

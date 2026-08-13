@@ -156,6 +156,46 @@ async def test_reserve_is_atomic_second_fails(account_and_task) -> None:
 @requires_pg
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_reserve_rejects_account_in_cooldown(account_and_task) -> None:
+    """Баг №9 (13.08.2026): reserve() раньше не проверял cooldown_until вообще —
+    аккаунт во flood-wait cooldown резервировался под фиксированный account_id
+    задачу (parser_add_channel и т.п.), тут же снова ловил flood_wait от
+    Telegram — livelock без единого успешного done."""
+    account_id, task_id = account_and_task
+    repo = AccountsRepo()
+
+    async with db.acquire() as conn:
+        await conn.execute(
+            "UPDATE accounts SET cooldown_until = now() + interval '1 hour' "
+            "WHERE id = $1",
+            account_id,
+        )
+
+    assert await repo.reserve(account_id, task_id) is False
+    assert await _current_task(account_id) is None
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_reserve_allows_account_after_cooldown_expired(account_and_task) -> None:
+    account_id, task_id = account_and_task
+    repo = AccountsRepo()
+
+    async with db.acquire() as conn:
+        await conn.execute(
+            "UPDATE accounts SET cooldown_until = now() - interval '1 minute' "
+            "WHERE id = $1",
+            account_id,
+        )
+
+    assert await repo.reserve(account_id, task_id) is True
+    assert await _current_task(account_id) == task_id
+
+
+@requires_pg
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_release_frees_account(account_and_task) -> None:
     account_id, task_id = account_and_task
     repo = AccountsRepo()
