@@ -10,14 +10,23 @@ from app_balance import queue_scheduler
 from app_balance.queue.producers.base import ProduceResult
 from app_balance.queue.producers.channel_balancer import ChannelBalancerProducer
 from app_balance.queue.producers.collect_extra_data import CollectExtraDataProducer
+from app_balance.queue.producers.inactive_channel_remove import (
+    InactiveChannelRemoveProducer,
+)
 from app_balance.queue.producers.update_channel import UpdateChannelProducer
 
 
-def test_producers_registry_has_three_jobs() -> None:
-    assert set(queue_scheduler.PRODUCERS) == {"collect", "update", "balancer"}
+def test_producers_registry_has_scheduled_jobs() -> None:
+    assert set(queue_scheduler.PRODUCERS) == {
+        "collect",
+        "update",
+        "balancer",
+        "inactive-remove",
+    }
     assert queue_scheduler.PRODUCERS["collect"] is CollectExtraDataProducer
     assert queue_scheduler.PRODUCERS["update"] is UpdateChannelProducer
     assert queue_scheduler.PRODUCERS["balancer"] is ChannelBalancerProducer
+    assert queue_scheduler.PRODUCERS["inactive-remove"] is InactiveChannelRemoveProducer
 
 
 def test_resolve_interval_cli_wins() -> None:

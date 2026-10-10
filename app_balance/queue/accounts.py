@@ -218,6 +218,7 @@ WHERE id IN ($1, $2)
   AND is_enabled = true
   AND current_task_id IS NULL
   AND (cooldown_until IS NULL OR cooldown_until <= now())
+ORDER BY id
 FOR UPDATE
 """
 

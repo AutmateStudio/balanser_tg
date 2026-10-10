@@ -128,7 +128,9 @@ class _FakeQueue:
     def __init__(self) -> None:
         self.steps: list[str] = []
 
-    async def set_last_completed_step(self, task_id: int, step: str) -> None:
+    async def set_last_completed_step(
+        self, task_id: int, step: str, *, locked_by: str | None = None
+    ) -> None:
         self.steps.append(step)
 
 

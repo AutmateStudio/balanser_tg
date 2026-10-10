@@ -176,6 +176,13 @@ async def _wait_for_scan(session: QRSession) -> None:
                     session.client, clump, session_name=session.session_name
                 )
                 session.result.update(membership.to_dict())
+            try:
+                await session.client.disconnect()
+            except Exception:
+                log.warning(
+                    "qr: не удалось отключить StringSession после сохранения .session",
+                    exc_info=True,
+                )
             return
         except telethon.errors.SessionPasswordNeededError:
             session.status = "2fa_required"

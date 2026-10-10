@@ -357,7 +357,7 @@ async def test_tz20_execution_error_schedules_retry_not_final_fail() -> None:
 
     queue = FakeQueue(completed=[], postponed=[], failed=[], assigned=[])
 
-    async def reschedule_or_fail(task_id, error, retry_delay_seconds):
+    async def reschedule_or_fail(task_id, error, retry_delay_seconds, *, locked_by=None):
         queue.failed.append((task_id, error))
         return "retry"
 

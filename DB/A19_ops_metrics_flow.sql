@@ -48,7 +48,7 @@ SELECT
     0
   ) AS "attempts_last_10_min",
   COALESCE(
-    EXTRACT(EPOCH FROM (now() - min("created_at") FILTER (WHERE "status" IN ('queued', 'scheduled'))))::bigint,
+    EXTRACT(EPOCH FROM (now() - min("created_at") FILTER (WHERE "status" IN ('queued', 'scheduled', 'retry'))))::bigint,
     0
   ) AS "oldest_queued_task_age_seconds"
 FROM "task_queue";

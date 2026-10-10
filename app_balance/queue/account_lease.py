@@ -168,7 +168,9 @@ async def acquire_best_account_lease(
 
             account = pick.account
             availability = pick.availability_percent
-            await queue.assign_account(task_id, account.id)
+            await queue.assign_account(
+                task_id, account.id, locked_by=DIRECT_LEASE_LOCKED_BY
+            )
             break
 
         assert account is not None
@@ -210,12 +212,14 @@ async def acquire_best_account_lease(
                             "availability_percent": availability,
                         }
                     },
+                    locked_by=DIRECT_LEASE_LOCKED_BY,
                 )
-                await queue.complete(task_id)
+                await queue.complete(task_id, locked_by=DIRECT_LEASE_LOCKED_BY)
             else:
                 await queue.fail(
                     task_id,
                     error_message or "direct_lease_failed",
+                    locked_by=DIRECT_LEASE_LOCKED_BY,
                 )
         except Exception:  # noqa: BLE001
             log.exception(

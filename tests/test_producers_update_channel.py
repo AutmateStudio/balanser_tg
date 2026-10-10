@@ -54,7 +54,7 @@ def test_stale_select_sql_uses_index_predicates() -> None:
     sql = _LIST_STALE_FOR_UPDATE_SQL
     assert "assigned_account_id IS NOT NULL" in sql
     assert "is_active = true" in sql
-    assert "ORDER BY last_updated_at ASC NULLS FIRST" in sql
+    assert "ORDER BY sc.last_updated_at ASC NULLS FIRST" in sql
 
 
 @pytest.mark.asyncio

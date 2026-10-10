@@ -27,9 +27,11 @@ logger = logging.getLogger(__name__)
 TASK_TYPE_CODE = PARSER_REMOVE_CHANNEL
 CREATED_BY = "inactive_channel_remove_producer"
 DEFAULT_BATCH_SIZE = 50
-DEFAULT_STALE_AFTER_SECONDS = 2_592_000  # 30 суток
+DEFAULT_STALE_AFTER_SECONDS = 3_600  # час после снятия с отслеживания
 _STALE_AFTER_ENV = "INACTIVE_CHANNEL_REMOVE_AFTER_SECONDS"
 _CLEAR_ORPHAN_ENV = "INACTIVE_CHANNEL_REMOVE_CLEAR_ORPHAN_ASSIGNED"
+_DENY_ENV = "LEAVE_CHANNEL_DENY_ACCOUNTS"
+_DEFAULT_DENY = "fgsh123"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +57,38 @@ def _resolve_stale_after_seconds() -> int:
     if value <= 0:
         return DEFAULT_STALE_AFTER_SECONDS
     return value
+
+
+def deny_account_tokens() -> set[str]:
+    """Аккаунты, из чьих каналов автоматически не выходим (username/session)."""
+    raw = os.getenv(_DENY_ENV, _DEFAULT_DENY)
+    tokens: set[str] = set()
+    for part in raw.split(","):
+        token = part.strip().lstrip("@").casefold()
+        if token:
+            tokens.add(token)
+    return tokens
+
+
+def account_is_denied(session_name: str, extra: str | None = None) -> bool:
+    tokens = deny_account_tokens()
+    if not tokens:
+        return False
+    name = (session_name or "").replace("\\", "/").rstrip("/")
+    base = name.split("/")[-1]
+    if base.lower().endswith(".session"):
+        base = base[: -len(".session")]
+    candidates = [base.casefold().lstrip("@")]
+    if extra:
+        candidates.append(str(extra).strip().lstrip("@").casefold())
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if candidate in tokens:
+            return True
+        if any(token in candidate for token in tokens):
+            return True
+    return False
 
 
 def _clear_orphan_assigned_enabled() -> bool:
@@ -279,52 +313,43 @@ class InactiveChannelRemoveProducer(BaseProducer):
             )
             return None
 
+        if account_is_denied(channel.session_name):
+            logger.info(
+                "inactive_channel_remove: аккаунт в deny-списке "
+                "channel_id=%s session=%s — skip",
+                channel.channel_id,
+                channel.session_name,
+            )
+            return None
+
         location = find_on_session(
             ref,
             clumps=clumps,
             jobs=jobs,
             preferred_session=channel.session_name,
         )
-        if location is None:
-            present = channel_present_in_jobs(ref, jobs)
-            # Clear только если store прочитан (jobs не пуст) и канала там нет.
-            # Пустой store → только skip (нельзя отличить от недоступного mount).
-            can_clear = self._clear_orphan_assigned and bool(jobs) and not present
+        leave_without_clump = location is None or not _sessions_equal(
+            location.session_name, channel.session_name
+        )
+        if leave_without_clump:
             logger.info(
-                "inactive_channel_remove: канала нет на сессии "
-                "channel_id=%s account_id=%s ref=%r present=%s can_clear=%s — skip",
+                "inactive_channel_remove: канала нет в clump/store или session "
+                "не совпала channel_id=%s account_id=%s ref=%r pg_session=%s — "
+                "ставим LeaveChannel по сессии аккаунта",
                 channel.channel_id,
                 channel.account_id,
                 ref,
-                present,
-                can_clear,
-            )
-            if can_clear:
-                cleared = await self._channels.clear_assigned_account(
-                    channel.channel_id
-                )
-                if cleared:
-                    logger.info(
-                        "inactive_channel_remove: очищен orphan assigned_account_id "
-                        "channel_id=%s",
-                        channel.channel_id,
-                    )
-            return None
-
-        if not _sessions_equal(location.session_name, channel.session_name):
-            logger.warning(
-                "inactive_channel_remove: session mismatch channel_id=%s "
-                "pg_session=%s store_session=%s parser_id=%s ref=%r — skip",
-                channel.channel_id,
                 channel.session_name,
-                location.session_name,
-                location.parser_id,
-                ref,
             )
-            return None
+            location = SessionLocation(
+                parser_id="",
+                session_name=channel.session_name,
+            )
 
         result = await self.enqueue_if_room(
-            _build_enqueue_input(channel, location)
+            _build_enqueue_input(
+                channel, location, leave_without_clump=leave_without_clump
+            )
         )
         if result.skipped_reason == "fatal_history":
             logger.warning(
@@ -340,16 +365,21 @@ class InactiveChannelRemoveProducer(BaseProducer):
 def _build_enqueue_input(
     channel: InactiveOnSessionChannel,
     location: SessionLocation,
+    *,
+    leave_without_clump: bool = False,
 ) -> EnqueueInput:
     ref = channel.ref()
+    parser_id = (location.parser_id or "").strip() or "unassigned"
     return EnqueueInput(
         task_type_code=TASK_TYPE_CODE,
         channel_id=channel.channel_id,
         account_id=channel.account_id,
-        dedup_key=_dedup_key(location.parser_id, ref),
+        dedup_key=_dedup_key(parser_id, ref),
         created_by=CREATED_BY,
         payload={
-            "parser_id": location.parser_id,
+            "parser_id": parser_id,
             "channel_ref": ref,
+            "session_name": channel.session_name,
+            "leave_without_clump": leave_without_clump,
         },
     )

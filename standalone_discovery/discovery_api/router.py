@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -400,18 +401,11 @@ async def discover(
         if pg_result.task_id is None:
             error = (
                 "Не удалось поставить задачу: пустой query"
-                if not req.session_name
+                if not (req.query or "").strip()
                 else "Не удалось поставить задачу: аккаунт не найден в PG "
-                f"(session_name={req.session_name!r}) или пустой query"
+                f"(session_name={req.session_name!r}) или очередь недоступна"
             )
-            return DiscoveryResponse(
-                query=req.query,
-                total=0,
-                depth_stats={},
-                channels=[],
-                groups=[],
-                errors=[error],
-            )
+            raise HTTPException(status_code=409, detail=error)
         return DiscoveryResponse(
             query=req.query,
             total=0,
@@ -516,7 +510,9 @@ async def send_bot_message_endpoint(req: BotMessageRequest):
     else:
         payload = req.dict(exclude_none=True)
     try:
-        result = send_bot_message(chat_id=req.chat_id, message=payload)
+        result = await asyncio.to_thread(
+            send_bot_message, req.chat_id, payload
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:

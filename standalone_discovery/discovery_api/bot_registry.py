@@ -31,6 +31,14 @@ def start_bot_polling_once() -> None:
     if _polling_started:
         return
 
+    from discovery_api.config import bot_polling_enabled
+
+    if not bot_polling_enabled():
+        log.info(
+            "Telegram bot polling пропущен: нет BOT_TOKEN или BOT_POLLING_ENABLED=false"
+        )
+        return
+
     bot = get_bot()
     from discovery_api.bot_handlers import register_bot_handlers
 

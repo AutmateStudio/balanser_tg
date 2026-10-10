@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from discovery_api.auth import restore_active_sessions
@@ -53,6 +54,8 @@ _inprocess_worker: Any = None  # worker[0] для обратной совмес�
 _inprocess_worker_task: "asyncio.Task[None] | None" = None  # совместимость тестов
 _inprocess_worker_pool: "list[Any]" = []
 _inprocess_worker_tasks: "list[asyncio.Task[None]]" = []
+_inactive_remove_stop: "asyncio.Event | None" = None
+_inactive_remove_task: "asyncio.Task[None] | None" = None
 _inprocess_pool_stop: "asyncio.Event | None" = None  # сигнал остановки watchdog
 
 
@@ -253,6 +256,47 @@ app.include_router(lead_intent_router, dependencies=[Depends(require_api_key)])
 app.include_router(parser_router, dependencies=[Depends(require_api_key)])
 
 
+async def _start_inactive_remove_loop() -> None:
+    """Автовыход из неотслеживаемых каналов в том же процессе, что и очередь."""
+    global _inactive_remove_stop, _inactive_remove_task
+    raw = os.getenv("INACTIVE_REMOVE_INPROCESS", "true").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        log.info("inactive-remove: in-process цикл выключен")
+        return
+    from app_balance.queue.producers.inactive_channel_remove import (
+        InactiveChannelRemoveProducer,
+    )
+    from app_balance.queue_scheduler import run_tick
+
+    interval = float(os.getenv("PRODUCER_INACTIVE_REMOVE_INTERVAL_SECONDS", "900"))
+    stop = asyncio.Event()
+    _inactive_remove_stop = stop
+    producer = InactiveChannelRemoveProducer()
+
+    async def _loop() -> None:
+        log.info("inactive-remove: старт in-process, interval=%ss", interval)
+        while not stop.is_set():
+            await run_tick(producer)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=max(interval, 1.0))
+            except asyncio.TimeoutError:
+                pass
+
+    _inactive_remove_task = asyncio.create_task(_loop(), name="inactive-remove")
+
+
+async def _stop_inactive_remove_loop() -> None:
+    global _inactive_remove_stop, _inactive_remove_task
+    if _inactive_remove_stop is not None:
+        _inactive_remove_stop.set()
+    task = _inactive_remove_task
+    _inactive_remove_task = None
+    if task is not None and not task.done():
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     if get_use_pg_queue():
@@ -275,6 +319,7 @@ async def on_startup() -> None:
                 "D12: in-process worker НЕ запущен — задайте DISCOVERY_INPROCESS_WORKER=true "
                 "в .env и пересоздайте контейнер (docker compose up -d --force-recreate discovery-api)"
             )
+        await _start_inactive_remove_loop()
 
 
 @app.on_event("shutdown")
@@ -283,6 +328,7 @@ async def on_shutdown() -> None:
 
     stop_bot_polling()
     await stop_action_worker()
+    await _stop_inactive_remove_loop()
     await _stop_inprocess_worker()
     await stop_channel_count_refresher()
     await release_all()
@@ -298,7 +344,40 @@ async def on_shutdown() -> None:
         await db.close_pool()
 
 
+@app.get("/health/live", tags=["system"])
+async def health_live():
+    """Лёгкая проверка процесса. Её использует Docker healthcheck."""
+    return {"status": "в порядке"}
+
+
 @app.get("/health", tags=["system"])
 async def health():
+    """Проверка PG, VPN-интерфейса и пульса in-process воркера."""
+    problems: list[str] = []
+    if get_use_pg_queue():
+        try:
+            from app_balance.queue.db import acquire
+
+            async with acquire() as conn:
+                await conn.fetchval("SELECT 1")
+        except Exception:  # noqa: BLE001
+            log.warning("health: PostgreSQL недоступен", exc_info=True)
+            problems.append("postgres")
+    iface = os.getenv("HEALTH_VPN_IFACE", "").strip()
+    if iface and not os.path.exists(f"/sys/class/net/{iface}"):
+        problems.append("vpn")
+    try:
+        from app_balance.queue.worker_heartbeat import worker_heartbeat_problem
+
+        worker_problem = worker_heartbeat_problem()
+        if worker_problem:
+            problems.append(worker_problem)
+    except Exception:  # noqa: BLE001
+        log.warning("health: не удалось прочитать пульс воркера", exc_info=True)
+    if problems:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "problems": problems},
+        )
     return {"status": "в порядке"}
 

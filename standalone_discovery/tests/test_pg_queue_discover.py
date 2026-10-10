@@ -68,10 +68,9 @@ class PgQueueDiscoverApiTests(unittest.TestCase):
             json={"session_name": "Unknown", "query": "test"},
         )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 409)
         body = resp.json()
-        self.assertFalse(body["async_mode"])
-        self.assertEqual(len(body["errors"]), 1)
+        self.assertIn("detail", body)
 
     @patch("discovery_api.router.persist_unified_discovery", new_callable=AsyncMock)
     @patch("discovery_api.router.discover_unified_on_client", new_callable=AsyncMock)
