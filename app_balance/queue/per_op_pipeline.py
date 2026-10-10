@@ -30,7 +30,9 @@ class PipelineStep:
 
 @runtime_checkable
 class _StepCompletionSink(Protocol):
-    async def set_last_completed_step(self, task_id: int, step: str) -> None: ...
+    async def set_last_completed_step(
+        self, task_id: int, step: str, *, locked_by: str | None = None
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -128,4 +130,6 @@ async def run_pipeline(
             task_attempt_id=attempt_id,
         )
         await execute_op(step)
-        await queue.set_last_completed_step(task.id, step.op_code)
+        await queue.set_last_completed_step(
+            task.id, step.op_code, locked_by=task.locked_by
+        )

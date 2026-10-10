@@ -75,7 +75,8 @@ def test_inactive_select_sql_predicates() -> None:
     sql = _LIST_INACTIVE_ON_SESSIONS_SQL
     assert "assigned_account_id IS NOT NULL" in sql
     assert "monitoring_projects" in sql
-    assert "source_messages" in sql
+    assert "source_messages" not in sql
+    assert "project_source_channels" in sql
     assert "platform_id" in sql or "platforms" in sql
     assert "ORDER BY COALESCE" in sql
 
@@ -186,8 +187,44 @@ def test_find_on_session_prefers_jobs_when_no_clumps() -> None:
     assert loc == SessionLocation(parser_id="p1", session_name="acc1")
 
 
+def test_account_is_denied_matches_username_and_session_basename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app_balance.queue.producers.inactive_channel_remove import account_is_denied
+
+    monkeypatch.setenv("LEAVE_CHANNEL_DENY_ACCOUNTS", "fgsh123")
+    assert account_is_denied("@fgsh123")
+    assert account_is_denied("/data/sessions/fgsh123.session")
+    assert not account_is_denied("other_account")
+
+
+@pytest.mark.asyncio
+async def test_produce_skips_denied_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LEAVE_CHANNEL_DENY_ACCOUNTS", "fgsh123")
+    task_types = AsyncMock()
+    task_types.get_by_code = AsyncMock(return_value=_task_type())
+    channels = AsyncMock()
+    channels.list_inactive_on_sessions = AsyncMock(
+        return_value=[_channel(session_name="fgsh123")]
+    )
+    task_queue = AsyncMock()
+    monkeypatch.setattr(
+        "app_balance.queue.producers.base.count_active_tasks",
+        AsyncMock(return_value=0),
+    )
+    producer = InactiveChannelRemoveProducer(
+        task_queue=task_queue,
+        task_types=task_types,
+        channels=channels,
+        load_clumps=lambda: [],
+        load_jobs=lambda: [],
+    )
+    assert await producer.produce() == []
+    task_queue.enqueue.assert_not_awaited()
+
+
 def test_producer_defaults() -> None:
-    assert DEFAULT_STALE_AFTER_SECONDS == 2_592_000
+    assert DEFAULT_STALE_AFTER_SECONDS == 3_600
     assert DEFAULT_BATCH_SIZE > 0
 
 
@@ -226,7 +263,10 @@ async def test_produce_skips_when_not_on_session(
         AsyncMock(return_value=0),
     )
 
-    # Пустой store: не чистим assigned (нельзя отличить «нет канала» от «store недоступен»).
+    # Канала нет в store — всё равно ставим выход по сессии из PG.
+    task_queue.enqueue = AsyncMock(
+        return_value=EnqueueResult(created=True, task_id=11)
+    )
     producer = InactiveChannelRemoveProducer(
         task_queue=task_queue,
         task_types=task_types,
@@ -237,8 +277,10 @@ async def test_produce_skips_when_not_on_session(
     )
     result = await producer.produce()
 
-    assert result == []
-    task_queue.enqueue.assert_not_awaited()
+    assert result == [ProduceResult(created=True, task_id=11)]
+    call: EnqueueInput = task_queue.enqueue.await_args.args[0]
+    assert call.payload["parser_id"] == "unassigned"
+    assert call.payload["leave_without_clump"] is True
     channels.clear_assigned_account.assert_not_awaited()
 
 
@@ -252,6 +294,9 @@ async def test_produce_clears_orphan_when_store_has_other_channels(
     channels.list_inactive_on_sessions = AsyncMock(return_value=[_channel()])
     channels.clear_assigned_account = AsyncMock(return_value=True)
     task_queue = AsyncMock()
+    task_queue.enqueue = AsyncMock(
+        return_value=EnqueueResult(created=True, task_id=12)
+    )
 
     monkeypatch.setattr(
         "app_balance.queue.producers.base.count_active_tasks",
@@ -276,9 +321,10 @@ async def test_produce_clears_orphan_when_store_has_other_channels(
     )
     result = await producer.produce()
 
-    assert result == []
-    task_queue.enqueue.assert_not_awaited()
-    channels.clear_assigned_account.assert_awaited_once_with(10)
+    assert result == [ProduceResult(created=True, task_id=12)]
+    call: EnqueueInput = task_queue.enqueue.await_args.args[0]
+    assert call.payload["leave_without_clump"] is True
+    channels.clear_assigned_account.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -407,7 +453,9 @@ async def test_produce_enqueues_when_in_assignments(
     assert call.account_id == 100
     assert call.dedup_key == "parser_remove_channel:p1:demo"
     assert call.created_by == "inactive_channel_remove_producer"
-    assert call.payload == {"parser_id": "p1", "channel_ref": "https://t.me/demo"}
+    assert call.payload["parser_id"] == "p1"
+    assert call.payload["channel_ref"] == "https://t.me/demo"
+    assert call.payload["leave_without_clump"] is False
 
 
 def test_dedup_key_matches_d9_for_private_c_link() -> None:
@@ -431,6 +479,9 @@ async def test_produce_skips_session_mismatch(
         return_value=[_channel(session_name="pg_acc")]
     )
     task_queue = AsyncMock()
+    task_queue.enqueue = AsyncMock(
+        return_value=EnqueueResult(created=True, task_id=13)
+    )
 
     monkeypatch.setattr(
         "app_balance.queue.producers.base.count_active_tasks",
@@ -454,8 +505,11 @@ async def test_produce_skips_session_mismatch(
     )
     result = await producer.produce()
 
-    assert result == []
-    task_queue.enqueue.assert_not_awaited()
+    assert result == [ProduceResult(created=True, task_id=13)]
+    call: EnqueueInput = task_queue.enqueue.await_args.args[0]
+    assert call.account_id == 100
+    assert call.payload["leave_without_clump"] is True
+    assert call.payload["session_name"] == "pg_acc"
 
 
 @pytest.mark.asyncio

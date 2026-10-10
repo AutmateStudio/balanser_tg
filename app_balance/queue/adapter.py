@@ -21,6 +21,7 @@ from app_balance.queue.errors import (
     map_clump_error_message,
     map_telethon_exception,
 )
+from app_balance.queue.channel_leave import leave_tracked_channel
 from app_balance.queue.collect_pipeline import (
     ClientGetter,
     CollectContext,
@@ -456,34 +457,53 @@ async def _execute_parser_remove_channel(
     account: Account,
     clump_getter: ClumpGetter,
     sync_after_remove: SyncAfterRemove,
+    client_getter: ClientGetter,
+    channels_repo: SourceChannelsRepo,
 ) -> None:
-    parser_id, channel_ref, _webhook_url = _parse_parser_channel_payload(dict(task.payload))
-    clump = clump_getter(parser_id)
+    parser_id, channel_ref, _webhook_url = _parse_parser_channel_payload(
+        dict(task.payload)
+    )
+    if task.channel_id is not None and await channels_repo.has_active_project(
+        task.channel_id
+    ):
+        log.info(
+            "execute_task: канал снова в active-проекте, LeaveChannel пропущен "
+            "channel_id=%s ref=%s",
+            task.channel_id,
+            channel_ref,
+        )
+        return
+
+    clump = clump_getter(parser_id) if parser_id else None
     if clump is None or not _clump_has_session(clump, account.session_name):
         fallback = _find_live_clump_by_session(account.session_name)
         if fallback is not None:
             clump = fallback
-    if clump is None:
-        raise RetryableError(
-            ErrorCode.CLUMP_NOT_LOADED,
-            f"{ErrorCode.CLUMP_NOT_LOADED}:{parser_id}",
-        )
-
     try:
-        removed = await clump.remove_channel(channel_ref)
+        client = await client_getter(account.session_name)
+        outcome = await leave_tracked_channel(client, channel_ref)
+        log.info(
+            "execute_task: LeaveChannel ref=%s left=%s soft_ok=%s",
+            channel_ref,
+            outcome.left_count,
+            outcome.soft_ok,
+        )
+        if clump is not None:
+            removed = await clump.remove_channel(channel_ref)
+            if not removed:
+                log.info(
+                    "execute_task: канал уже отсутствует в clump ref=%s parser_id=%s",
+                    channel_ref,
+                    parser_id,
+                )
     except QueueTaskError:
         raise
     except Exception as exc:  # noqa: BLE001
         raise map_telethon_exception(exc) from exc
-    if not removed:
-        log.info(
-            "execute_task: канал уже отсутствует в clump ref=%s parser_id=%s",
-            channel_ref,
-            parser_id,
-        )
 
     await sync_after_remove(task, account, clump)
-    await _start_clump_after_execute(parser_id=parser_id, clump=clump)
+    if clump is not None and parser_id:
+        await _start_clump_after_execute(parser_id=parser_id, clump=clump)
 
 
 async def _execute_collect_extra_data(
@@ -663,6 +683,7 @@ async def _execute_telegram_discover(
                 persist=persist_stats.to_dict(),
             )
         },
+        locked_by=task.locked_by,
     )
     if not merged:
         log.warning(
@@ -760,6 +781,7 @@ async def _execute_telegram_discover_leads(
                 persist=persist_dict,
             )
         },
+        locked_by=task.locked_by,
     )
     if not merged:
         log.warning(
@@ -825,6 +847,8 @@ async def execute_task(
             account=account,
             clump_getter=clump_getter,
             sync_after_remove=sync_after_remove,
+            client_getter=client_getter or default_client_getter(),
+            channels_repo=channels_repo or SourceChannelsRepo(),
         )
     elif task.task_type_code == COLLECT_EXTRA_DATA:
         if task_type is None:

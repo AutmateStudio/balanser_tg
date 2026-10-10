@@ -441,7 +441,7 @@ SELECT
   ) AS "attempts_last_10_min",
   -- G1 §26.2: возраст самой старой задачи, ожидающей выполнения (queued + scheduled).
   COALESCE(
-    EXTRACT(EPOCH FROM (now() - min("created_at") FILTER (WHERE "status" IN ('queued', 'scheduled'))))::bigint,
+    EXTRACT(EPOCH FROM (now() - min("created_at") FILTER (WHERE "status" IN ('queued', 'scheduled', 'retry'))))::bigint,
     0
   ) AS "oldest_queued_task_age_seconds"
 FROM "task_queue";

@@ -2,7 +2,7 @@
 -- Порядок: после BD_schema.sql
 -- effective_rph = floor(rph_limit × (1 − reserve_percent/100)), reserve_percent = 10
 --
--- RPH get_entity/JoinChannel: базовые значения (7 / 30), БЕЗ политики A14 (223).
+-- RPH get_entity/JoinChannel: канон A22 (200 / 65), не A14 (223) и не старые 7/30.
 -- A14_parser_add_channel_rph_20_per_hour.sql НЕ входит в migrate_queue.sh —
 -- только ручной накат: python scripts/apply_a14_rph_migration.py
 --
@@ -24,13 +24,13 @@ INSERT INTO resource_op_types (code, name, rph_limit, is_enabled) VALUES
   ('connect_disconnect', 'Connect / disconnect сессии', 150, true),
   ('get_me', 'Текущий пользователь (валидация сессии)', 150, true),
   ('is_user_authorized', 'Проверка авторизации', 150, true),
-  ('get_entity', 'Resolve username / ссылки / peer', 7, true),
+  ('get_entity', 'Resolve username / ссылки / peer', 200, true),
   ('get_input_entity', 'get_input_entity() для InputPeer', 340, true),
   ('contacts.Search', 'Поиск контактов / каналов', 1670, true),
   ('messages.SearchGlobal', 'Глобальный поиск сообщений', 1670, true),
   ('channels.GetChannelRecommendations', 'Рекомендации каналов', 840, true),
   ('channels.GetFullChannel', 'Полные данные канала', 2500, true),
-  ('channels.JoinChannel', 'Подписка / join канала или discussion', 30, true),
+  ('channels.JoinChannel', 'Подписка / join канала или discussion', 65, true),
   ('channels.LeaveChannel', 'Выход из канала или discussion', 150, true),
   ('channels.GetParticipant', 'Проверка участника (InputPeerSelf)', 30000, true),
   ('channels.GetParticipants', 'Список участников (megagroup / lidgen)', 2500, true),

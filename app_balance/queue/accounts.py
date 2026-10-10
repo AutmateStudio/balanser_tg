@@ -253,6 +253,7 @@ WHERE current_task_id IS NULL
       AND (cooldown_until IS NULL OR cooldown_until <= now())
     )
   )
+ORDER BY id
 FOR UPDATE
 """
 

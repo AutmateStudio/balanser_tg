@@ -389,6 +389,7 @@ SET status = 'done',
     updated_at = now()
 WHERE id = $1
   AND status = 'in_progress'
+  AND ($2::text IS NULL OR locked_by = $2)
 """
 
 # Если попытки исчерпаны (attempt_count >= max_attempts) → failed, иначе retry
@@ -409,6 +410,7 @@ SET status = CASE WHEN attempt_count >= max_attempts THEN 'failed'::task_status
     updated_at = now()
 WHERE id = $1
   AND status = 'in_progress'
+  AND ($4::text IS NULL OR locked_by = $4)
 RETURNING status::text
 """
 
@@ -425,6 +427,7 @@ SET status = 'failed'::task_status,
     updated_at = now()
 WHERE id = $1
   AND status = 'in_progress'
+  AND ($3::text IS NULL OR locked_by = $3)
 RETURNING status::text
 """
 
@@ -433,6 +436,8 @@ UPDATE task_queue
 SET account_id = $2,
     updated_at = now()
 WHERE id = $1
+  AND status = 'in_progress'
+  AND ($3::text IS NULL OR locked_by = $3)
 """
 
 _UNASSIGN_ACCOUNT_SQL = """
@@ -441,6 +446,7 @@ SET account_id = NULL,
     updated_at = now()
 WHERE id = $1
   AND status = 'in_progress'
+  AND ($2::text IS NULL OR locked_by = $2)
 """
 
 # E6: фиксирует op-код последнего успешного шага multi-op пайплайна в payload
@@ -455,6 +461,8 @@ SET payload = jsonb_set(
     ),
     updated_at = now()
 WHERE id = $1
+  AND status = 'in_progress'
+  AND ($3::text IS NULL OR locked_by = $3)
 """
 
 _MERGE_PAYLOAD_SQL = """
@@ -463,6 +471,7 @@ SET payload = COALESCE(payload, '{}'::jsonb) || $2::jsonb,
     updated_at = now()
 WHERE id = $1
   AND status = 'in_progress'
+  AND ($3::text IS NULL OR locked_by = $3)
 """
 
 # ТЗ §9.3: attempt_count — только при передаче задачи аккаунту (до execute).
@@ -471,6 +480,8 @@ UPDATE task_queue
 SET attempt_count = attempt_count + 1,
     updated_at = now()
 WHERE id = $1
+  AND status = 'in_progress'
+  AND ($2::text IS NULL OR locked_by = $2)
 RETURNING attempt_count
 """
 
@@ -488,6 +499,17 @@ SET status = 'scheduled',
     updated_at = now()
 WHERE id = $1
   AND status = 'in_progress'
+  AND ($4::text IS NULL OR locked_by = $4)
+"""
+
+_POSTPONE_LOCK_SQL = """
+SELECT t.postpone_count, tt.max_postpone_count
+FROM task_queue t
+JOIN task_types tt ON tt.id = t.task_type_id
+WHERE t.id = $1
+  AND t.status = 'in_progress'
+  AND ($2::text IS NULL OR t.locked_by = $2)
+FOR UPDATE OF t
 """
 
 # C6/G5: in_progress дольше task_timeout_seconds → stuck (C6) либо auto-retry (G5).
@@ -517,6 +539,15 @@ WITH timed_out AS (
       AND COALESCE(t.locked_at, t.started_at) IS NOT NULL
       AND COALESCE(t.locked_at, t.started_at)
           + (tt.task_timeout_seconds * interval '1 second') < now()
+      -- Живой lease (locked_until в будущем) и direct lease не снимаем,
+      -- пока блокировка не истекла. Иначе watchdog убивает HTTP-lease на 3600с
+      -- по task_timeout_seconds (~300с) и отпускает аккаунт у живого исполнителя.
+      AND (t.locked_until IS NULL OR t.locked_until <= now())
+      AND NOT (
+          COALESCE((t.payload->>'direct_lease')::boolean, false)
+          AND t.locked_until IS NOT NULL
+          AND t.locked_until > now()
+      )
     ORDER BY COALESCE(t.locked_at, t.started_at) ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
@@ -994,17 +1025,20 @@ class TaskQueueRepo:
                 return None
             return _row_to_claimed(row)
 
-    async def complete(self, task_id: int) -> bool:
+    async def complete(
+        self, task_id: int, *, locked_by: str | None = None
+    ) -> bool:
         """Успешное завершение: in_progress → done, снимает lock.
 
-        False — задача уже не in_progress (например, watchdog → stuck).
+        ``locked_by`` — fencing: чужой исполнитель после watchdog не закроет задачу.
+        False — задача уже не in_progress или lock принадлежит другому.
         """
         async with acquire() as conn:
-            result = await conn.execute(_COMPLETE_SQL, task_id)
+            result = await conn.execute(_COMPLETE_SQL, task_id, locked_by)
             updated = int(result.split()[-1])
             if updated == 0:
                 logger.debug(
-                    "complete: задача id=%s уже не in_progress (watchdog?)",
+                    "complete: задача id=%s уже не in_progress или чужой lock",
                     task_id,
                 )
                 return False
@@ -1015,69 +1049,103 @@ class TaskQueueRepo:
         task_id: int,
         error: str | None = None,
         retry_delay_seconds: int = 60,
+        *,
+        locked_by: str | None = None,
     ) -> str | None:
         """Ошибка попытки: retry (если остались попытки) либо failed.
 
         Возвращает итоговый статус ('retry' | 'failed') или None, если задача
-        уже не in_progress.
+        уже не in_progress либо lock чужой.
         """
         async with acquire() as conn:
             status = await conn.fetchval(
-                _RESCHEDULE_OR_FAIL_SQL, task_id, error, retry_delay_seconds
+                _RESCHEDULE_OR_FAIL_SQL,
+                task_id,
+                error,
+                retry_delay_seconds,
+                locked_by,
             )
             if status is None:
                 logger.debug(
-                    "reschedule_or_fail: задача id=%s уже не in_progress (watchdog?)",
+                    "reschedule_or_fail: задача id=%s уже не in_progress или чужой lock",
                     task_id,
                 )
             return status
 
-    async def fail(self, task_id: int, error: str | None = None) -> str | None:
+    async def fail(
+        self,
+        task_id: int,
+        error: str | None = None,
+        *,
+        locked_by: str | None = None,
+    ) -> str | None:
         """E1: немедленный failed (PermanentError), без учёта оставшихся попыток.
 
-        Возвращает 'failed' или None, если задача уже не in_progress.
+        Возвращает 'failed' или None, если задача уже не in_progress либо lock чужой.
         """
         async with acquire() as conn:
-            status = await conn.fetchval(_FAIL_SQL, task_id, error)
+            status = await conn.fetchval(_FAIL_SQL, task_id, error, locked_by)
             if status is None:
                 logger.debug(
-                    "fail: задача id=%s уже не in_progress (watchdog?)",
+                    "fail: задача id=%s уже не in_progress или чужой lock",
                     task_id,
                 )
             return status
 
-    async def assign_account(self, task_id: int, account_id: int) -> None:
+    async def assign_account(
+        self, task_id: int, account_id: int, *, locked_by: str | None = None
+    ) -> None:
         """Записывает подобранный аккаунт в task_queue (после pick_and_reserve)."""
         async with acquire() as conn:
-            await conn.execute(_ASSIGN_ACCOUNT_SQL, task_id, account_id)
+            await conn.execute(_ASSIGN_ACCOUNT_SQL, task_id, account_id, locked_by)
 
-    async def unassign_account(self, task_id: int) -> None:
+    async def unassign_account(
+        self, task_id: int, *, locked_by: str | None = None
+    ) -> None:
         """Сбрасывает закреплённый account_id (смена аккаунта при retry)."""
         async with acquire() as conn:
-            await conn.execute(_UNASSIGN_ACCOUNT_SQL, task_id)
+            await conn.execute(_UNASSIGN_ACCOUNT_SQL, task_id, locked_by)
 
-    async def set_last_completed_step(self, task_id: int, step: str) -> None:
+    async def set_last_completed_step(
+        self, task_id: int, step: str, *, locked_by: str | None = None
+    ) -> None:
         """E6: сохраняет op-код последнего успешного шага в payload (идемпотентность).
 
         При retry многошаговой задачи адаптер по этому значению пропускает уже
         выполненные op и не списывает за них ресурс повторно (ТЗ §29).
         """
         async with acquire() as conn:
-            await conn.execute(_SET_LAST_COMPLETED_STEP_SQL, task_id, step)
+            await conn.execute(
+                _SET_LAST_COMPLETED_STEP_SQL, task_id, step, locked_by
+            )
 
-    async def merge_payload(self, task_id: int, patch: dict[str, Any]) -> bool:
+    async def merge_payload(
+        self,
+        task_id: int,
+        patch: dict[str, Any],
+        *,
+        locked_by: str | None = None,
+    ) -> bool:
         """Дополняет payload задачи (напр. result после discover_groups)."""
         payload_json = json.dumps(patch or {})
         async with acquire() as conn:
-            result = await conn.execute(_MERGE_PAYLOAD_SQL, task_id, payload_json)
+            result = await conn.execute(
+                _MERGE_PAYLOAD_SQL, task_id, payload_json, locked_by
+            )
             return int(result.split()[-1]) == 1
 
-    async def begin_execution_attempt(self, task_id: int) -> int:
+    async def begin_execution_attempt(
+        self, task_id: int, *, locked_by: str | None = None
+    ) -> int:
         """Инкремент attempt_count при передаче задачи аккаунту (ТЗ §9.3)."""
         async with acquire() as conn:
-            val = await conn.fetchval(_BEGIN_EXECUTION_ATTEMPT_SQL, task_id)
+            val = await conn.fetchval(
+                _BEGIN_EXECUTION_ATTEMPT_SQL, task_id, locked_by
+            )
             if val is None:
-                raise ValueError(f"task_queue id={task_id} not found")
+                raise ValueError(
+                    f"task_queue id={task_id} not in_progress or foreign lock"
+                )
             return int(val)
 
     async def postpone(
@@ -1085,24 +1153,37 @@ class TaskQueueRepo:
         task_id: int,
         delay_seconds: int = 300,
         reason: str | None = None,
+        *,
+        locked_by: str | None = None,
     ) -> bool:
         """Отложить задачу: in_progress → scheduled без расхода ресурса.
 
         Инкрементирует postpone_count, снимает lock, не трогает attempt_count.
-        False — задача уже не in_progress.
+        Если postpone_count уже достиг max_postpone_count типа задачи — failed.
+        False — задача уже не in_progress, lock чужой, либо упёрлась в лимит.
         """
-        async with acquire() as conn:
-            result = await conn.execute(
-                _POSTPONE_SQL, task_id, delay_seconds, reason
-            )
-            updated = int(result.split()[-1])
-            if updated == 0:
+        async with transaction() as conn:
+            row = await conn.fetchrow(_POSTPONE_LOCK_SQL, task_id, locked_by)
+            if row is None:
                 logger.debug(
-                    "postpone: задача id=%s уже не in_progress (watchdog?)",
+                    "postpone: задача id=%s уже не in_progress или чужой lock",
                     task_id,
                 )
                 return False
-            return True
+            if int(row["postpone_count"]) >= int(row["max_postpone_count"]):
+                await conn.fetchval(
+                    _FAIL_SQL, task_id, "max_postpone_count", locked_by
+                )
+                logger.warning(
+                    "postpone: задача id=%s → failed, достигнут max_postpone_count=%s",
+                    task_id,
+                    row["max_postpone_count"],
+                )
+                return False
+            result = await conn.execute(
+                _POSTPONE_SQL, task_id, delay_seconds, reason, locked_by
+            )
+            return int(result.split()[-1]) == 1
 
     async def release_orphan_account_locks(self) -> int:
         """Снимает accounts.current_task_id, если задача уже не in_progress.

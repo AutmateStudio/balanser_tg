@@ -32,6 +32,7 @@
 | `transient_error` | Timeout / временный сбой сети | retry | Обычно проходит сам; при массовости — проверить сеть/сервер |
 | `unknown_task_type:*` | Тип задачи не найден или выключен | retry → failed | Проверить seed `task_types`, включить тип |
 | `account_unauthorized` | Сессия аккаунта не авторизована в Telegram | retry через 30 мин (`ACCOUNT_UNAUTHORIZED_RETRY_SECONDS`) + sync health | Переавторизовать аккаунт (сессия/2FA); задача повторится после re-auth. **Не** блокирует B12 fatal-dedup по каналу |
+| `channels_too_much` | На аккаунте слишком много каналов | retry | Снять лишние каналы или перенести часть на другой аккаунт |
 
 ### Permanent (немедленный `failed`)
 
@@ -41,6 +42,8 @@
 | `username_not_found` | Telethon `No user has "X" as username` — юзернейм не занят (удалён/сменён), `ResolveUsernameRequest` стабильно вернёт то же | failed | Не пытаться повторно этот канал; удалить/актуализировать ссылку в источнике |
 | `account_not_found` | Аккаунт отсутствует в PG | failed | Синхронизировать аккаунты |
 | `unsupported_task_type` | Adapter не поддерживает тип | failed | Дождаться реализации adapter-ветки |
+| `channel_has_no_discussion` | У канала нет группы обсуждения | failed | Не ставить задачу, которой нужен discussion |
+| `banned_in_channel` | Аккаунт забанен в этом канале | failed | Не повторять вход этим аккаунтом |
 
 ### Postpone (отложить без расхода attempt)
 
@@ -49,6 +52,7 @@
 | `insufficient_resource:*` | RPH op исчерпан | postpone | Дождаться окна; проверить загрузку аккаунтов |
 | `missing_availability` | Нет данных availability для op | postpone | Проверить `account_resource_usage` / seed op |
 | `no_available_account` | Нет свободного аккаунта для pick | postpone | Освободить аккаунты / добавить сессии |
+| `pacing` | Следующий join на аккаунте ещё рано | postpone на остаток интервала | Проверить `JOIN_PACING_SECONDS` |
 | `no_ops_for_role:*` | Нет enabled op для роли (source/target) | postpone | Проверить `task_type_ops` seed |
 | `account_reserve_failed:*` | Не удалось зарезервировать аккаунт | postpone | Аккаунт занят другой задачей |
 | `dual_account_reserve_failed:*` | Не удалось зарезервировать пару | postpone | Проверить оба аккаунта |
@@ -138,7 +142,7 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 | `channel_balancer.py` (F2) | `move_channel` | перекос числа каналов между аккаунтами clump > ±5% | `channel_balancer` |
 | `collect_extra_data.py` (F4) | `collect_extra_data` | `extra_data_collected = false` | `collect_extra_data_producer` |
 | `update_channel.py` (F5) | `update_channel` | устаревший `last_updated_at` (приоритет старым / NULL) | `update_channel_producer` |
-| `inactive_channel_remove.py` | `parser_remove_channel` | нет active-проекта + активность ≥ 30д + на сессии | `inactive_channel_remove_producer` |
+| `inactive_channel_remove.py` | `parser_remove_channel` | нет active-проекта, отсрочка 1 ч, канал на сессии | `inactive_channel_remove_producer` |
 
 ### F2/F3 — балансировка каналов и отключение старого idle-rebalance
 
@@ -170,24 +174,32 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 - Задача ставится с `account_id = assigned_account_id` канала, чтобы dispatch
   резервировал именно закреплённый аккаунт, а не выбирал произвольный.
 
-### inactive-remove — снятие давно неактивных каналов с сессий
+### inactive-remove — выход из неотслеживаемых каналов
 
 Канал-кандидат, если одновременно:
 
-1. нет строки `project_source_channels` с `is_enabled=true` у
-   `monitoring_projects.status='active'` (`deleted_at IS NULL`);
-2. `COALESCE(MAX(source_messages.published_at), source_channels.updated_at)`
-   старше порога `INACTIVE_CHANNEL_REMOVE_AFTER_SECONDS` (дефолт `2592000` = 30 суток);
+1. нет включённой связи с `monitoring_projects.status='active'`
+   (`deleted_at IS NULL`);
+2. с момента последнего изменения привязки к проекту
+   (`MAX(project_source_channels.updated_at)`, иначе `source_channels.updated_at`)
+   прошла отсрочка `INACTIVE_CHANNEL_REMOVE_AFTER_SECONDS` (дефолт `3600` = 1 час);
 3. `assigned_account_id IS NOT NULL` и есть usable ref (URL или нечисловой
    `external_channel_id`).
 
-Перед enqueue обязательно проверяется, что канал есть на сессии: live-clump
-(`iter_clumps`) или `parser_jobs.json` (`assignments` / `channel_list`).
-Telethon restore **не** вызывается — сервис совместим с co-located discovery-api
-на vps-104 (без конфликта `.session`). Если в PG `assigned`, а в store канала
-нет — remove не ставится; при
-`INACTIVE_CHANNEL_REMOVE_CLEAR_ORPHAN_ASSIGNED=true` (дефолт) чистится
-`assigned_account_id`.
+Задача `parser_remove_channel` вызывает `channels.LeaveChannel` для канала и
+связанной группы обсуждения, затем снимает канал с локального listener.
+`move_channel` по-прежнему только переносит канал локально и из Telegram не выходит.
+
+Канал, которого нет в `parser_jobs.json` / clump, всё равно ставится в выход
+по `session_name` из PG (`leave_without_clump`). Аккаунты из
+`LEAVE_CHANNEL_DENY_ACCOUNTS` (дефолт `fgsh123`) пропускаются: их каналы
+не покидаются.
+
+На vps-104 цикл крутится внутри `discovery-api`
+(`INACTIVE_REMOVE_INPROCESS=true`, интервал
+`PRODUCER_INACTIVE_REMOVE_INTERVAL_SECONDS`, дефолт 900 с). Отдельный
+контейнер `producer-inactive-remove` делает то же самое и безопасен рядом
+с discovery: он не открывает `.session`. Повторная постановка гасится dedup.
 
 ```bash
 docker compose --profile producers up -d producer-inactive-remove
@@ -225,7 +237,7 @@ docker compose --profile producers up -d producer-collect producer-update produc
 | `producer-collect` | `collect` | `PRODUCER_COLLECT_INTERVAL_SECONDS` | 300s |
 | `producer-update` | `update` | `PRODUCER_UPDATE_INTERVAL_SECONDS` | 3600s |
 | `producer-balancer` | `balancer` | `PRODUCER_BALANCER_INTERVAL_SECONDS` | 300s |
-| `producer-inactive-remove` | `inactive-remove` | `PRODUCER_INACTIVE_REMOVE_INTERVAL_SECONDS` | 86400s |
+| `producer-inactive-remove` | `inactive-remove` | `PRODUCER_INACTIVE_REMOVE_INTERVAL_SECONDS` | 900s |
 
 ---
 

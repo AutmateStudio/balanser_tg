@@ -51,11 +51,11 @@ class FakeQueue:
     async def claim_next(self, locked_by, lock_ttl_seconds, task_type_codes):
         return self._tasks.pop(0) if self._tasks else None
 
-    async def complete(self, task_id):
+    async def complete(self, task_id, *, locked_by=None):
         self.completed.append(task_id)
         return True
 
-    async def reschedule_or_fail(self, task_id, error, retry_delay_seconds):
+    async def reschedule_or_fail(self, task_id, error, retry_delay_seconds, *, locked_by=None):
         self.failed.append((task_id, error))
         return "retry"
 
@@ -208,12 +208,31 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.watchdog_interval_seconds == 45.0
 
 
-def test_build_task_adapter_mock_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_task_adapter_clump_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WORKER_TASK_ADAPTER", raising=False)
+    from app_balance.queue.adapter import ClumpTaskAdapter
+    from app_balance.queue_worker import build_task_adapter
+
+    assert isinstance(build_task_adapter(), ClumpTaskAdapter)
+
+
+def test_build_task_adapter_mock_only_when_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WORKER_TASK_ADAPTER", "mock")
     from app_balance.queue.mock_adapter import MockTaskAdapter
     from app_balance.queue_worker import build_task_adapter
 
     assert isinstance(build_task_adapter(), MockTaskAdapter)
+
+
+def test_separate_worker_refuses_inprocess_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCOVERY_INPROCESS_WORKER", "true")
+    from app_balance.queue_worker import main
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
 
 
 def test_build_task_adapter_clump_mode(monkeypatch: pytest.MonkeyPatch) -> None:

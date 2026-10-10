@@ -1307,6 +1307,21 @@ class Parser_client:
         self.channels[:] = [c for c in self.channels if c != raw]
         return True
 
+    async def leave_channel(self, raw: str) -> bool:
+        """Выйти из канала в Telegram и затем снять его с локального listener.
+
+        ``remove_channel`` сам по себе LeaveChannel не вызывает.
+        """
+        from app_balance.queue.channel_leave import leave_tracked_channel
+
+        ref = (raw or "").strip()
+        if not ref:
+            return False
+        client = await self.get_client()
+        await leave_tracked_channel(client, ref)
+        await self.remove_channel(ref)
+        return True
+
     def restore_channel(
         self, raw: str, listen_peer_id: int, *, webhook_url: str = ""
     ) -> None:
@@ -1880,6 +1895,17 @@ class SessionClump:
         if removed:
             self.assignments.pop(ref, None)
         return removed
+
+    async def leave_channel(self, raw: str) -> bool:
+        """LeaveChannel на сессии-владельце и локальное снятие с clump."""
+        ref = (raw or "").strip()
+        owner = self._find_owner(ref)
+        if owner is None:
+            return False
+        left = await owner.leave_channel(ref)
+        if left:
+            self.assignments.pop(ref, None)
+        return left
 
     def _enqueue_pending(self, ref: str, bucket: Optional[list[str]] = None) -> None:
         """Кладёт канал в очередь повторной обработки (без дублей)."""

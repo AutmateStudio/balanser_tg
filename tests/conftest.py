@@ -28,6 +28,17 @@ def _is_truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+@pytest.fixture(autouse=True)
+def _reset_join_pacer():
+    """Изолирует глобальный пейсер: в юнит-тестах интервал 0, состояние не течёт."""
+    from app_balance.queue import pacing
+
+    previous = pacing._default_pacer
+    pacing._default_pacer = pacing.AccountPacer(interval_seconds=0)
+    yield
+    pacing._default_pacer = previous
+
+
 requires_pg = pytest.mark.skipif(
     not _has_dsn(),
     reason="QUEUE_DATABASE_URL не задан — интеграционные тесты пропущены",

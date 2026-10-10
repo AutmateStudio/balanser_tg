@@ -79,18 +79,28 @@ class FakeQueue:
     failed: list[tuple[int, str | None]] = field(default_factory=list)
     merged: list[tuple[int, dict]] = field(default_factory=list)
 
-    async def assign_account(self, task_id: int, account_id: int) -> None:
+    async def assign_account(
+        self, task_id: int, account_id: int, *, locked_by: str | None = None
+    ) -> None:
         self.assigned.append((task_id, account_id))
 
-    async def complete(self, task_id: int) -> bool:
+    async def complete(self, task_id: int, *, locked_by: str | None = None) -> bool:
         self.completed.append(task_id)
         return True
 
-    async def fail(self, task_id: int, error: str | None = None) -> str | None:
+    async def fail(
+        self,
+        task_id: int,
+        error: str | None = None,
+        *,
+        locked_by: str | None = None,
+    ) -> str | None:
         self.failed.append((task_id, error))
         return "failed"
 
-    async def merge_payload(self, task_id: int, patch: dict) -> bool:
+    async def merge_payload(
+        self, task_id: int, patch: dict, *, locked_by: str | None = None
+    ) -> bool:
         self.merged.append((task_id, patch))
         return True
 

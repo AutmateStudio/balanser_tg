@@ -71,16 +71,29 @@ class WorkerConfig:
 
 
 def _worker_task_adapter_mode() -> str:
-    return os.getenv("WORKER_TASK_ADAPTER", "mock").strip().lower()
+    raw = os.getenv("WORKER_TASK_ADAPTER", "").strip().lower()
+    if not raw:
+        return "clump"
+    return raw
 
 
 def build_task_adapter() -> TaskAdapter:
     mode = _worker_task_adapter_mode()
+    if mode == "mock":
+        logger.warning(
+            "WORKER_TASK_ADAPTER=mock: задачи будут done без операций Telegram"
+        )
+        return default_mock_adapter()
     if mode in ("clump", "telethon", "real"):
         from app_balance.queue.adapter import ClumpTaskAdapter
 
         return ClumpTaskAdapter()
-    return default_mock_adapter()
+    logger.warning(
+        "WORKER_TASK_ADAPTER=%r неизвестен — использую clump", mode
+    )
+    from app_balance.queue.adapter import ClumpTaskAdapter
+
+    return ClumpTaskAdapter()
 
 
 def build_default_dispatcher(config: WorkerConfig) -> TaskDispatcher:
@@ -131,8 +144,15 @@ class QueueWorker:
 
     async def run(self) -> None:
         """Главный цикл. Пул должен быть уже инициализирован (см. serve())."""
+        from app_balance.queue.worker_heartbeat import (
+            mark_worker_started,
+            mark_worker_tick,
+        )
+
+        mark_worker_started()
         logger.info("worker %s: старт цикла", self.config.worker_id)
         while not self._stop.is_set():
+            mark_worker_tick()
             task = await self._queue.claim_next(
                 locked_by=self.config.worker_id,
                 lock_ttl_seconds=self.config.lock_ttl_seconds,
@@ -169,14 +189,17 @@ class QueueWorker:
         """C1-совместимый путь для unit-тестов с inject handler."""
         try:
             await self._legacy_handler(task)
-            if await self._queue.complete(task.id):
+            if await self._queue.complete(task.id, locked_by=task.locked_by):
                 self._processed += 1
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "worker %s: ошибка задачи id=%s", self.config.worker_id, task.id
             )
             status = await self._queue.reschedule_or_fail(
-                task.id, str(exc), self.config.retry_delay_seconds
+                task.id,
+                str(exc),
+                self.config.retry_delay_seconds,
+                locked_by=task.locked_by,
             )
             if status is not None:
                 logger.warning("задача id=%s переведена в %s", task.id, status)
@@ -247,6 +270,13 @@ def main() -> None:
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    inprocess = os.getenv("DISCOVERY_INPROCESS_WORKER", "").strip().lower()
+    if inprocess in ("1", "true", "yes", "on"):
+        logger.error(
+            "queue-worker не запускается: DISCOVERY_INPROCESS_WORKER=true. "
+            "Отдельный процесс конфликтует с in-process worker за .session"
+        )
+        raise SystemExit(2)
     config = WorkerConfig.from_env()
     worker = QueueWorker(config, dispatcher=build_default_dispatcher(config))
     asyncio.run(worker.serve())

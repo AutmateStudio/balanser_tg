@@ -513,10 +513,21 @@ def _remove_claimed(*, payload: dict | None = None) -> ClaimedTask:
     )
 
 
+def _leave_ok():
+    from app_balance.queue.channel_leave import LeaveOutcome
+
+    return LeaveOutcome(ok=True, left_count=1, soft_ok=False)
+
+
 @pytest.mark.asyncio
-async def test_execute_parser_remove_channel_success() -> None:
+async def test_execute_parser_remove_channel_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     clump = FakeClump()
     sync_after_remove = AsyncMock()
+    leave = AsyncMock(return_value=_leave_ok())
+    monkeypatch.setattr("app_balance.queue.adapter.leave_tracked_channel", leave)
+    client = object()
     task = _remove_claimed()
     account = _account()
 
@@ -525,18 +536,24 @@ async def test_execute_parser_remove_channel_success() -> None:
         account=account,
         clump_getter=lambda _pid: clump,
         sync_after_remove=sync_after_remove,
+        client_getter=AsyncMock(return_value=client),
     )
 
+    leave.assert_awaited_once_with(client, "@ch")
     clump.remove_channel.assert_awaited_once_with("@ch")
     sync_after_remove.assert_awaited_once_with(task, account, clump)
     clump.start.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_execute_parser_remove_idempotent_when_not_found() -> None:
+async def test_execute_parser_remove_idempotent_when_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     clump = FakeClump()
     clump.remove_channel = AsyncMock(return_value=False)
     sync_after_remove = AsyncMock()
+    leave = AsyncMock(return_value=_leave_ok())
+    monkeypatch.setattr("app_balance.queue.adapter.leave_tracked_channel", leave)
     task = _remove_claimed()
 
     await execute_task(
@@ -544,6 +561,7 @@ async def test_execute_parser_remove_idempotent_when_not_found() -> None:
         account=_account(),
         clump_getter=lambda _pid: clump,
         sync_after_remove=sync_after_remove,
+        client_getter=AsyncMock(return_value=object()),
     )
 
     clump.remove_channel.assert_awaited_once_with("@ch")
@@ -552,16 +570,69 @@ async def test_execute_parser_remove_idempotent_when_not_found() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_parser_remove_clump_not_loaded() -> None:
+async def test_execute_parser_remove_without_clump_still_leaves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Канал вне store всё равно покидается по сессии аккаунта."""
+    sync_after_remove = AsyncMock()
+    leave = AsyncMock(return_value=_leave_ok())
+    monkeypatch.setattr("app_balance.queue.adapter.leave_tracked_channel", leave)
     task = _remove_claimed()
+    account = _account()
 
-    with pytest.raises(RetryableError, match="clump_not_loaded:p1") as exc_info:
-        await execute_task(
-            task,
-            account=_account(),
-            clump_getter=lambda _pid: None,
-        )
-    assert exc_info.value.code == "clump_not_loaded"
+    await execute_task(
+        task,
+        account=account,
+        clump_getter=lambda _pid: None,
+        sync_after_remove=sync_after_remove,
+        client_getter=AsyncMock(return_value=object()),
+    )
+
+    leave.assert_awaited_once()
+    sync_after_remove.assert_awaited_once_with(task, account, None)
+
+
+@pytest.mark.asyncio
+async def test_execute_parser_remove_skips_leave_when_project_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    leave = AsyncMock(return_value=_leave_ok())
+    monkeypatch.setattr("app_balance.queue.adapter.leave_tracked_channel", leave)
+    clump = FakeClump()
+    channels = AsyncMock()
+    channels.has_active_project = AsyncMock(return_value=True)
+    task = _claimed(
+        task_type_code="parser_remove_channel",
+        payload={"parser_id": "p1", "channel_ref": "@ch"},
+    )
+    task = ClaimedTask(
+        id=task.id,
+        task_type_id=task.task_type_id,
+        task_type_code=task.task_type_code,
+        priority=task.priority,
+        payload=task.payload,
+        channel_id=77,
+        account_id=task.account_id,
+        source_account_id=None,
+        target_account_id=None,
+        attempt_count=1,
+        max_attempts=3,
+        dedup_key=None,
+        locked_by="test",
+        locked_until=None,
+    )
+
+    await execute_task(
+        task,
+        account=_account(),
+        clump_getter=lambda _pid: clump,
+        channels_repo=channels,
+        client_getter=AsyncMock(return_value=object()),
+    )
+
+    channels.has_active_project.assert_awaited_once_with(77)
+    leave.assert_not_awaited()
+    clump.remove_channel.assert_not_awaited()
 
 
 @pytest.mark.asyncio

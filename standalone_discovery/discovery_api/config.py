@@ -19,6 +19,22 @@ def _ensure_env_loaded() -> None:
     _env_loaded = True
 
 
+def bot_polling_enabled() -> bool:
+    """Polling бота только если он явно нужен и токен задан.
+
+    Без BOT_TOKEN процесс discovery не должен падать на старте.
+    BOT_POLLING_ENABLED=false выключает polling даже при токене.
+    """
+    _ensure_env_loaded()
+    raw = os.getenv("BOT_POLLING_ENABLED", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    token = (os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return bool(token)
+
+
 def get_bot_token() -> str:
     _ensure_env_loaded()
     val = (os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()

@@ -105,36 +105,58 @@ class FakeQueue:
         if self.completed is ...:
             pass
 
-    async def complete(self, task_id: int) -> bool:
+    async def complete(self, task_id: int, *, locked_by: str | None = None) -> bool:
         if self.complete_raises:
             raise self.complete_raises
         self.completed.append(task_id)
         return True
 
     async def postpone(
-        self, task_id: int, delay_seconds: int = 300, reason: str | None = None
+        self,
+        task_id: int,
+        delay_seconds: int = 300,
+        reason: str | None = None,
+        *,
+        locked_by: str | None = None,
     ) -> bool:
         self.postponed.append((task_id, delay_seconds, reason))
         return True
 
     async def reschedule_or_fail(
-        self, task_id: int, error: str | None, retry_delay_seconds: int
+        self,
+        task_id: int,
+        error: str | None,
+        retry_delay_seconds: int,
+        *,
+        locked_by: str | None = None,
     ) -> str:
         self.failed.append((task_id, error))
         self.retry_delays.append(retry_delay_seconds)
         return "retry"
 
-    async def fail(self, task_id: int, error: str | None = None) -> str | None:
+    async def fail(
+        self,
+        task_id: int,
+        error: str | None = None,
+        *,
+        locked_by: str | None = None,
+    ) -> str | None:
         self.permanent_failed.append((task_id, error))
         return "failed"
 
-    async def assign_account(self, task_id: int, account_id: int) -> None:
+    async def assign_account(
+        self, task_id: int, account_id: int, *, locked_by: str | None = None
+    ) -> None:
         self.assigned.append((task_id, account_id))
 
-    async def unassign_account(self, task_id: int) -> None:
+    async def unassign_account(
+        self, task_id: int, *, locked_by: str | None = None
+    ) -> None:
         self.unassigned.append(task_id)
 
-    async def begin_execution_attempt(self, task_id: int) -> int:
+    async def begin_execution_attempt(
+        self, task_id: int, *, locked_by: str | None = None
+    ) -> int:
         self.begin_calls.append(task_id)
         return len(self.begin_calls)
 
@@ -924,7 +946,7 @@ async def test_b9_success_records_attempt() -> None:
 async def test_b9_attempt_number_from_begin_execution() -> None:
     queue = _fake_queue()
 
-    async def _begin(task_id: int) -> int:
+    async def _begin(task_id: int, *, locked_by: str | None = None) -> int:
         return 3
 
     queue.begin_execution_attempt = _begin  # type: ignore[assignment]

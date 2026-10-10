@@ -24,13 +24,13 @@ effective_rph = floor(rph_limit × (1 − reserve_percent / 100))
 | `connect_disconnect` | Connect / disconnect сессии | 150 | 135 | true |
 | `get_me` | Текущий пользователь (валидация сессии) | 150 | 135 | true |
 | `is_user_authorized` | Проверка авторизации | 150 | 135 | true |
-| `get_entity` | Resolve username / ссылки / peer | **223** | **200** | true |
+| `get_entity` | Resolve username / ссылки / peer | **200** | **180** | true |
 | `get_input_entity` | get_input_entity() для InputPeer | 35 | 31 | true |
 | `contacts.Search` | Поиск контактов / каналов | 10 | 9 | true |
 | `messages.SearchGlobal` | Глобальный поиск сообщений | 600 | 540 | true |
 | `channels.GetChannelRecommendations` | Рекомендации каналов | 150 | 135 | true |
 | `channels.GetFullChannel` | Полные данные канала | **112** | **100** | true |
-| `channels.JoinChannel` | Подписка / join канала или discussion | **223** | **200** | true |
+| `channels.JoinChannel` | Подписка / join канала или discussion | **65** | **58** | true |
 | `channels.LeaveChannel` | Выход из канала или discussion | 150 | 135 | true |
 | `channels.GetParticipant` | Проверка участника (InputPeerSelf) | 30000 | 27000 | true |
 | `channels.GetParticipants` | Список участников (megagroup / lidgen) | 2500 | 2250 | true |
