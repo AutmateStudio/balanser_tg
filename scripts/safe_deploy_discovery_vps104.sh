@@ -179,6 +179,16 @@ set_env_line "WORKER_TASK_ADAPTER=clump" "$ENV"
 set_env_line "USE_PG_QUEUE=true" "$ENV"
 set_env_line "INPROCESS_WORKER_COUNT=4" "$ENV"
 set_env_line "JOIN_PENDING_RETRY_SECONDS=1800" "$ENV"
+set_env_line "INACTIVE_CHANNEL_REMOVE_AFTER_SECONDS=3600" "$ENV"
+set_env_line "INACTIVE_REMOVE_INPROCESS=true" "$ENV"
+if ! grep -q 'fgsh123' "$ENV"; then
+  deny_now="$(grep -E '^LEAVE_CHANNEL_DENY_ACCOUNTS=' "$ENV" | tail -1 | cut -d= -f2- || true)"
+  if [ -n "$deny_now" ]; then
+    set_env_line "LEAVE_CHANNEL_DENY_ACCOUNTS=${deny_now},fgsh123" "$ENV"
+  else
+    set_env_line "LEAVE_CHANNEL_DENY_ACCOUNTS=fgsh123" "$ENV"
+  fi
+fi
 
 echo "=== 5.5. Миграции БД (migrate_queue.sh) ==="
 if [ "$SKIP_MIGRATE" = false ]; then
@@ -235,6 +245,11 @@ n=len(json.load(open(p, encoding='utf-8')))
 print(f'контейнер parser_jobs.json: {os.path.getsize(p)} bytes, records={n}')
 " || die "parser_jobs.json в контейнере недоступен или битый"
 fi
+
+echo "=== 9. producer-inactive-remove ==="
+docker tag standalone-discovery-api:latest lidogen-balancer:latest
+(cd "$ROOT" && docker compose --profile producers up -d --force-recreate producer-inactive-remove) \
+  || echo "WARN: отдельный producer-inactive-remove не поднялся; in-process цикл в discovery-api остаётся основным"
 
 echo ""
 echo "OK: деплой завершён"

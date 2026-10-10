@@ -77,6 +77,9 @@ class _FakeQueue:
         self.last_auto_retry = auto_retry
         return list(self._results)
 
+    async def release_orphan_account_locks(self) -> int:
+        return 0
+
 
 @pytest.mark.asyncio
 async def test_tick_passes_auto_retry_config() -> None:

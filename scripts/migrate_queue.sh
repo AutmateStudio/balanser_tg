@@ -136,7 +136,8 @@ for mig in \
   A21_orphan_locks_metrics.sql \
   A20_source_channels_ref_lookup_indexes.sql \
   A22_parser_add_channel_rph_30_per_hour.sql \
-  A23_telegram_discover_leads.sql
+  A23_telegram_discover_leads.sql \
+  A24_leave_channel_and_metrics.sql
 do
   MIG_FILE="$DB_DIR/$mig"
   [[ -f "$MIG_FILE" ]] || die "Файл миграции не найден: $MIG_FILE"
@@ -157,7 +158,8 @@ for mig in \
   A21_orphan_locks_metrics.sql \
   A20_source_channels_ref_lookup_indexes.sql \
   A22_parser_add_channel_rph_30_per_hour.sql \
-  A23_telegram_discover_leads.sql
+  A23_telegram_discover_leads.sql \
+  A24_leave_channel_and_metrics.sql
 do
   apply_once "$DB_DIR/$mig"
 done

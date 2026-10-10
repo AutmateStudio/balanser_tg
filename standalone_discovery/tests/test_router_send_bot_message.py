@@ -39,8 +39,8 @@ class SendBotMessageEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), {"ok": True, "message_id": 777, "chat_id": 123})
         send_mock.assert_called_once()
-        self.assertEqual(send_mock.call_args.kwargs["chat_id"], 123)
-        self.assertEqual(send_mock.call_args.kwargs["message"]["text"], "<b>Привет</b>")
+        self.assertEqual(send_mock.call_args.args[0], 123)
+        self.assertEqual(send_mock.call_args.args[1]["text"], "<b>Привет</b>")
 
     def test_send_bot_message_endpoint_returns_400_for_invalid_payload(self) -> None:
         from discovery_api.main import app

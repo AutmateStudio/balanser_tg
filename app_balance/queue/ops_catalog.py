@@ -59,8 +59,8 @@ RESOURCE_OPS: dict[str, ResourceOpDefinition] = {
     "get_entity": ResourceOpDefinition(
         code="get_entity",
         name="Resolve username / ссылки / peer",
-        # 20 кан/ч: 2 units/канал, threshold 80% → effective_rph ≥ 200 → rph_limit 223
-        rph_limit=223,
+        # A22: 30 add/ч не упираются в resolve. rph_limit 200 → effective 180.
+        rph_limit=200,
     ),
     "get_input_entity": ResourceOpDefinition(
         code="get_input_entity",
@@ -93,7 +93,8 @@ RESOURCE_OPS: dict[str, ResourceOpDefinition] = {
     "channels.JoinChannel": ResourceOpDefinition(
         code="channels.JoinChannel",
         name="Подписка / join канала или discussion",
-        rph_limit=223,
+        # A22: governor ~30 add/аккаунт/час (2 units, порог 0%).
+        rph_limit=65,
     ),
     "channels.LeaveChannel": ResourceOpDefinition(
         code="channels.LeaveChannel",

@@ -193,6 +193,21 @@ LIMIT $2
 """
 
 # Каналы на сессии без active-проекта и без активности ≥ N секунд.
+_HAS_ACTIVE_PROJECT_SQL = """
+SELECT EXISTS (
+    SELECT 1
+    FROM project_source_channels psc
+    JOIN monitoring_projects mp ON mp.id = psc.monitoring_project_id
+    WHERE psc.source_channel_id = $1
+      AND psc.is_enabled = true
+      AND mp.status = 'active'
+      AND mp.deleted_at IS NULL
+)
+"""
+
+# Неотслеживаемость — отсутствие active-проекта, а не тишина в ленте.
+# Отсрочка считается от последнего изменения привязки к проекту
+# (или updated_at канала, если привязок не было).
 _LIST_INACTIVE_ON_SESSIONS_SQL = """
 SELECT
   sc.id,
@@ -200,15 +215,15 @@ SELECT
   sc.external_url,
   sc.external_channel_id,
   a.session_name,
-  COALESCE(lm.last_published_at, sc.updated_at) AS activity_at
+  COALESCE(link.last_link_at, sc.updated_at) AS activity_at
 FROM source_channels sc
 JOIN accounts a ON a.id = sc.assigned_account_id
 JOIN platforms p ON p.id = sc.platform_id AND lower(p.code) = 'tg'
 LEFT JOIN LATERAL (
-  SELECT MAX(sm.published_at) AS last_published_at
-  FROM source_messages sm
-  WHERE sm.source_channel_id = sc.id
-) lm ON true
+  SELECT MAX(psc.updated_at) AS last_link_at
+  FROM project_source_channels psc
+  WHERE psc.source_channel_id = sc.id
+) link ON true
 WHERE sc.assigned_account_id IS NOT NULL
   AND NOT EXISTS (
     SELECT 1
@@ -219,7 +234,7 @@ WHERE sc.assigned_account_id IS NOT NULL
       AND mp.status = 'active'
       AND mp.deleted_at IS NULL
   )
-  AND COALESCE(lm.last_published_at, sc.updated_at)
+  AND COALESCE(link.last_link_at, sc.updated_at)
       < now() - ($1 * interval '1 second')
   AND (
     NULLIF(BTRIM(sc.external_url), '') IS NOT NULL
@@ -228,7 +243,7 @@ WHERE sc.assigned_account_id IS NOT NULL
       AND BTRIM(sc.external_channel_id) !~ '^-?[0-9]+$'
     )
   )
-ORDER BY COALESCE(lm.last_published_at, sc.updated_at) ASC NULLS FIRST, sc.id ASC
+ORDER BY COALESCE(link.last_link_at, sc.updated_at) ASC NULLS FIRST, sc.id ASC
 LIMIT $2
 """
 
@@ -602,6 +617,12 @@ class SourceChannelsRepo:
             )
             for row in rows
         ]
+
+    async def has_active_project(self, channel_id: int) -> bool:
+        """True, если канал снова включён в неудалённый active-проект."""
+        async with acquire() as conn:
+            val = await conn.fetchval(_HAS_ACTIVE_PROJECT_SQL, channel_id)
+        return bool(val)
 
     async def list_inactive_on_sessions(
         self, limit: int, stale_after_seconds: int

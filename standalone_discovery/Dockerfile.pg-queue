@@ -22,6 +22,8 @@ RUN pip install --no-cache-dir \
 
 COPY app_balance /app/app_balance
 COPY standalone_discovery/discovery_api /app/discovery_api
+COPY scripts/leave_untracked_channels.py /app/scripts/leave_untracked_channels.py
+COPY scripts/quarantine_account.py /app/scripts/quarantine_account.py
 
 RUN mkdir -p /app/discovery_api/data
 

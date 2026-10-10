@@ -161,7 +161,7 @@ class TaskDispatcher:
                     f"{ErrorCode.UNKNOWN_TASK_TYPE}:{task.task_type_code}",
 
                     self._retry_delay_seconds,
-
+                    locked_by=task.locked_by,
                 )
 
                 if status is None:
@@ -204,7 +204,9 @@ class TaskDispatcher:
 
                 if task.account_id is None:
 
-                    await self._queue.assign_account(task.id, account.id)
+                    await self._queue.assign_account(
+                    task.id, account.id, locked_by=task.locked_by
+                )
 
                 execute_account = account
 
@@ -213,7 +215,9 @@ class TaskDispatcher:
                 account=execute_account.session_name,
             )
 
-            attempt_number = await self._queue.begin_execution_attempt(task.id)
+            attempt_number = await self._queue.begin_execution_attempt(
+                task.id, locked_by=task.locked_by
+            )
 
             if task_type.uses_two_accounts:
                 accounts_by_role = {
@@ -262,7 +266,7 @@ class TaskDispatcher:
 
             await self._finish_attempt(attempt_id, status="success")
 
-            if await self._queue.complete(task.id):
+            if await self._queue.complete(task.id, locked_by=task.locked_by):
                 log_task_ok(
                     logger,
                     task.id,
@@ -412,7 +416,9 @@ class TaskDispatcher:
         )
 
         if queue_op == "fail":
-            status = await self._queue.fail(task.id, error_for_queue)
+            status = await self._queue.fail(
+                task.id, error_for_queue, locked_by=task.locked_by
+            )
             if status is None:
                 return DispatchResult.FAILED
             return DispatchResult.FAILED
@@ -422,6 +428,7 @@ class TaskDispatcher:
             task.id,
             error_for_queue,
             delay,
+            locked_by=task.locked_by,
         )
         if status is None:
             return DispatchResult.RETRIED
@@ -454,7 +461,9 @@ class TaskDispatcher:
             account.session_name if account is not None else None,
             delay,
         )
-        await self._queue.postpone(task.id, delay, reason)
+        await self._queue.postpone(
+            task.id, delay, reason, locked_by=task.locked_by
+        )
 
     def _calc_retry_delay(
         self,
@@ -792,7 +801,7 @@ class TaskDispatcher:
         if task_type.uses_two_accounts:
             return
         try:
-            await self._queue.unassign_account(task.id)
+            await self._queue.unassign_account(task.id, locked_by=task.locked_by)
             logger.info(
                 "dispatch: unassign account_id после reserve_failed "
                 "task_id=%s (возврат в auto-pick)",
@@ -821,7 +830,7 @@ class TaskDispatcher:
         if task_type.uses_two_accounts:
             return
         try:
-            await self._queue.unassign_account(task.id)
+            await self._queue.unassign_account(task.id, locked_by=task.locked_by)
             logger.info(
                 "dispatch: unassign account_id после %s task_id=%s (смена аккаунта на retry)",
                 code,

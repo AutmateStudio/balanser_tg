@@ -48,7 +48,8 @@ git push origin main
 4. **`migrate_queue.sh`** (накат A19 и прочих pending-миграций).
 5. Останавливает отдельный `queue-worker` (если был).
 6. Rebuild образа + `force-recreate discovery-api`.
-7. Ждёт `/health`, запускает `verify_discovery_vps104.sh`.
+7. Ждёт `/health` (глубокая проверка PG; лёгкий Docker-probe — `/health/live`), запускает `verify_discovery_vps104.sh`.
+8. Поднимает `producer-inactive-remove`. Автовыход также крутится внутри `discovery-api`.
 
 ```bash
 ssh ubuntu@vps-104

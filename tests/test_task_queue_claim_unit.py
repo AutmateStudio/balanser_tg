@@ -89,6 +89,9 @@ def test_begin_execution_attempt_sql_increments() -> None:
 def test_complete_and_reschedule_sql_present() -> None:
     assert "status = 'done'" in _COMPLETE_SQL
     assert "locked_until = null" in _COMPLETE_SQL.lower()
+    assert "locked_by = $2" in _COMPLETE_SQL.lower()
+    assert "locked_by = $4" in _RESCHEDULE_OR_FAIL_SQL.lower()
+    assert "locked_by = $3" in _FAIL_SQL.lower()
     assert "'retry'" in _RESCHEDULE_OR_FAIL_SQL
     assert "'failed'" in _RESCHEDULE_OR_FAIL_SQL
 
@@ -145,7 +148,7 @@ async def test_complete_executes_update(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr("app_balance.queue.task_queue.acquire", fake_acquire)
 
     assert await TaskQueueRepo().complete(99) is True
-    conn.execute.assert_awaited_once_with(_COMPLETE_SQL, 99)
+    conn.execute.assert_awaited_once_with(_COMPLETE_SQL, 99, None)
 
 
 @pytest.mark.asyncio
@@ -162,7 +165,7 @@ async def test_reschedule_or_fail_returns_status(monkeypatch: pytest.MonkeyPatch
     status = await TaskQueueRepo().reschedule_or_fail(5, "boom", retry_delay_seconds=30)
     assert status == "retry"
     conn.fetchval.assert_awaited_once_with(
-        _RESCHEDULE_OR_FAIL_SQL, 5, "boom", 30
+        _RESCHEDULE_OR_FAIL_SQL, 5, "boom", 30, None
     )
 
 
@@ -179,4 +182,4 @@ async def test_fail_returns_status(monkeypatch: pytest.MonkeyPatch) -> None:
 
     status = await TaskQueueRepo().fail(7, "invalid_payload")
     assert status == "failed"
-    conn.fetchval.assert_awaited_once_with(_FAIL_SQL, 7, "invalid_payload")
+    conn.fetchval.assert_awaited_once_with(_FAIL_SQL, 7, "invalid_payload", None)
