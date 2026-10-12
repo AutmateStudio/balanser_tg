@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from discovery_api.client_sessions.errors import (
     PasswordRequired,
     PeerUnavailableError,
     PrivacyRestrictedError,
+    SessionBusyError,
     SessionRevokedError,
 )
 from discovery_api.client_sessions.gateway import AuthProfile, HistoryItem
@@ -66,6 +68,7 @@ class TelethonGateway:
 
     def __init__(self) -> None:
         self._clients: dict[str, object] = {}
+        self._client_locks: dict[str, asyncio.Lock] = {}
 
     async def begin_qr(self, session_path: Path) -> TelethonQrHandle:
         client = await self._client(session_path, fresh=True)
@@ -79,8 +82,8 @@ class TelethonGateway:
         username: str | None,
         text: str,
     ) -> int:
-        client = await self._client(session_path)
         try:
+            client = await self._client(session_path)
             entity = await self._resolve(client, peer_id, username)
             message = await client.send_message(entity, text)
         except Exception as exc:  # noqa: BLE001
@@ -97,8 +100,8 @@ class TelethonGateway:
         limit: int,
         newer: bool,
     ) -> tuple[list[HistoryItem], str | None]:
-        client = await self._client(session_path)
         try:
+            client = await self._client(session_path)
             entity = await self._resolve(client, peer_id, username)
             kwargs: dict[str, object] = {"limit": limit}
             if cursor and cursor.isdigit() and cursor != "0":
@@ -118,11 +121,10 @@ class TelethonGateway:
         return items, next_cursor
 
     async def revoke(self, session_path: Path) -> None:
-        client = self._clients.pop(str(session_path), None)
-        if client is not None:
-            disconnect = getattr(client, "disconnect", None)
-            if disconnect:
-                await disconnect()
+        key = str(session_path)
+        async with self._client_lock(session_path):
+            client = self._clients.pop(key, None)
+            await self._disconnect(client)
         for suffix in (".session", ".session-journal"):
             path = Path(str(session_path) + suffix)
             if path.is_file():
@@ -134,13 +136,47 @@ class TelethonGateway:
         from discovery_api.config import get_api_hash, get_api_id
 
         key = str(session_path)
-        current = self._clients.get(key)
-        if current is not None and not fresh and getattr(current, "is_connected", lambda: False)():
-            return current
-        client = TelegramClient(key, get_api_id(), get_api_hash())
-        await client.connect()
-        self._clients[key] = client
-        return client
+        async with self._client_lock(session_path):
+            current = self._clients.get(key)
+            if current is not None and not fresh:
+                if getattr(current, "is_connected", lambda: False)():
+                    return current
+                try:
+                    await current.connect()
+                    return current
+                except Exception as exc:  # noqa: BLE001
+                    _reraise_connection(exc)
+                    raise
+
+            if current is not None:
+                await self._disconnect(current)
+                self._clients.pop(key, None)
+
+            client = TelegramClient(key, get_api_id(), get_api_hash())
+            try:
+                await client.connect()
+            except Exception as exc:  # noqa: BLE001
+                await self._disconnect(client)
+                _reraise_connection(exc)
+                raise
+            self._clients[key] = client
+            return client
+
+    def _client_lock(self, session_path: Path) -> asyncio.Lock:
+        key = str(session_path)
+        lock = self._client_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._client_locks[key] = lock
+        return lock
+
+    @staticmethod
+    async def _disconnect(client: object | None) -> None:
+        if client is None:
+            return
+        disconnect = getattr(client, "disconnect", None)
+        if disconnect:
+            await disconnect()
 
     async def _resolve(self, client: object, peer_id: str | None, username: str | None) -> object:
         if username:
@@ -175,12 +211,18 @@ def _reraise_auth(exc: BaseException) -> None:
     name = type(exc).__name__
     if name == "SessionPasswordNeededError":
         raise PasswordRequired() from exc
+    if name == "AuthKeyDuplicatedError":
+        raise SessionRevokedError() from exc
     if name in {"AuthKeyUnregisteredError", "SessionRevokedError", "UserDeactivatedError"}:
         raise SessionRevokedError() from exc
+    if isinstance(exc, sqlite3.OperationalError) and "database is locked" in str(exc).lower():
+        raise SessionBusyError() from exc
 
 
 def _reraise_send(exc: BaseException) -> None:
     name = type(exc).__name__
+    if isinstance(exc, sqlite3.OperationalError) and "database is locked" in str(exc).lower():
+        raise SessionBusyError() from exc
     if name == "FloodWaitError":
         seconds = int(getattr(exc, "seconds", 0) or 0)
         raise FloodWaitError(seconds) from exc
@@ -193,7 +235,19 @@ def _reraise_send(exc: BaseException) -> None:
         "InputUserDeactivatedError",
     }:
         raise PeerUnavailableError() from exc
-    if name in {"AuthKeyUnregisteredError", "SessionRevokedError", "UserDeactivatedError"}:
+    if name in {
+        "AuthKeyDuplicatedError",
+        "AuthKeyUnregisteredError",
+        "SessionRevokedError",
+        "UserDeactivatedError",
+    }:
         raise SessionRevokedError() from exc
-    if isinstance(exc, (FloodWaitError, PrivacyRestrictedError, PeerUnavailableError, SessionRevokedError)):
+    if isinstance(
+        exc,
+        (FloodWaitError, PrivacyRestrictedError, PeerUnavailableError, SessionBusyError, SessionRevokedError),
+    ):
         raise exc
+
+
+def _reraise_connection(exc: BaseException) -> None:
+    _reraise_send(exc)
