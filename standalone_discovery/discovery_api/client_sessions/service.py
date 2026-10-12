@@ -240,7 +240,8 @@ class ClientSessionService:
         peer = peer_id or (f"username:{username}" if username else None)
         if peer:
             await self.watch(remote_account_id, peer, username)
-            self._advance_cursor(remote_account_id, peer, str(message_id))
+            async with self._lock(remote_account_id):
+                self._advance_cursor(remote_account_id, peer, str(message_id))
         return public_payload(payload)
 
     async def history(
@@ -284,18 +285,19 @@ class ClientSessionService:
         )
 
     async def watch(self, remote_account_id: str, peer_id: str, username: str | None = None) -> None:
-        meta = self._require_active(remote_account_id)
-        peers = list(meta.get("watched_peers") or [])
-        if peer_id not in peers:
-            peers.append(peer_id)
-            meta["watched_peers"] = peers
-        cursors = dict(meta.get("cursors") or {})
-        if peer_id not in cursors:
-            cursors[peer_id] = await self._latest_cursor(remote_account_id, peer_id, username)
-            meta["cursors"] = cursors
-        self.store.save(meta)
-        if self.auto_listen:
-            self.ensure_listener()
+        async with self._lock(remote_account_id):
+            meta = self._require_active(remote_account_id)
+            peers = list(meta.get("watched_peers") or [])
+            if peer_id not in peers:
+                peers.append(peer_id)
+                meta["watched_peers"] = peers
+            cursors = dict(meta.get("cursors") or {})
+            if peer_id not in cursors:
+                cursors[peer_id] = await self._latest_cursor(remote_account_id, peer_id, username)
+                meta["cursors"] = cursors
+            self.store.save(meta)
+            if self.auto_listen:
+                self.ensure_listener()
 
     async def poll_once(self) -> list[dict[str, Any]]:
         delivered: list[dict[str, Any]] = []

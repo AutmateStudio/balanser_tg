@@ -37,6 +37,15 @@ class PeerUnavailableError(ClientSessionError):
         )
 
 
+class SessionBusyError(ClientSessionError):
+    def __init__(self) -> None:
+        super().__init__(
+            "session_busy",
+            "Telegram-сессия занята, повторите отправку через несколько секунд",
+            3,
+        )
+
+
 class SessionRevokedError(ClientSessionError):
     def __init__(self) -> None:
         super().__init__("session_revoked", "Сессия Telegram отозвана")
