@@ -50,6 +50,8 @@ services:
     init: true
     env_file:
       - .env
+    environment:
+      CLIENT_SESSIONS_DIR: /app/client-sessions
     network_mode: "service:vpn"
     depends_on:
       vpn:
@@ -57,6 +59,7 @@ services:
     volumes:
       - ./data:/app/discovery_api/data
       - ./sessions:/app/sessions
+      - ./client-sessions:/app/client-sessions
     healthcheck:
       test:
         [

@@ -15,7 +15,6 @@ from telethon.errors import FloodWaitError
 from telethon.tl import types
 
 from discovery_api.chat_resolve import (
-    ChannelHasNoDiscussionError,
     ChatAccessError,
     _join_channel_entity,
     classify_chat_entity,
@@ -103,6 +102,14 @@ class ResolveListenTargetTests(unittest.TestCase):
         self.assertEqual(target.linked_chat_id, 222)
         self.assertEqual(target.source_peer_id, -100111)
         self.assertEqual(target.listen_peer_id, -100222)
+        self.assertEqual(target.subscribed_peer_ids(), (-100222, -100111))
+        discussion = target.webhook_identity(-100222)
+        self.assertEqual(discussion["listen_mode"], "discussion")
+        self.assertEqual(discussion["source_peer_id"], -100111)
+        self.assertEqual(discussion["linked_peer_id"], -100222)
+        posts = target.webhook_identity(-100111)
+        self.assertEqual(posts["listen_mode"], "posts")
+        self.assertEqual(posts["source_peer_id"], -100111)
 
     def test_megagroup_listens_self(self) -> None:
         group = _make_channel(megagroup=True, channel_id=333)
@@ -124,7 +131,7 @@ class ResolveListenTargetTests(unittest.TestCase):
         self.assertEqual(target.listen_mode, "group_chat")
         self.assertEqual(target.listen_peer_id, target.source_peer_id)
 
-    def test_channel_without_discussion_raises(self) -> None:
+    def test_channel_without_discussion_listens_posts(self) -> None:
         channel = _make_channel(broadcast=True)
         full_chat = MagicMock()
         full_chat.linked_chat_id = None
@@ -133,11 +140,26 @@ class ResolveListenTargetTests(unittest.TestCase):
 
         client = AsyncMock()
         client.get_entity = AsyncMock(return_value=channel)
-        client.side_effect = [None, full_info]
+        client.side_effect = [full_info]
 
-        with patch.object(telethon.utils, "get_peer_id", return_value=-100111):
-            with self.assertRaises(ChannelHasNoDiscussionError):
-                _run(resolve_listen_target(client, "https://t.me/nodiscuss"))
+        with patch.object(telethon.utils, "get_peer_id", return_value=-100111), patch(
+            "discovery_api.chat_resolve._join_channel_entity",
+            new_callable=AsyncMock,
+            return_value=(True, None),
+        ), patch(
+            "discovery_api.chat_resolve._check_listen_access",
+            new_callable=AsyncMock,
+            return_value=(True, "участник"),
+        ):
+            target = _run(resolve_listen_target(client, "https://t.me/nodiscuss"))
+
+        self.assertEqual(target.listen_mode, "posts")
+        self.assertEqual(target.listen_peer_id, -100111)
+        self.assertEqual(target.source_peer_id, -100111)
+        self.assertEqual(target.subscribed_peer_ids(), (-100111,))
+        identity = target.webhook_identity(-100111)
+        self.assertEqual(identity["listen_mode"], "posts")
+        self.assertIsNone(identity["linked_peer_id"])
 
     def test_user_raises_value_error(self) -> None:
         user = MagicMock(spec=types.User)

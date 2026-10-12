@@ -1062,6 +1062,8 @@ class Parser_client:
         self.channels: list[str] = []
         self.allowed_chat_ids: set[int] = set()
         self.ref_to_chat_id: dict[str, int] = {}
+        self.ref_to_peer_ids: dict[str, list[int]] = {}
+        self.listen_identities: dict[int, dict[str, Any]] = {}
         self._webhook_url: str = ""
         self._supervisor_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -1129,6 +1131,7 @@ class Parser_client:
                     pending_refs=[],
                     client=client,
                     on_event=self.health.touch_event,
+                    listen_identities=self.listen_identities,
                 )
                 if self._stop_requested:
                     break
@@ -1250,7 +1253,14 @@ class Parser_client:
         wh = (webhook_url or self._webhook_url or "").strip()
         client = await self.get_client()
         await self._respect_resolve_pacing()
-        chat_id, err, error_code = await resolve_channel_to_chat_id(client, raw, join=True)
+        subscribed: list[int] = []
+        chat_id, err, error_code = await resolve_channel_to_chat_id(
+            client,
+            raw,
+            join=True,
+            listen_identities=self.listen_identities,
+            subscribed_ids=subscribed,
+        )
         if err or chat_id is None:
             # FloodWait при resolve гасится в строку — поднимаем его в health,
             # чтобы балансировщик увёл следующие каналы на другую сессию.
@@ -1261,18 +1271,13 @@ class Parser_client:
             return None, err, error_code
 
         cid = int(chat_id)
-        if cid in self.allowed_chat_ids:
-            # already_present: синхронизируем channels/ref_to_chat_id
-            self.ref_to_chat_id[raw] = cid
-            if raw not in self.channels:
-                self.channels.append(raw)
-            return cid, None, None
-
-        self.allowed_chat_ids.add(cid)
-        self.ref_to_chat_id[raw] = cid
+        peers = subscribed or [cid]
+        already = raw in self.channels and all(int(peer) in self.allowed_chat_ids for peer in peers)
+        self._bind_channel_peers(raw, peers)
         if raw not in self.channels:
             self.channels.append(raw)
-            self.record_channel_add()
+            if not already:
+                self.record_channel_add()
 
         if wh and not self.is_running():
             await self.start(wh)
@@ -1299,12 +1304,10 @@ class Parser_client:
                 return False
             cid = int(resolved)
 
-        if cid not in self.allowed_chat_ids:
+        if cid not in self.allowed_chat_ids and raw not in self.ref_to_peer_ids:
             return False
 
-        self.allowed_chat_ids.discard(cid)
-        self.ref_to_chat_id.pop(raw, None)
-        self.channels[:] = [c for c in self.channels if c != raw]
+        self.forget_channel_local(raw)
         return True
 
     async def leave_channel(self, raw: str) -> bool:
@@ -1322,13 +1325,38 @@ class Parser_client:
         await self.remove_channel(ref)
         return True
 
+    def _bind_channel_peers(self, raw: str, peers: list[int]) -> None:
+        unique = list(dict.fromkeys(int(peer) for peer in peers))
+        self.ref_to_peer_ids[raw] = unique
+        self.ref_to_chat_id[raw] = unique[0]
+        for peer_id in unique:
+            self.allowed_chat_ids.add(peer_id)
+
+    def forget_channel_local(self, raw: str) -> int | None:
+        """Снимает ref и все связанные peer id, которые больше никто не слушает."""
+        primary = self.ref_to_chat_id.get(raw)
+        peers = list(self.ref_to_peer_ids.pop(raw, []))
+        if primary is not None and int(primary) not in peers:
+            peers.append(int(primary))
+        self.ref_to_chat_id.pop(raw, None)
+        self.channels[:] = [item for item in self.channels if item != raw]
+        for peer_id in peers:
+            still_used = any(
+                int(peer_id) in ids for ids in self.ref_to_peer_ids.values()
+            ) or any(int(other) == int(peer_id) for other in self.ref_to_chat_id.values())
+            if not still_used:
+                self.allowed_chat_ids.discard(int(peer_id))
+                self.listen_identities.pop(int(peer_id), None)
+        if primary is None:
+            return int(peers[0]) if peers else None
+        return int(primary)
+
     def restore_channel(
         self, raw: str, listen_peer_id: int, *, webhook_url: str = ""
     ) -> None:
         """Восстановление из JSON без resolve (startup)."""
         cid = int(listen_peer_id)
-        self.allowed_chat_ids.add(cid)
-        self.ref_to_chat_id[raw] = cid
+        self._bind_channel_peers(raw, [cid])
         if raw not in self.channels:
             self.channels.append(raw)
         if webhook_url:
@@ -1712,11 +1740,7 @@ class SessionClump:
     @staticmethod
     def _strip_channel_local(pc: Parser_client, ref: str) -> None:
         """Снимает канал с сессии локально (без Telethon LeaveChannel)."""
-        cid = pc.ref_to_chat_id.get(ref)
-        if cid is not None:
-            pc.allowed_chat_ids.discard(int(cid))
-        pc.ref_to_chat_id.pop(ref, None)
-        pc.channels[:] = [c for c in pc.channels if c != ref]
+        pc.forget_channel_local(ref)
 
     async def move_channel(
         self,
@@ -2041,9 +2065,7 @@ class SessionClump:
 
             for ref in to_move:
                 # Снимаем канал с упавшей сессии (локально, без RPC).
-                source.allowed_chat_ids.discard(source.ref_to_chat_id.get(ref, 0))
-                source.ref_to_chat_id.pop(ref, None)
-                source.channels[:] = [c for c in source.channels if c != ref]
+                source.forget_channel_local(ref)
                 self.assignments.pop(ref, None)
 
                 try:
@@ -2186,9 +2208,7 @@ class SessionClump:
                     cid = source.ref_to_chat_id.get(ref)
                     if cid is None:
                         continue
-                    source.allowed_chat_ids.discard(cid)
-                    source.ref_to_chat_id.pop(ref, None)
-                    source.channels[:] = [c for c in source.channels if c != ref]
+                    source.forget_channel_local(ref)
                     self.assignments.pop(ref, None)
                     chat_id, err, error_code = await target.add_channel(
                         ref, webhook_url=self.webhook_url

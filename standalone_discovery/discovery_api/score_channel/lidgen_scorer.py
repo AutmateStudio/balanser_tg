@@ -230,7 +230,11 @@ def _compute_lidgen_score(
         return LidgenScore(
             score_total=0,
             breakdown={"relevance": 0.0, "liveness": 0.0, "audience_quality": 0.0, "reachability": 0.0},
-            extracted_signals={"reason": "scam_or_fake"},
+            extracted_signals={
+                "reason": "scam_or_fake",
+                "linked_chat_id": linked_chat_id,
+                "about": about if isinstance(about, str) else signals.get("about"),
+            },
             hard_flags=hard_flags,
         )
 
@@ -425,6 +429,8 @@ def _compute_lidgen_score(
         "members_sample_limit": get_lidgen_members_sample_limit(),
         "dead_days_threshold": dead_days,
         "days_since_last_post": days_since_last,
+        "linked_chat_id": linked_chat_id,
+        "about": about if isinstance(about, str) else signals.get("about"),
     }
     if signals.get("collector_errors"):
         extracted["collector_errors"] = signals["collector_errors"]
