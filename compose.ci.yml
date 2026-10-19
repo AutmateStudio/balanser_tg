@@ -1,0 +1,36 @@
+# A disposable PostgreSQL and mocked Telegram clients; no host .env or data mounts.
+# docker compose -f compose.ci.yml up --build --abort-on-container-exit --exit-code-from test
+# docker compose -f compose.ci.yml down --volumes --remove-orphans
+name: ${COMPOSE_PROJECT_NAME:-lidogen-ci}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lidogen_ci
+      POSTGRES_PASSWORD: local_ci_only
+      POSTGRES_DB: lidogen_ci
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U lidogen_ci -d lidogen_ci"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      QUEUE_DATABASE_URL: postgresql://lidogen_ci:local_ci_only@postgres:5432/lidogen_ci
+      PYTEST_DB_ISOLATED: "1"
+      DISCOVERY_INPROCESS_WORKER: "false"
+    command:
+      - bash
+      - -euc
+      - |
+        bash scripts/migrate_queue.sh --mode greenfield
+        bash scripts/migrate_queue.sh --mode greenfield
+        bash scripts/run_all_tests.sh

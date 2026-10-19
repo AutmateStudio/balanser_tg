@@ -540,22 +540,7 @@ SELECT
   (
     SELECT count(*) FROM "v_account_resource_summary"
     WHERE "any_op_exhausted" = true
-  ) AS "accounts_without_resource",
-  count(*) FILTER (
-    WHERE "is_enabled" = true
-      AND "status" IN ('active', 'cooldown')
-      AND "current_task_id" IS NULL
-      AND ("cooldown_until" IS NULL OR "cooldown_until" <= now())
-  ) AS "pickable_accounts_count",
-  count(*) FILTER (WHERE "current_task_id" IS NOT NULL) AS "busy_accounts_count",
-  count(*) FILTER (
-    WHERE "current_task_id" IS NOT NULL
-      AND NOT EXISTS (
-        SELECT 1 FROM "task_queue" "t"
-        WHERE "t"."id" = "accounts"."current_task_id"
-          AND "t"."status" = 'in_progress'
-      )
-  ) AS "orphan_account_locks"
+  ) AS "accounts_without_resource"
 FROM "accounts";
 
 -- --- §26.3 / G7★: загрузка каналов по парку (лимит per-session — в env MAX_CHANNELS_PER_SESSION) ---

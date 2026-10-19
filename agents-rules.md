@@ -31,6 +31,8 @@ Dev-сервер приложения: **`vps-101`**, пользователь *
 
 ```text
 ~/Lidogen_telegram_balancer/
+├── .github/workflows/       # ci.yml, vps-sync.yml
+├── .dockerignore            # исключение секретов и runtime из образов
 ├── DB/                      # SQL-схема, seed, миграции очереди
 ├── Dockerfile
 ├── Makefile
@@ -38,14 +40,18 @@ Dev-сервер приложения: **`vps-101`**, пользователь *
 ├── agents-rules.md          # этот файл — правила для агентов
 ├── app_balance/             # PG Queue Balancer: queue/, queue_worker.py
 ├── balancer/
+├── compose.ci.yml           # изолированные PostgreSQL и тесты в CI
 ├── docker-compose.yml       # postgres local, migrate, test, queue-worker
+├── docs/development-pipeline.md # разработка через PR и связь с VPS
+├── ops/ci/                  # check_source.py, scan_secrets.sh
+├── ops/pipeline.json        # репозиторий и отдельный checkout VPS
 ├── docs(plan)/              # планы спринтов, ТЗ, доступ к БД
 ├── pytest.ini
 ├── requirements.txt
 ├── requirements-dev.txt     # pytest, pytest-asyncio
 ├── scripts/                 # migrate_queue.sh, run_all_tests.sh, sync_accounts_to_pg.py, e2e_d12/
 ├── standalone_discovery/    # см. подраздел ниже
-└── tests/                   # unit + integration тесты очереди (PG)
+└── tests/                   # unit + integration тесты очереди (PG), __init__.py
 ```
 
 Файлы конфигурации (не в `ls`, но обязательны на dev): `.env` (из `.env.example`), опционально `.env.example`.
@@ -64,12 +70,10 @@ Dev-сервер приложения: **`vps-101`**, пользователь *
 ├── README.md
 ├── USAGE.md
 ├── check_health_urls.py
-├── test_endpoints.py
-├── Client1.session          # Telethon-сессии (локальные артеfacts)
-├── TEST_MEGAGROUP.session
-├── Telegram-Parser-Gleb-2.conf
-└── vpn_telegram_gleb.conf
+└── test_endpoints.py
 ```
+
+Локальные `Client1.session`, `TEST_MEGAGROUP.session` и VPN `.conf` остаются только на сервере, вне версионируемого дерева.
 
 > **Не коммитить в git:** `*.session`, локальные `.conf` с секретами, `__pycache__/`.
 

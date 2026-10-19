@@ -1,0 +1,11 @@
+{
+  "component": "telegram-balancer",
+  "repository": "AutmateStudio/balanser_tg",
+  "vps": 104,
+  "current_runtime_source_path": "/home/ubuntu/Lidogen_telegram_balancer",
+  "linked_checkout_path": "/home/ubuntu/lidogen-repos/telegram-balancer",
+  "mode": "source_staging",
+  "production_cutover_applied": false,
+  "automatic_n8n_import": false,
+  "automatic_production_migrations": false
+}
