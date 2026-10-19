@@ -6,6 +6,11 @@
 
 ---
 
+Особый случай `account_unauthorized` (обновлено 2026-10-19): при сообщении Telegram
+`authorization key (session file) was used under two different IP addresses simultaneously`
+аккаунт немедленно получает статус `banned`. Задача остаётся retryable: worker снимает
+`account_id` и повторно ставит её в очередь для выбора другого аккаунта.
+
 ## Поля ошибки в API и БД
 
 | Поле | Где | Описание |
@@ -99,6 +104,32 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 
 См. также `python scripts/diag_worker_rph.py` (docker compose run --rm test).
 
+### Восстановление TG parser sync после выбора одного недоступного парсера (2026-10-17)
+
+С 2026-10-17 продовый n8n `AaE9mJjKA1Xio59R` распределяет не более одного нового канала на здоровый доступный парсер за тик. Старые `parser_add_channel` закреплены за `account_id` в момент enqueue; смена алгоритма n8n **не** переносит их. Кроме того, активная задача на канал блокирует новую задачу под другим `parser_id`.
+
+1. Приостановить старый sync и дождаться завершения выполняющихся задач. Снять снимок `task_queue` и списка парсеров. Сверить конкретный `account_id` с `accounts.session_name` и `payload->>'parser_id'`; не полагаться на прежние числа из инцидента.
+2. Прочитать только кандидатов на ручное освобождение (подставить проверенный ID аккаунта):
+
+   ```sql
+   SELECT t.id, t.status, t.account_id, t.channel_id,
+          t.payload->>'parser_id' AS parser_id,
+          t.payload->>'channel_ref' AS channel_ref,
+          t.created_at, t.last_error
+   FROM task_queue t
+   WHERE t.task_type_code = 'parser_add_channel'
+     AND t.account_id = :bad_account_id
+     AND t.status IN ('queued', 'scheduled', 'retry', 'in_progress')
+   ORDER BY t.id;
+   ```
+
+3. Только после подтверждения, что аккаунт недоступен, вручную отменить **лишь** `queued`/`scheduled`/`retry` из подтверждённого списка в транзакции с `RETURNING id, channel_id, payload`; сохранить этот список для сверки. Не менять `in_progress` до завершения/разбора lease и не делать глобальную отмену всех `parser_add_channel`. Проверить, что число отмен совпало с предварительным списком, затем `COMMIT`; при расхождении `ROLLBACK`.
+4. Запустить обновлённый workflow сначала вручную, сверить `parserId` и `task_ids` ответа add-channels. Затем отдельно разрешить активацию расписания. Каждые 3 минуты проверять распределение `task_queue` по `account_id`, `skipped_already_queued`, `skipped_fatal` и фактические `per_session.allowed_chat_ids`. Канал считается восстановленным только после успешной задачи и появления у здоровой слушающей сессии; запись `queued` или `channel_list` сама по себе недостаточна.
+
+Не включать старый и новый sync одновременно. При невозможности однозначно сопоставить задачи с аккаунтом/каналом остановиться до ручной проверки, а не массово переписывать `account_id` у существующих задач: `payload.parser_id` и маршрутизация слушателя тогда расходятся.
+
+Факт восстановления 2026-10-17: точечный скрипт `scripts/requeue_invalid_tg_parser_tasks.py` выполнил транзакционную отмену 1146 pending-задач аккаунта 14; 938 новых task ID поставлены через API на 26 парсеров. Ещё шесть каналов не имели `allowed_chat_ids`, хотя прежние clump считали их назначенными. Старые task ID: `71125`, `73004`, `70406`, `70359`, `72360`, `73334`. Через `scripts/requeue_unverified_tg_channels.py` они поставлены на другие работающие clump: новые task ID `74525–74530`, статус на момент проверки `scheduled` из-за cooldown до примерно 10:19 UTC. Итого создано 944 новых task ID; активных задач на аккаунте 14 нет. Не считать каналы восстановленными только по `source_channels.assigned_account_id`/`channel_list` или `scheduled`: после cooldown проверить `done` и фактическое `per_session.allowed_chat_ids`.
+
 ---
 
 ## Per-op RPH (§0.5)
@@ -147,10 +178,14 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 ### F2/F3 — балансировка каналов и отключение старого idle-rebalance
 
 - F2 `channel_balancer` считает число каналов на аккаунт (`source_channels.assigned_account_id`)
-  внутри каждого clump и при отклонении > ±5% от среднего ставит задачи `move_channel`
+  по всей ферме и при отклонении > ±5% от среднего ставит задачи `move_channel`
   (низкий приоритет, `target_queue_size` из seed, dedup_key
   `move_channel:<channel_id>:<source_account_id>:<target_account_id>`). Это
   **единственный** механизм переноса каналов при работе PG-очереди.
+  Сессии из `REBALANCE_EXCLUDE_ACCOUNTS` в расчёт не входят: с них каналы не
+  забираются и на них чужие не переносятся. Слушатель clump при этом работает.
+  Аккаунт `danilkostin` с 2026-10-14 в этом списке: каналы на нём подключаются
+  вручную.
 - Старый механизм `SessionClump.rebalance_idle()` (env `REBALANCE_ENABLED`, перенос в
   «тихое окно») **автоматически отключается при `USE_PG_QUEUE=true`**:
   `eff_rebalance_enabled()` возвращает `false` независимо от `REBALANCE_ENABLED` и
@@ -161,6 +196,7 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 |-----|-----------|-------|
 | `USE_PG_QUEUE` | Включает PG-очередь и PG-балансер (F2) | При `true` → idle-rebalance принудительно off |
 | `REBALANCE_ENABLED` | Старый idle-rebalance в clump (default `false`) | Игнорируется, если `USE_PG_QUEUE=true` |
+| `REBALANCE_EXCLUDE_ACCOUNTS` | Сессии вне F2 (через запятую) | Слушатель не останавливается |
 
 ### F5 — update_channel
 
@@ -193,7 +229,8 @@ psql "$PGURL" -f scripts/psql_parser_add_channel_diag.sql
 Канал, которого нет в `parser_jobs.json` / clump, всё равно ставится в выход
 по `session_name` из PG (`leave_without_clump`). Аккаунты из
 `LEAVE_CHANNEL_DENY_ACCOUNTS` (дефолт `fgsh123`) пропускаются: их каналы
-не покидаются.
+не покидаются. С 2026-10-14 на vps-104 в этот список добавлен `danilkostin`:
+каналы, которые уже есть на аккаунте, автоматически не снимаются.
 
 На vps-104 цикл крутится внутри `discovery-api`
 (`INACTIVE_REMOVE_INPROCESS=true`, интервал

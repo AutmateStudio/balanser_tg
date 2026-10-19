@@ -15,6 +15,7 @@ from discovery_api.session_health import (
     SessionHealth,
     SessionStatus,
     classify_telethon_error,
+    is_conflicting_auth_key_error,
     parse_flood_wait_seconds,
 )
 
@@ -68,6 +69,13 @@ class ClassifyTelethonErrorTests(unittest.TestCase):
     def test_fatal_default(self) -> None:
         kind, seconds = classify_telethon_error(ValueError("unexpected"))
         self.assertEqual(kind, "fatal")
+        self.assertIsNone(seconds)
+
+    def test_conflicting_auth_key_message_is_banned(self) -> None:
+        message = "The authorization key (session file) was used under two different IP addresses simultaneously"
+        self.assertTrue(is_conflicting_auth_key_error(message))
+        kind, seconds = classify_telethon_error(RuntimeError(message))
+        self.assertEqual(kind, "banned")
         self.assertIsNone(seconds)
 
 

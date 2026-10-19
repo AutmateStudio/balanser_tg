@@ -1035,6 +1035,14 @@ async def notify_session_unauthorized(session_name: str, message: str) -> None:
     await _persist_unauthorized_pg(session_name, message)
 
 
+async def notify_session_banned(session_name: str, message: str) -> None:
+    """In-memory health clump + PG accounts для окончательно заблокированной сессии."""
+    pc = find_parser_client(session_name)
+    if pc is not None:
+        pc.health.mark_banned(message)
+    await _persist_banned_pg(session_name, message)
+
+
 async def notify_session_reauthorized(session_name: str) -> bool:
     """In-memory health clump + PG accounts после успешной re-auth."""
     pc = find_parser_client(session_name)

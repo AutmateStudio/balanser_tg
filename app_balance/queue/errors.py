@@ -116,6 +116,13 @@ def map_clump_error_message(err: str) -> QueueTaskError:
             retry_after_seconds=account_unauthorized_retry_seconds(),
         )
 
+    if "authorization key (session file) was used under two different ip addresses" in lowered:
+        return RetryableError(
+            ErrorCode.ACCOUNT_UNAUTHORIZED,
+            text,
+            retry_after_seconds=account_unauthorized_retry_seconds(),
+        )
+
     # Бан в конкретном канале — permanent для задачи, но не глобальный бан аккаунта.
     if (
         "userbannedinchannel" in normalized
@@ -230,10 +237,20 @@ def map_telethon_exception(exc: BaseException) -> QueueTaskError:
     try:
         from discovery_api.session_health import (
             classify_telethon_error,
+            is_conflicting_auth_key_error,
             is_session_unauthorized_error,
         )
     except ImportError:
         return RetryableError(TRANSIENT, str(exc))
+
+    # Сессию баним, но саму задачу оставляем retryable: dispatch снимет account_id
+    # и вернёт задачу в очередь для другого аккаунта.
+    if is_conflicting_auth_key_error(exc):
+        return RetryableError(
+            ErrorCode.ACCOUNT_UNAUTHORIZED,
+            str(exc) or ErrorCode.ACCOUNT_UNAUTHORIZED,
+            retry_after_seconds=account_unauthorized_retry_seconds(),
+        )
 
     if is_session_unauthorized_error(exc):
         return RetryableError(

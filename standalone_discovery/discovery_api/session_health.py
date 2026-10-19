@@ -24,6 +24,10 @@ _UNAUTHORIZED_MESSAGE_MARKERS = (
     "session not authorized",
 )
 
+_CONFLICTING_AUTH_KEY_MESSAGE_MARKERS = (
+    "authorization key (session file) was used under two different ip addresses",
+)
+
 # Текст FloodWait-ошибок из resolve-пути выглядит как "FloodWait 42s ...".
 _FLOOD_WAIT_RE = re.compile(r"FloodWait\s+(\d+)\s*s", re.IGNORECASE)
 
@@ -87,12 +91,22 @@ _TRANSIENT_ERRORS: Tuple[type[BaseException], ...] = (
 
 def is_session_unauthorized_error(exc: BaseException) -> bool:
     """True, если .session есть, но login отсутствует (не путать с ban/revoke)."""
-    if isinstance(exc, _BANNED_ERRORS):
+    if isinstance(exc, _BANNED_ERRORS) or is_conflicting_auth_key_error(exc):
         return False
     if isinstance(exc, te.UnauthorizedError):
         return True
     msg = str(exc).lower()
     return any(marker in msg for marker in _UNAUTHORIZED_MESSAGE_MARKERS)
+
+
+def is_conflicting_auth_key_error(exc: BaseException | str) -> bool:
+    """True для auth_key, одновременно использованного с двух IP.
+
+    В watchdog такая ошибка иногда приходит не как AuthKeyDuplicatedError,
+    а как RuntimeError с текстом от Telegram, поэтому проверяем и сообщение.
+    """
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _CONFLICTING_AUTH_KEY_MESSAGE_MARKERS)
 
 
 def classify_telethon_error(exc: BaseException) -> Tuple[ErrorKind, Optional[int]]:
@@ -111,7 +125,7 @@ def classify_telethon_error(exc: BaseException) -> Tuple[ErrorKind, Optional[int
     if isinstance(exc, (te.FloodWaitError, te.FloodError)):
         seconds = int(getattr(exc, "seconds", 0) or 0)
         return "flood", seconds
-    if isinstance(exc, _BANNED_ERRORS):
+    if is_conflicting_auth_key_error(exc) or isinstance(exc, _BANNED_ERRORS):
         return "banned", None
     if isinstance(exc, te.UnauthorizedError) or is_session_unauthorized_error(exc):
         return "unauthorized", None

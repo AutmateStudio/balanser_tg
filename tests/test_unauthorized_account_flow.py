@@ -29,6 +29,9 @@ _UNAUTH_MSG = (
     "Сессия '/app/sessions/test4' не авторизована; "
     "войдите в аккаунт для этой session"
 )
+_CONFLICT_MSG = (
+    "The authorization key (session file) was used under two different IP addresses simultaneously"
+)
 
 
 # --- 1. Классификация ошибок ---
@@ -53,6 +56,18 @@ def test_is_session_unauthorized_distinguishes_ban_from_missing_login() -> None:
     assert is_session_unauthorized_error(RuntimeError(_UNAUTH_MSG)) is True
     assert is_session_unauthorized_error(te.UserDeactivatedError(None)) is False
     assert is_session_unauthorized_error(te.SessionRevokedError(None)) is False
+
+
+def test_conflicting_auth_key_is_banned_but_task_retryable() -> None:
+    exc = RuntimeError(_CONFLICT_MSG)
+
+    kind, _seconds = classify_telethon_error(exc)
+    mapped = map_telethon_exception(exc)
+
+    assert kind == "banned"
+    assert isinstance(mapped, RetryableError)
+    assert mapped.code == ErrorCode.ACCOUNT_UNAUTHORIZED
+    assert is_session_unauthorized_error(exc) is False
 
 
 def test_map_layers_agree_on_account_unauthorized_code() -> None:
