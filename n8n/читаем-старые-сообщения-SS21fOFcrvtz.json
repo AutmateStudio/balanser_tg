@@ -296,11 +296,5 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": {
-    "node:Раз в день": {
-      "recurrenceRules": []
-    }
-  },
-  "pinData": {},
   "meta": null
 }

@@ -431,7 +431,7 @@
           "parameters": [
             {
               "name": "X-API-Key",
-              "value": "hvOoL4RQZ6QOKUEKGk8cfJlE0ZONAT+b04qbCALgmDQ"
+              "value": "replace-me"
             },
             {
               "name": "Content-Type",
@@ -814,8 +814,6 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": null,
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true
   }

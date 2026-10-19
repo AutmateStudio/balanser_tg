@@ -86,7 +86,7 @@
             },
             {
               "name": "cookie",
-              "value": "remixlang=0;remixstid=619394827_eV0nVJAoUhRHsWm5s4LuSW9MgVNwAuD0j9WN1YEyrGD;remixuacck=b26ba5ae3ed757199c;remixcolor_scheme_mode=auto;remixdt=0;remixdmgr=ab802bf5cdcd166d9b8613ba4e48725cb1ed63fd4210d15a7ad4edc4954ab3fa;_ga=GA1.1.955808580.1759834375;_ym_uid=1759834375719052331;_ym_d=1759834375;tmr_lvid=0422962bed0e35a206dbab758bd1b422;tmr_lvidTS=1759835556164;remixuas=ZThiMWFmZjRkYWViNDMwODVmMGI3Mzhh;remixstlid=9088059490202565866_kbzOXKMz6LQrAuAOT9fZ2zKpkB5xW09QOOkOBBQWQTX;remixsf=1;remixrefkey=1ab1dacdc0da1c55e9;_ga_04L1QYDPKP=GS2.1.s1769758632$o6$g1$t1769758742$j59$l0$h0;remixscreen_orient=1;remixua=52%7C628%7C180%7C1977333106;remixcurr_audio=null;remixmaudio=null;remixage18=1;prcl=17758e4905f678;remixdark_color_scheme=0;remixpuad=6tYcgh-BPf9QNdnVvi6QUYHVCi6KwxoPDAaM22CJktk;remixsid=1_wUQ_KAmZk2KVOdvyV0Or4cvOCNqABq7k4q_sX-dSMpQnMFPUhc64KsfkRZSHokT8VKdrrXcOfJ9JeGhDW5Rv-A;remixseenads=4;remixgp=004be9e883e6805f8d84415653eff90c;httoken=5PjJ2NyoAhuTrGyhucHKpRywjEvutUsC6muOhJR50EuQjYACNVetZWVyhpqPNrVDz06nyivmHzULHUs50mJHdWxQ4dP686NZWTQIINR8336g35zYl_4eNVI5xDO8uk_zY14;remixscreen_width=2560;remixscreen_height=1440;remixscreen_dpr=1;remixscreen_depth=24;remixscreen_winzoom=1.62;remixrt=0;remixsts=%7B%22data%22%3A%5B%5B1774969027%2C%22entries_requests%22%2C1%2C%22core_spa_vk%22%2C%22core_spa%22%5D%2C%5B1774969027%2C%22entries_requests%22%2C1%2C%22ui_common%22%2C%22web%22%5D%2C%5B1774969027%2C%22entries_requests%22%2C1%2C%22notifier%22%2C%22web%22%5D%2C%5B1774969027%2C%22entries_requests%22%2C1%2C%22likes%22%2C%22web%22%5D%5D%2C%22uniqueId%22%3A430683403.6585834%7D;"
+              "value": "replace-me"
             }
           ]
         },
@@ -128,7 +128,7 @@
             },
             {
               "name": "access_token",
-              "value": "vk1.a.ONw0XIDtiQ-3Qt8oqjKsEEyrAiNMz4wZqm9I5NK19wN4feKpCHZOB4PwUy3AQ1olhEIAmWedIJpDO96YqdEkxCQ3kjwyuyPoVywLMEQX6pWKUb3_1Em1em1A0rLZDICtnaAJ4vjDoAX9Ei7JiZBE93xgy6S8woIK1XR3D_7lIgec6dn2GAp6axzLVQ7ScP5qX1Nf3rNCee3N8OR-GUyx8g"
+              "value": "replace-me"
             }
           ]
         },
@@ -162,7 +162,5 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": null,
-  "pinData": {},
   "meta": null
 }

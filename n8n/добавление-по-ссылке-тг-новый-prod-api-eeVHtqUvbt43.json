@@ -722,8 +722,6 @@
     "availableInMCP": false,
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "staticData": null,
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true
   }

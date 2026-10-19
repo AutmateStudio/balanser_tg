@@ -160,11 +160,5 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": {
-    "node:Каждые 10 секунд": {
-      "recurrenceRules": []
-    }
-  },
-  "pinData": {},
   "meta": null
 }

@@ -741,11 +741,5 @@
     "availableInMCP": false,
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "staticData": {
-    "node:Every 1m1": {
-      "recurrenceRules": []
-    }
-  },
-  "pinData": {},
   "meta": null
 }

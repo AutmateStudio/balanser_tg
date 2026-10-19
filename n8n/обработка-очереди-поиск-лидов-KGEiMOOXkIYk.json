@@ -2457,8 +2457,6 @@
     "saveDataSuccessExecution": "none",
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "staticData": null,
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true
   }

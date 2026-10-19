@@ -9,7 +9,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl import functions, types
 
-from discovery_api.config import get_lidgen_discovery_concurrency, get_lidgen_min_score_total
+from discovery_api.config import get_lidgen_discovery_concurrency
 from discovery_api.score_channel.lidgen_scorer import score_channel_for_lidgen, score_group_for_lidgen
 from discovery_api.score_channel.signal_collector import collect_lidgen_signals
 
@@ -400,6 +400,19 @@ async def _score_discovered_channel_lidgen(
     )
 
 
+def rank_discovered_channels(channels: List[DiscoveredChannel]) -> List[DiscoveredChannel]:
+    """Все каналы после скоринга, без отсечения по порогу.
+
+    Порядок: score_total по убыванию, при равенстве — больше участников,
+    затем меньшая глубина обхода.
+    """
+    return sorted(
+        channels,
+        key=lambda c: (int(c.score_total or 0), int(c.participants_count or 0), -int(c.depth or 0)),
+        reverse=True,
+    )
+
+
 async def _discover(
     client: TelegramClient,
     query: str,
@@ -493,13 +506,8 @@ async def _discover(
             if next_depth < max_depth:
                 queue.append((rec, next_depth, rec.id))
 
-    min_score_total = get_lidgen_min_score_total()
-    filtered = [c for c in all_channels if int(c.score_total or 0) >= min_score_total]
-    filtered_depth: Dict[int, int] = {}
-    for c in filtered:
-        filtered_depth[c.depth] = filtered_depth.get(c.depth, 0) + 1
-    ranked = sorted(filtered, key=lambda c: (c.score_total, int(c.participants_count or 0), -c.depth), reverse=True)
-    return DiscoveryResult(query=query, channels=ranked, total=len(ranked), depth_stats=filtered_depth)
+    ranked = rank_discovered_channels(all_channels)
+    return DiscoveryResult(query=query, channels=ranked, total=len(ranked), depth_stats=depth_stats)
 
 
 def _generate_group_seeds(word: str, max_seeds: int = 20) -> List[str]:

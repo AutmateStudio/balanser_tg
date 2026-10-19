@@ -289,13 +289,16 @@ class BundleToTelethonTests(unittest.TestCase):
             fake_tdesk = MagicMock()
             fake_tdesk.isLoaded.return_value = True
 
+            converted_client = MagicMock()
+            converted_client.disconnect = AsyncMock()
+
             async def _to_telethon(*, session, flag, api, password=None, **kwargs):
                 self.assertIs(flag, use_current)
                 self.assertIs(api, api_desktop)
                 base = session if not str(session).endswith(".session") else session[: -len(".session")]
                 with open(base + ".session", "wb") as f:
                     f.write(b"ok")
-                return MagicMock()
+                return converted_client
 
             fake_tdesk.ToTelethon = AsyncMock(side_effect=_to_telethon)
 
@@ -319,6 +322,8 @@ class BundleToTelethonTests(unittest.TestCase):
 
             self.assertTrue(os.path.isfile(dest))
             fake_tdesk.ToTelethon.assert_awaited_once()
+            converted_client.disconnect.assert_awaited_once()
+            converted_client.session.close.assert_called_once()
 
 
 class SessionIdentityTests(unittest.TestCase):

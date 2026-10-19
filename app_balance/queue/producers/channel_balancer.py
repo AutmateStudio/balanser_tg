@@ -16,6 +16,7 @@ dedup_key и target_queue_size обеспечиваются BaseProducer (F1).
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -30,6 +31,7 @@ log = logging.getLogger(__name__)
 MOVE_CHANNEL = "move_channel"
 CREATED_BY = "channel_balancer"
 SKEW_THRESHOLD = 0.05
+_REBALANCE_EXCLUDE_ENV = "REBALANCE_EXCLUDE_ACCOUNTS"
 
 # Снимок (parser_id, clump) загруженных clump'ов реестра.
 ClumpsProvider = Callable[[], list[tuple[str, Any]]]
@@ -39,6 +41,34 @@ def _default_clumps_provider() -> list[tuple[str, Any]]:
     from discovery_api.session_registry import iter_clumps
 
     return iter_clumps()
+
+
+def _session_basename(session_name: str) -> str:
+    token = (session_name or "").strip().replace("\\", "/").rstrip("/").split("/")[-1]
+    if token.lower().endswith(".session"):
+        token = token[: -len(".session")]
+    return token.lstrip("@")
+
+
+def rebalance_exclude_names() -> set[str]:
+    """Сессии вне ребаланса: каналы не уезжают и чужие на них не приезжают.
+
+    `REBALANCE_EXCLUDE_ACCOUNTS` — список session_name через запятую.
+    Слушатель при этом не останавливается: аккаунт остаётся в clump.
+    """
+    names: set[str] = set()
+    for part in os.getenv(_REBALANCE_EXCLUDE_ENV, "").split(","):
+        token = _session_basename(part)
+        if token:
+            names.add(token.casefold())
+    return names
+
+
+def session_excluded_from_rebalance(session_name: str) -> bool:
+    names = rebalance_exclude_names()
+    if not names:
+        return False
+    return _session_basename(session_name).casefold() in names
 
 
 def _dedup_key(channel_id: int, source_id: int, target_id: int) -> str:
@@ -92,6 +122,12 @@ class ChannelBalancerProducer(BaseProducer):
             for pc in getattr(clump, "parser_client_list", None) or []:
                 session_name = getattr(pc, "session_name", None)
                 if not session_name:
+                    continue
+                if session_excluded_from_rebalance(session_name):
+                    log.info(
+                        "channel_balancer: session=%s исключена из ребаланса",
+                        session_name,
+                    )
                     continue
                 existing = session_to_parser.get(session_name)
                 if existing is not None and existing != parser_id:

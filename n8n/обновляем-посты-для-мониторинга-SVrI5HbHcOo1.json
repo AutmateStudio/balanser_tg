@@ -496,18 +496,6 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": {
-    "node:В полночь": {
-      "recurrenceRules": []
-    },
-    "node:Раз в час": {
-      "recurrenceRules": []
-    },
-    "node:Раз в 20 минут": {
-      "recurrenceRules": []
-    }
-  },
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true
   }

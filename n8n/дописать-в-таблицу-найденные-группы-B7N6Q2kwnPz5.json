@@ -212,7 +212,7 @@
             },
             {
               "name": "access_token",
-              "value": "vk1.a.sqMCIjyTUej8NH5M6HqwXBGmBaKeSt7_Xr5JDShpUAZ5yR4wE1AVPAHbi-5dCk3Zvo_3J5E1sOAvREvYaZJ4EyAaLiGrlzu9SWYxrKcOA46Pic2DxNljE6cu6PN41v9OCM5uk5bKbgBS81Nq6extwiXlT9mxzPm16PLV7HMS1wNGkzz5jDsnkydCCiiOXl0TF5s0ypFXFXF1iSavYGVSTA"
+              "value": "replace-me"
             }
           ]
         },
@@ -386,7 +386,5 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": null,
-  "pinData": {},
   "meta": null
 }

@@ -360,7 +360,5 @@
     "availableInMCP": false,
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "staticData": null,
-  "pinData": {},
   "meta": null
 }
