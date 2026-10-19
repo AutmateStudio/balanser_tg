@@ -1750,7 +1750,7 @@
             {
               "id": "a00000002",
               "name": "apiKey",
-              "value": "=vfLTbTq3+wR9GI95rFXhNB8nx0rYmqUxZ6LpA2DtKn0=",
+              "value": "replace-me",
               "type": "string"
             },
             {
@@ -2235,7 +2235,5 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": null,
-  "pinData": {},
   "meta": null
 }

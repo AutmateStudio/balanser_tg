@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import time
@@ -19,8 +20,12 @@ from discovery_api.config import (
     get_http_pool_limit,
     get_http_timeout_seconds,
     get_queue_maxsize,
+    get_telegram_ingress_mode,
     get_webhook_api_key,
 )
+from discovery_api.redis_ingress import close as close_redis_ingress
+from discovery_api.redis_ingress import enabled as redis_ingress_enabled
+from discovery_api.redis_ingress import publish as publish_to_redis
 from discovery_api.chat_resolve import (
     ChannelHasNoDiscussionError,
     ChatAccessError,
@@ -64,10 +69,39 @@ _stats: dict[str, int] = {
     "webhook_errors": 0,
     "retried": 0,
     "failed": 0,
+    "duplicates": 0,
     "webhook_received": 0,
     "identity_attached": 0,
     "identity_miss": 0,
 }
+
+
+class WebhookDuplicateError(Exception):
+    """Сообщение уже записано в source_messages. Повторная отправка не нужна."""
+
+
+def _response_text(body: Any) -> str:
+    if isinstance(body, str):
+        return body
+    try:
+        return json.dumps(body, ensure_ascii=False)
+    except TypeError:
+        return str(body)
+
+
+def is_duplicate_webhook_rejection(text: str) -> bool:
+    lowered = text.lower()
+    return "duplicate key" in lowered or "uq_source_messages_channel_external" in lowered
+
+
+def _envelope_ids(item: dict[str, Any]) -> tuple[Any, Any]:
+    nested = item.get("telegram_message")
+    message = nested if isinstance(nested, dict) else {}
+    chat_id = item.get("chat_id")
+    if chat_id is None:
+        chat_id = message.get("chat_id")
+    message_id = item.get("message_id") or item.get("id") or message.get("id")
+    return chat_id, message_id
 
 # In-memory кеш публичной информации об отправителях. Ключ — sender_id (int),
 # значение — (timestamp последнего обновления, словарь sender-полей).
@@ -133,11 +167,14 @@ class AsyncSender:
                 else:
                     body = await response.text()
                 if response.status >= 400:
+                    text = _response_text(body)[:500]
+                    if is_duplicate_webhook_rejection(text):
+                        raise WebhookDuplicateError(text)
                     raise aiohttp.ClientResponseError(
                         response.request_info,
                         response.history,
                         status=response.status,
-                        message=f"webhook HTTP {response.status}",
+                        message=f"webhook HTTP {response.status}: {text}",
                         headers=response.headers,
                     )
                 return body
@@ -185,10 +222,20 @@ async def _dispatch_queue_worker() -> None:
         item = await _message_queue.get()
         try:
             last_exc: BaseException | None = None
+            chat_id, message_id = _envelope_ids(item)
             for attempt in range(1, _WEBHOOK_MAX_ATTEMPTS + 1):
                 try:
                     await send_message_to_webhook(item)
                     _stats["delivered"] += 1
+                    last_exc = None
+                    break
+                except WebhookDuplicateError:
+                    _stats["duplicates"] += 1
+                    log.info(
+                        "webhook duplicate rejected chat_id=%s message_id=%s",
+                        chat_id,
+                        message_id,
+                    )
                     last_exc = None
                     break
                 except Exception as exc:  # noqa: BLE001
@@ -201,7 +248,7 @@ async def _dispatch_queue_worker() -> None:
                             "webhook retry attempt=%s/%s chat_id=%s delay=%.1fs: %s",
                             attempt,
                             _WEBHOOK_MAX_ATTEMPTS,
-                            item.get("chat_id"),
+                            chat_id,
                             delay,
                             exc,
                         )
@@ -210,8 +257,8 @@ async def _dispatch_queue_worker() -> None:
                 _stats["failed"] += 1
                 log.error(
                     "webhook delivery failed permanently chat_id=%s message_id=%s: %s",
-                    item.get("chat_id"),
-                    item.get("message_id") or item.get("id"),
+                    chat_id,
+                    message_id,
                     last_exc,
                     exc_info=last_exc,
                 )
@@ -235,6 +282,7 @@ async def shutdown_webhook_dispatch() -> None:
             log.debug("shutdown: ошибка close AsyncSender %s", url[:48], exc_info=True)
     _webhook_senders.clear()
     _message_queue = None
+    await close_redis_ingress()
 
 
 def _ensure_dispatch_workers(n: int | None = None) -> None:
@@ -569,6 +617,14 @@ def _make_new_message_handler(
                     identity=identity,
                 ),
             }
+            if get_telegram_ingress_mode() == "redis" and redis_ingress_enabled():
+                try:
+                    await publish_to_redis(envelope)
+                    _stats["enqueued"] += 1
+                except Exception:
+                    _stats["dropped"] += 1
+                    log.exception("Redis Telegram ingress publish failed: chat_id=%s", chat_id)
+                return
             try:
                 queue.put_nowait(envelope)
                 _stats["enqueued"] += 1
@@ -846,8 +902,9 @@ async def run_session_listener(
     from discovery_api.session_registry import get_or_create_client
 
     queue = _ensure_message_queue()
-    _ensure_sender(webhook_url)
-    _ensure_dispatch_workers()
+    if get_telegram_ingress_mode() != "redis":
+        _ensure_sender(webhook_url)
+        _ensure_dispatch_workers()
 
     tg_client = client or await get_or_create_client(session_name)
     params: dict[str, Any] = {

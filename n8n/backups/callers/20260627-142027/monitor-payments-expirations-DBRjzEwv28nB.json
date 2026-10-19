@@ -335,12 +335,6 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": {
-    "node:Каждый день в 8 утра": {
-      "recurrenceRules": []
-    }
-  },
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true
   }

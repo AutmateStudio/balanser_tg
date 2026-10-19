@@ -526,6 +526,7 @@ async def _tdata_to_telethon(tdata_dir: str, target_path: str) -> None:
     except FileNotFoundError:
         pass
 
+    converted_client = None
     try:
         tdesk = TDesktop(tdata_dir)
         if not tdesk.isLoaded():
@@ -533,7 +534,7 @@ async def _tdata_to_telethon(tdata_dir: str, target_path: str) -> None:
                 "conversion_failed",
                 "Не удалось загрузить tdata",
             )
-        await tdesk.ToTelethon(
+        converted_client = await tdesk.ToTelethon(
             session=base,
             flag=UseCurrentSession,
             api=API.TelegramDesktop,
@@ -545,6 +546,29 @@ async def _tdata_to_telethon(tdata_dir: str, target_path: str) -> None:
             "conversion_failed",
             f"Конвертация tdata не удалась: {e}",
         ) from e
+
+    finally:
+        # opentele2 ?????????? TelegramClient ? ???????? SQLite-???????.
+        # ???? ??? ?? ???????, ????????? probe ??? ?? .session ????????
+        # `database is locked` ? ?????????? ?????? ??????????? ???????.
+        if converted_client is not None:
+            import inspect
+
+            try:
+                disconnect = getattr(converted_client, "disconnect", None)
+                if callable(disconnect):
+                    result = disconnect()
+                    if inspect.isawaitable(result):
+                        await result
+            except Exception:
+                pass
+            try:
+                session = getattr(converted_client, "session", None)
+                close = getattr(session, "close", None)
+                if callable(close):
+                    close()
+            except Exception:
+                pass
 
     if not os.path.isfile(sqlite_path):
         raise ArchiveSessionError(

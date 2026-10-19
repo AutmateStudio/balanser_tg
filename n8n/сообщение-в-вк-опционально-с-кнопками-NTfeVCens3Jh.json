@@ -286,8 +286,6 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": null,
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true
   }

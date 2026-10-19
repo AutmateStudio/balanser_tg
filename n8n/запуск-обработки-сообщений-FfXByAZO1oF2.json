@@ -153,12 +153,6 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": {
-    "node:Каждую минуту": {
-      "recurrenceRules": []
-    }
-  },
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true
   }

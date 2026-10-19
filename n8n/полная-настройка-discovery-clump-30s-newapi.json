@@ -7,7 +7,10 @@
       "name": "Старт вручную",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [0, 400]
+      "position": [
+        0,
+        400
+      ]
     },
     {
       "parameters": {
@@ -69,7 +72,10 @@
       "name": "Config",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [240, 400],
+      "position": [
+        240,
+        400
+      ],
       "notes": "Заполните apiKey, sessionList (имена .session без расширения), channels, webhookUrl. sessionName — для проверки discover."
     },
     {
@@ -81,7 +87,10 @@
       "name": "01 Health",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 400],
+      "position": [
+        480,
+        400
+      ],
       "continueOnFail": true
     },
     {
@@ -92,7 +101,10 @@
       "name": "Wait 30s — после Health",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [720, 400],
+      "position": [
+        720,
+        400
+      ],
       "webhookId": "w1000004-0004-4004-8004-000000000004"
     },
     {
@@ -103,7 +115,10 @@
       "name": "Сессии в список",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [960, 400]
+      "position": [
+        960,
+        400
+      ]
     },
     {
       "parameters": {
@@ -114,7 +129,10 @@
       "name": "QR по сессиям",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [1200, 400]
+      "position": [
+        1200,
+        400
+      ]
     },
     {
       "parameters": {
@@ -142,7 +160,10 @@
       "name": "02 QR создать",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1440, 280],
+      "position": [
+        1440,
+        280
+      ],
       "continueOnFail": true,
       "notes": "Отсканируйте qr_url из ответа в Telegram до истечения паузы 30с."
     },
@@ -154,7 +175,10 @@
       "name": "Wait 30s — скан QR",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [1680, 280],
+      "position": [
+        1680,
+        280
+      ],
       "webhookId": "w1000008-0008-4008-8008-000000000008"
     },
     {
@@ -175,7 +199,10 @@
       "name": "03 QR статус",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1920, 280],
+      "position": [
+        1920,
+        280
+      ],
       "continueOnFail": true,
       "notes": "Если status != success — запустите workflow снова или добавьте цикл IF+Wait."
     },
@@ -187,7 +214,10 @@
       "name": "Wait 30s — после QR",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [2160, 280],
+      "position": [
+        2160,
+        280
+      ],
       "webhookId": "w1000010-0010-4010-8010-000000000010"
     },
     {
@@ -216,7 +246,10 @@
       "name": "04 Parser start",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1440, 520],
+      "position": [
+        1440,
+        520
+      ],
       "continueOnFail": true
     },
     {
@@ -227,7 +260,10 @@
       "name": "Wait 30s — после start",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [1680, 520],
+      "position": [
+        1680,
+        520
+      ],
       "webhookId": "w1000012-0012-4012-8012-000000000012"
     },
     {
@@ -248,7 +284,10 @@
       "name": "05 Parser status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1920, 520],
+      "position": [
+        1920,
+        520
+      ],
       "continueOnFail": true
     },
     {
@@ -259,7 +298,10 @@
       "name": "Wait 30s — после status",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [2160, 520],
+      "position": [
+        2160,
+        520
+      ],
       "webhookId": "w1000014-0014-4014-8014-000000000014"
     },
     {
@@ -280,7 +322,10 @@
       "name": "06 Accounts all",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2400, 520],
+      "position": [
+        2400,
+        520
+      ],
       "continueOnFail": true,
       "notes": "Проверьте: session_file_exists, in_clump, connected, running = true."
     },
@@ -292,7 +337,10 @@
       "name": "Wait 30s — после accounts",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [2640, 520],
+      "position": [
+        2640,
+        520
+      ],
       "webhookId": "w1000016-0016-4016-8016-000000000016"
     },
     {
@@ -321,7 +369,10 @@
       "name": "07 Discover каналы",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2880, 520],
+      "position": [
+        2880,
+        520
+      ],
       "continueOnFail": true
     },
     {
@@ -332,7 +383,10 @@
       "name": "Wait 30s — после discover",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [3120, 520],
+      "position": [
+        3120,
+        520
+      ],
       "webhookId": "w1000018-0018-4018-8018-000000000018"
     },
     {
@@ -361,7 +415,10 @@
       "name": "08 Discover группы",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3360, 520],
+      "position": [
+        3360,
+        520
+      ],
       "continueOnFail": true
     },
     {
@@ -372,7 +429,10 @@
       "name": "Wait 30s — после discover-groups",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [3600, 520],
+      "position": [
+        3600,
+        520
+      ],
       "webhookId": "w1000020-0020-4020-8020-000000000020"
     },
     {
@@ -393,7 +453,10 @@
       "name": "09 Parser channels",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3840, 520],
+      "position": [
+        3840,
+        520
+      ],
       "continueOnFail": true
     },
     {
@@ -404,7 +467,10 @@
       "name": "Wait 30s — после channels",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [4080, 520],
+      "position": [
+        4080,
+        520
+      ],
       "webhookId": "w1000022-0022-4022-8022-000000000022"
     },
     {
@@ -425,7 +491,10 @@
       "name": "10 Queue metrics",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [4320, 520],
+      "position": [
+        4320,
+        520
+      ],
       "continueOnFail": true,
       "notes": "503 — PG-очередь выключена, это нормально если USE_PG_QUEUE=false."
     }
@@ -686,8 +755,6 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": null,
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": false
   }

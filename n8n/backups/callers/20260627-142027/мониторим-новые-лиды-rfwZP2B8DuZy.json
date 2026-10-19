@@ -188,12 +188,6 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": {
-    "node:Раз в минуту": {
-      "recurrenceRules": []
-    }
-  },
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true
   }

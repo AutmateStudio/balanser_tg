@@ -192,7 +192,7 @@
             },
             {
               "name": "access_token",
-              "value": "vk1.a.pEnDNFOm2hY2Vu0t7TovDoulkHiS_8fmrakUPeHUysAhFvdKdhtnyHhlWkdiLcymt8E4QB1KiaclOTovqaSB7TkqGm6_7YqqaOEbGOVXWcPNM7Gk9mSpaP32cVbEPozRCiQsBbnSYlPrCh5QUcBDSsbtRTSNoaZTYekBaEsgp1dgYmgmb5b2axFk9uCH2quRHuGGr9wEhP6DbCiH7YB-vw"
+              "value": "replace-me"
             },
             {
               "name": "v",
@@ -303,8 +303,6 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": null,
-  "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true
   }

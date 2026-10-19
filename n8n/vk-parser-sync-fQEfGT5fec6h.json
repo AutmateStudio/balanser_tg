@@ -402,11 +402,5 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "staticData": {
-    "node:Every 1m1": {
-      "recurrenceRules": []
-    }
-  },
-  "pinData": {},
   "meta": null
 }

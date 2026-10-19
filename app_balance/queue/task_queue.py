@@ -486,11 +486,29 @@ RETURNING attempt_count
 """
 
 # B5: отложить задачу без расхода ресурса и без increment attempt_count.
+# Ожидание слота (пейсинг, нет аккаунта, нехватка квоты) — не ошибка канала.
+# Такие откладывания не копят postpone_count и не доводят задачу до failed.
+_BACKPRESSURE_POSTPONE_REASONS = frozenset(
+    {
+        ErrorCode.PACING,
+        ErrorCode.NO_AVAILABLE_ACCOUNT,
+        ErrorCode.INSUFFICIENT_RESOURCE,
+        ErrorCode.MISSING_AVAILABILITY,
+    }
+)
+
+
+def postpone_counts_toward_limit(reason: str | None) -> bool:
+    """True, если эта отсрочка расходует лимит max_postpone_count."""
+    prefix = error_code_prefix(reason)
+    return prefix not in _BACKPRESSURE_POSTPONE_REASONS
+
+
 _POSTPONE_SQL = """
 UPDATE task_queue
 SET status = 'scheduled',
     run_after = now() + ($2 * interval '1 second'),
-    postpone_count = postpone_count + 1,
+    postpone_count = postpone_count + CASE WHEN $5::boolean THEN 1 ELSE 0 END,
     last_error = COALESCE($3, last_error),
     last_error_at = CASE WHEN $3 IS NOT NULL THEN now() ELSE last_error_at END,
     locked_by = NULL,
@@ -1159,9 +1177,12 @@ class TaskQueueRepo:
         """Отложить задачу: in_progress → scheduled без расхода ресурса.
 
         Инкрементирует postpone_count, снимает lock, не трогает attempt_count.
-        Если postpone_count уже достиг max_postpone_count типа задачи — failed.
+        Если отсрочка расходует лимит и postpone_count уже достиг
+        max_postpone_count типа задачи — failed.
+        Ожидание слота (pacing, нет аккаунта, нехватка квоты) лимит не тратит.
         False — задача уже не in_progress, lock чужой, либо упёрлась в лимит.
         """
+        counts = postpone_counts_toward_limit(reason)
         async with transaction() as conn:
             row = await conn.fetchrow(_POSTPONE_LOCK_SQL, task_id, locked_by)
             if row is None:
@@ -1170,7 +1191,7 @@ class TaskQueueRepo:
                     task_id,
                 )
                 return False
-            if int(row["postpone_count"]) >= int(row["max_postpone_count"]):
+            if counts and int(row["postpone_count"]) >= int(row["max_postpone_count"]):
                 await conn.fetchval(
                     _FAIL_SQL, task_id, "max_postpone_count", locked_by
                 )
@@ -1181,7 +1202,7 @@ class TaskQueueRepo:
                 )
                 return False
             result = await conn.execute(
-                _POSTPONE_SQL, task_id, delay_seconds, reason, locked_by
+                _POSTPONE_SQL, task_id, delay_seconds, reason, locked_by, counts
             )
             return int(result.split()[-1]) == 1
 
