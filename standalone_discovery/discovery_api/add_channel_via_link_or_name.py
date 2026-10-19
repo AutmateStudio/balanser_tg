@@ -83,8 +83,13 @@ async def add_channel_via_link(client: TelegramClient, link: str) -> Dict[str, A
         "peer_id": target.source_peer_id,
         "source_peer_id": target.source_peer_id,
         "listen_chat_id": target.listen_peer_id,
+        "listen_peer_ids": list(target.subscribed_peer_ids()),
         "entity_kind": target.entity_kind,
         "listen_mode": target.listen_mode,
+        **{
+            key: target.webhook_identity(target.listen_peer_id)[key]
+            for key in ("linked_peer_id", "source_peer_id", "listen_peer_id")
+        },
         "source_joined": target.source_joined,
         "listen_joined": target.listen_joined,
         "has_listen_access": target.has_listen_access,

@@ -44,9 +44,20 @@ async def get_telegram_platform_id() -> int:
     return _telegram_platform_id
 
 
+def marked_channel_peer_id(raw_id: int | None) -> int | None:
+    """Полный peer id. Положительный сырой id канала получает префикс `-100`."""
+    if raw_id is None:
+        return None
+    value = int(raw_id)
+    if value < 0:
+        return value
+    return int(f"-100{value}")
+
+
 def external_channel_id_from_peer(peer_id: int) -> str:
-    """Канонический external_channel_id (полный peer_id как строка, как в n8n)."""
-    return str(int(peer_id))
+    """Канонический external_channel_id: полный peer id строкой, без обрезки `-100`."""
+    marked = marked_channel_peer_id(peer_id)
+    return str(marked)
 
 
 def _linked_chat_id(item: DiscoverPersistItem) -> int | None:
@@ -83,11 +94,7 @@ def is_group_item(item: DiscoverPersistItem) -> bool:
 
 
 def should_persist_discovered(item: DiscoverPersistItem) -> bool:
-    """Broadcast — только с discussion; группы/supergroup — всегда."""
-    if is_group_item(item):
-        return True
-    if is_broadcast_channel_item(item):
-        return _linked_chat_id(item) is not None
+    """Каталог хранит и группы, и broadcast. Канал без discussion слушается как посты."""
     return True
 
 
@@ -99,10 +106,24 @@ def entity_kind_for_item(item: DiscoverPersistItem) -> str:
     return "unknown"
 
 
+def listen_mode_for_item(item: DiscoverPersistItem) -> str:
+    if is_group_item(item):
+        return "group_chat"
+    if _linked_chat_id(item) is not None:
+        return "discussion"
+    if is_broadcast_channel_item(item):
+        return "posts"
+    return "group_chat"
+
+
 def build_discovered_metadata(item: DiscoverPersistItem) -> dict[str, Any]:
     signals = item.score_signals or {}
     linked = _linked_chat_id(item)
     is_broadcast = is_broadcast_channel_item(item)
+    source_peer_id = marked_channel_peer_id(item.peer_id)
+    linked_peer_id = marked_channel_peer_id(linked)
+    mode = listen_mode_for_item(item)
+    listen_peer_id = linked_peer_id if mode == "discussion" and linked_peer_id is not None else source_peer_id
     return {
         "name": item.title,
         "username": item.username,
@@ -114,6 +135,10 @@ def build_discovered_metadata(item: DiscoverPersistItem) -> dict[str, Any]:
         "score_signals": dict(signals),
         "score_hard_flags": dict(item.score_hard_flags or {}),
         "linked_chat_id": linked,
+        "linked_peer_id": linked_peer_id,
+        "source_peer_id": source_peer_id,
+        "listen_peer_id": listen_peer_id,
+        "listen_mode": mode,
         "has_discussion": bool(linked) if is_broadcast else None,
         "entity_kind": entity_kind_for_item(item),
         "source": item.source,

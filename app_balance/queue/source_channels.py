@@ -161,10 +161,7 @@ WHERE sc.assigned_account_id IS NOT NULL
   AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())
   AND (
     NULLIF(BTRIM(sc.external_url), '') IS NOT NULL
-    OR (
-      NULLIF(BTRIM(sc.external_channel_id), '') IS NOT NULL
-      AND BTRIM(sc.external_channel_id) !~ '^-?[0-9]+$'
-    )
+    OR NULLIF(BTRIM(sc.external_channel_id), '') IS NOT NULL
   )
 ORDER BY sc.created_at ASC, sc.id ASC
 LIMIT $1
@@ -181,10 +178,7 @@ WHERE sc.assigned_account_id IS NOT NULL
   AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())
   AND (
     NULLIF(BTRIM(sc.external_url), '') IS NOT NULL
-    OR (
-      NULLIF(BTRIM(sc.external_channel_id), '') IS NOT NULL
-      AND BTRIM(sc.external_channel_id) !~ '^-?[0-9]+$'
-    )
+    OR NULLIF(BTRIM(sc.external_channel_id), '') IS NOT NULL
   )
   AND (sc.last_updated_at IS NULL
        OR sc.last_updated_at < now() - ($1 * interval '1 second'))
@@ -238,10 +232,7 @@ WHERE sc.assigned_account_id IS NOT NULL
       < now() - ($1 * interval '1 second')
   AND (
     NULLIF(BTRIM(sc.external_url), '') IS NOT NULL
-    OR (
-      NULLIF(BTRIM(sc.external_channel_id), '') IS NOT NULL
-      AND BTRIM(sc.external_channel_id) !~ '^-?[0-9]+$'
-    )
+    OR NULLIF(BTRIM(sc.external_channel_id), '') IS NOT NULL
   )
 ORDER BY COALESCE(link.last_link_at, sc.updated_at) ASC NULLS FIRST, sc.id ASC
 LIMIT $2
@@ -340,6 +331,22 @@ class StaleChannel:
     last_updated_at: datetime | None
 
 
+def channel_ref_from_ids(external_url: str | None, external_channel_id: str | None) -> str:
+    """Ссылка или peer, которые parser умеет резолвить, включая канал без username."""
+    url = (external_url or "").strip()
+    if url:
+        return url
+    ext = (external_channel_id or "").strip()
+    if not ext:
+        return ""
+    if ext.startswith("@") or ext.startswith("http://") or ext.startswith("https://") or "t.me/" in ext:
+        return ext
+    digits = ext[4:] if ext.startswith("-100") else ext.lstrip("-")
+    if digits.isdigit():
+        return f"https://t.me/c/{digits}"
+    return f"@{ext}"
+
+
 @dataclass(frozen=True, slots=True)
 class InactiveOnSessionChannel:
     """Канал на сессии без active-проекта и без активности ≥ порога (remove producer)."""
@@ -352,10 +359,7 @@ class InactiveOnSessionChannel:
     activity_at: datetime | None
 
     def ref(self) -> str:
-        url = (self.external_url or "").strip()
-        if url:
-            return url
-        return (self.external_channel_id or "").strip()
+        return channel_ref_from_ids(self.external_url, self.external_channel_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,13 +375,7 @@ class AssignedChannelDetail:
     last_updated_at: datetime | None
 
     def ref(self) -> str:
-        url = (self.external_url or "").strip()
-        if url:
-            return url
-        ext = (self.external_channel_id or "").strip()
-        if ext and not ext.startswith("@"):
-            return f"@{ext}"
-        return ext
+        return channel_ref_from_ids(self.external_url, self.external_channel_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -389,11 +387,8 @@ class ChannelRef:
     external_channel_id: str | None
 
     def ref(self) -> str:
-        """channel_ref для payload: external_url, fallback на external_channel_id."""
-        url = (self.external_url or "").strip()
-        if url:
-            return url
-        return (self.external_channel_id or "").strip()
+        """channel_ref для payload: external_url, иначе numeric peer или @username."""
+        return channel_ref_from_ids(self.external_url, self.external_channel_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,11 +400,8 @@ class CollectTarget:
     external_channel_id: str | None
 
     def ref(self) -> str:
-        """channel_ref для get_entity: external_url, fallback external_channel_id."""
-        url = (self.external_url or "").strip()
-        if url:
-            return url
-        return (self.external_channel_id or "").strip()
+        """channel_ref для get_entity: external_url, иначе numeric peer или @username."""
+        return channel_ref_from_ids(self.external_url, self.external_channel_id)
 
 
 class SourceChannelsRepo:
