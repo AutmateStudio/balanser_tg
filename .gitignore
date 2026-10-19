@@ -68,3 +68,6 @@ uploads/
 *.pre-*
 *.pre_*
 *.log
+
+**/client-sessions/
+**/.venv*/

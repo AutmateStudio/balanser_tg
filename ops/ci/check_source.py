@@ -16,6 +16,7 @@ for rel in filter(None,files):
     env_file=name=='.env' or name.startswith('.env.')
     env_example=name=='.env.example' or name.startswith('.env.') and name.endswith('.example')
     forbidden=(env_file and not env_example) or name in {'.ui-token','env.d12'} or name.endswith(('.session','.session-journal','.db','.db-wal','.db-shm','.sqlite','.sqlite3','.pem','.key','.ovpn','.bin','.safetensors'))
+    forbidden = forbidden or 'client-sessions' in p.relative_to(root).parts or any(part.startswith('.venv') for part in p.relative_to(root).parts)
     if forbidden:errors.append(f'{rel}: runtime/секретный файл в Git')
     try:
         if p.suffix=='.py':ast.parse(p.read_bytes(),filename=rel)
