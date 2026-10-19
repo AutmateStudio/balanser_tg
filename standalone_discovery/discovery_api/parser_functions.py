@@ -94,6 +94,20 @@ def _is_full_user_resolve_enabled() -> bool:
     }
 
 
+def _is_inline_sender_resolve_enabled() -> bool:
+    """Разрешает сетевой resolve отправителя прямо в Telethon handler.
+
+    По умолчанию выключен: handler обязан быстро положить событие в очередь,
+    иначе медленный Telegram RPC задерживает обработку следующих сообщений.
+    """
+    return os.getenv("PARSER_INLINE_SENDER_RESOLVE", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def reset_sender_cache() -> None:
     """Сбрасывает in-memory кеш sender-info. Используется в тестах."""
     _sender_cache.clear()
@@ -527,11 +541,13 @@ def _make_new_message_handler(
                 except Exception:
                     log.debug("on_event callback бросил исключение", exc_info=True)
 
-            try:
-                sender_info = await resolve_sender_info(event, client)
-            except Exception:
-                log.debug("resolve_sender_info failed", exc_info=True)
-                sender_info = {}
+            sender_info: dict[str, Any] | None = None
+            if _is_inline_sender_resolve_enabled():
+                try:
+                    sender_info = await resolve_sender_info(event, client)
+                except Exception:
+                    log.debug("resolve_sender_info failed", exc_info=True)
+                    sender_info = {}
 
             envelope = {
                 "webhook_url": webhook_url,
