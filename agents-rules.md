@@ -467,3 +467,8 @@ scripts/run_all_tests.sh         # единая команда для хоста
 - [`README.md`](README.md) — быстрый старт, Docker, pytest
 - [`docs(plan)/план-исполнения-s2-s3.md`](docs(plan)/план-исполнения-s2-s3.md) — критерии приёмки по задачам
 - [`docs(plan)/db-access-via-tailscale.md`](docs(plan)/db-access-via-tailscale.md) — доступ к dev-БД
+
+
+## Синхронизация production-исходников — 28.10.2026
+
+Production данного workspace размещён на VPS-104. Исторические команды для dev VPS-101 выше не являются командами выпуска production. Добавлены `.github/workflows/`, `ops/ci/`, `ops/pipeline.json` и `compose.ci.yml` для CI и отдельного source checkout. Сохранён `standalone_discovery/discovery_api/redis_ingress.py`; добавлен `standalone_discovery/tests/test_runtime_backfill.py`. Сессии, SQLite/runtime data и env.d12 исключены из новых коммитов.

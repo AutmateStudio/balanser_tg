@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import time
@@ -19,8 +20,12 @@ from discovery_api.config import (
     get_http_pool_limit,
     get_http_timeout_seconds,
     get_queue_maxsize,
+    get_telegram_ingress_mode,
     get_webhook_api_key,
 )
+from discovery_api.redis_ingress import close as close_redis_ingress
+from discovery_api.redis_ingress import enabled as redis_ingress_enabled
+from discovery_api.redis_ingress import publish as publish_to_redis
 from discovery_api.chat_resolve import (
     ChannelHasNoDiscussionError,
     ChatAccessError,
@@ -64,10 +69,36 @@ _stats: dict[str, int] = {
     "webhook_errors": 0,
     "retried": 0,
     "failed": 0,
-    "webhook_received": 0,
-    "identity_attached": 0,
-    "identity_miss": 0,
+    "duplicates": 0,
 }
+
+
+class WebhookDuplicateError(Exception):
+    """Сообщение уже записано в source_messages. Повторная отправка не нужна."""
+
+
+def _response_text(body: Any) -> str:
+    if isinstance(body, str):
+        return body
+    try:
+        return json.dumps(body, ensure_ascii=False)
+    except TypeError:
+        return str(body)
+
+
+def is_duplicate_webhook_rejection(text: str) -> bool:
+    lowered = text.lower()
+    return "duplicate key" in lowered or "uq_source_messages_channel_external" in lowered
+
+
+def _envelope_ids(item: dict[str, Any]) -> tuple[Any, Any]:
+    nested = item.get("telegram_message")
+    message = nested if isinstance(nested, dict) else {}
+    chat_id = item.get("chat_id")
+    if chat_id is None:
+        chat_id = message.get("chat_id")
+    message_id = item.get("message_id") or item.get("id") or message.get("id")
+    return chat_id, message_id
 
 # In-memory кеш публичной информации об отправителях. Ключ — sender_id (int),
 # значение — (timestamp последнего обновления, словарь sender-полей).
@@ -94,6 +125,20 @@ def _is_full_user_resolve_enabled() -> bool:
         "false",
         "no",
         "off",
+    }
+
+
+def _is_inline_sender_resolve_enabled() -> bool:
+    """Разрешает сетевой resolve отправителя прямо в Telethon handler.
+
+    По умолчанию выключен: handler обязан быстро положить событие в очередь,
+    иначе медленный Telegram RPC задерживает обработку следующих сообщений.
+    """
+    return os.getenv("PARSER_INLINE_SENDER_RESOLVE", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
     }
 
 
@@ -133,11 +178,14 @@ class AsyncSender:
                 else:
                     body = await response.text()
                 if response.status >= 400:
+                    text = _response_text(body)[:500]
+                    if is_duplicate_webhook_rejection(text):
+                        raise WebhookDuplicateError(text)
                     raise aiohttp.ClientResponseError(
                         response.request_info,
                         response.history,
                         status=response.status,
-                        message=f"webhook HTTP {response.status}",
+                        message=f"webhook HTTP {response.status}: {text}",
                         headers=response.headers,
                     )
                 return body
@@ -185,10 +233,20 @@ async def _dispatch_queue_worker() -> None:
         item = await _message_queue.get()
         try:
             last_exc: BaseException | None = None
+            chat_id, message_id = _envelope_ids(item)
             for attempt in range(1, _WEBHOOK_MAX_ATTEMPTS + 1):
                 try:
                     await send_message_to_webhook(item)
                     _stats["delivered"] += 1
+                    last_exc = None
+                    break
+                except WebhookDuplicateError:
+                    _stats["duplicates"] += 1
+                    log.info(
+                        "webhook duplicate rejected chat_id=%s message_id=%s",
+                        chat_id,
+                        message_id,
+                    )
                     last_exc = None
                     break
                 except Exception as exc:  # noqa: BLE001
@@ -201,7 +259,7 @@ async def _dispatch_queue_worker() -> None:
                             "webhook retry attempt=%s/%s chat_id=%s delay=%.1fs: %s",
                             attempt,
                             _WEBHOOK_MAX_ATTEMPTS,
-                            item.get("chat_id"),
+                            chat_id,
                             delay,
                             exc,
                         )
@@ -210,8 +268,8 @@ async def _dispatch_queue_worker() -> None:
                 _stats["failed"] += 1
                 log.error(
                     "webhook delivery failed permanently chat_id=%s message_id=%s: %s",
-                    item.get("chat_id"),
-                    item.get("message_id") or item.get("id"),
+                    chat_id,
+                    message_id,
                     last_exc,
                     exc_info=last_exc,
                 )
@@ -235,6 +293,7 @@ async def shutdown_webhook_dispatch() -> None:
             log.debug("shutdown: ошибка close AsyncSender %s", url[:48], exc_info=True)
     _webhook_senders.clear()
     _message_queue = None
+    await close_redis_ingress()
 
 
 def _ensure_dispatch_workers(n: int | None = None) -> None:
@@ -471,11 +530,7 @@ async def resolve_sender_info(
 
 
 def _telegram_message_payload(
-    msg: Any,
-    event: Any,
-    *,
-    sender_info: Optional[dict[str, Any]] = None,
-    identity: Optional[dict[str, Any]] = None,
+    msg: Any, event: Any, *, sender_info: Optional[dict[str, Any]] = None
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": msg.id,
@@ -488,17 +543,6 @@ def _telegram_message_payload(
         "is_group": event.is_group,
         "is_channel": event.is_channel,
     }
-    if identity:
-        for key in (
-            "source_peer_id",
-            "listen_peer_id",
-            "linked_chat_id",
-            "linked_peer_id",
-            "listen_mode",
-            "entity_kind",
-        ):
-            if key in identity:
-                data[key] = identity[key]
     if msg.reply_to:
         data["reply_to_msg_id"] = msg.reply_to.reply_to_msg_id
     if sender_info is not None:
@@ -513,7 +557,6 @@ def listen_for_events(params: dict[str, Any]) -> Any:
     webhook_url = params["webhook_url"]
     allowed_chat_ids: set[int] = params["allowed_chat_ids"]
     on_event = params.get("on_event")
-    listen_identities: dict[int, dict[str, Any]] = params.get("listen_identities") or {}
 
     handler = _make_new_message_handler(
         client=client,
@@ -521,7 +564,6 @@ def listen_for_events(params: dict[str, Any]) -> Any:
         queue=queue,
         webhook_url=webhook_url,
         on_event=on_event,
-        listen_identities=listen_identities,
     )
     client.add_event_handler(handler, events.NewMessage())
     return handler
@@ -534,19 +576,12 @@ def _make_new_message_handler(
     webhook_url: str,
     client: Optional[telethon.TelegramClient] = None,
     on_event: Optional[Any] = None,
-    listen_identities: Optional[dict[int, dict[str, Any]]] = None,
 ):
     async def handle_new_message(event: Any) -> None:
         try:
             chat_id = getattr(event, "chat_id", None)
             if chat_id is None or int(chat_id) not in allowed_chat_ids:
                 return
-            _stats["webhook_received"] += 1
-            identity = (listen_identities or {}).get(int(chat_id))
-            if identity is None:
-                _stats["identity_miss"] += 1
-            else:
-                _stats["identity_attached"] += 1
 
             if on_event is not None:
                 try:
@@ -554,21 +589,28 @@ def _make_new_message_handler(
                 except Exception:
                     log.debug("on_event callback бросил исключение", exc_info=True)
 
-            try:
-                sender_info = await resolve_sender_info(event, client)
-            except Exception:
-                log.debug("resolve_sender_info failed", exc_info=True)
-                sender_info = {}
+            sender_info: dict[str, Any] | None = None
+            if _is_inline_sender_resolve_enabled():
+                try:
+                    sender_info = await resolve_sender_info(event, client)
+                except Exception:
+                    log.debug("resolve_sender_info failed", exc_info=True)
+                    sender_info = {}
 
             envelope = {
                 "webhook_url": webhook_url,
                 **_telegram_message_payload(
-                    event.message,
-                    event,
-                    sender_info=sender_info,
-                    identity=identity,
+                    event.message, event, sender_info=sender_info
                 ),
             }
+            if get_telegram_ingress_mode() == "redis" and redis_ingress_enabled():
+                try:
+                    await publish_to_redis(envelope)
+                    _stats["enqueued"] += 1
+                except Exception:
+                    _stats["dropped"] += 1
+                    log.exception("Redis Telegram ingress publish failed: chat_id=%s", chat_id)
+                return
             try:
                 queue.put_nowait(envelope)
                 _stats["enqueued"] += 1
@@ -593,29 +635,11 @@ def _normalize_channel_ref(raw: str) -> str:
     return str(ref)
 
 
-def _remember_listen_target(
-    target: Any,
-    *,
-    listen_identities: Optional[dict[int, dict[str, Any]]] = None,
-    subscribed_ids: Optional[list[int]] = None,
-) -> int:
-    peers = [int(peer_id) for peer_id in target.subscribed_peer_ids()]
-    if subscribed_ids is not None:
-        subscribed_ids.clear()
-        subscribed_ids.extend(peers)
-    if listen_identities is not None:
-        for peer_id in peers:
-            listen_identities[peer_id] = target.webhook_identity(peer_id)
-    return int(target.listen_peer_id)
-
-
 async def resolve_channel_to_chat_id(
     client: telethon.TelegramClient,
     raw: str,
     *,
     join: bool = True,
-    listen_identities: Optional[dict[int, dict[str, Any]]] = None,
-    subscribed_ids: Optional[list[int]] = None,
 ) -> Tuple[Optional[int], Optional[str], Optional[str]]:
     """Превращает `@username` / `t.me/...` / числовой id в `chat_id` (int).
 
@@ -647,11 +671,7 @@ async def resolve_channel_to_chat_id(
         try:
             # Убеждаемся, что текущая сессия — участник (и при join=True вступаем).
             target = await resolve_listen_target(client, raw, join=join)
-            listen_peer_id = _remember_listen_target(
-                target,
-                listen_identities=listen_identities,
-                subscribed_ids=subscribed_ids,
-            )
+            listen_peer_id = int(target.listen_peer_id)
             set_cached_chat_id(normalized, listen_peer_id)
             return listen_peer_id, None, None
         except ChatAccessError as e:
@@ -686,11 +706,7 @@ async def resolve_channel_to_chat_id(
     try:
         log.info("parser resolve_channel_to_chat_id: ref=%s join=%s", raw, join)
         target = await resolve_listen_target(client, raw, join=join)
-        listen_peer_id = _remember_listen_target(
-            target,
-            listen_identities=listen_identities,
-            subscribed_ids=subscribed_ids,
-        )
+        listen_peer_id = int(target.listen_peer_id)
         set_cached_chat_id(cache_key, listen_peer_id)
         log.info(
             "parser resolve OK ref=%s listen_peer_id=%s kind=%s mode=%s "
@@ -741,7 +757,6 @@ async def _resolve_pending_usernames(
     client: telethon.TelegramClient,
     pending_usernames: list[str],
     allowed_chat_ids: set[int],
-    listen_identities: Optional[dict[int, dict[str, Any]]] = None,
 ) -> None:
     if not pending_usernames:
         return
@@ -760,16 +775,13 @@ async def _resolve_pending_usernames(
         try:
             log.info("parser pending resolve: ref=%s", raw_ref)
             target = await resolve_listen_target(client, raw_ref, join=True)
-            _remember_listen_target(target, listen_identities=listen_identities)
-            for peer_id in target.subscribed_peer_ids():
-                allowed_chat_ids.add(int(peer_id))
+            allowed_chat_ids.add(int(target.listen_peer_id))
             if cache_key:
                 set_cached_chat_id(cache_key, int(target.listen_peer_id))
             log.info(
-                "parser pending OK ref=%s listen_peer_id=%s peers=%s joined_src=%s joined_listen=%s",
+                "parser pending OK ref=%s listen_peer_id=%s joined_src=%s joined_listen=%s",
                 raw_ref,
                 target.listen_peer_id,
-                list(target.subscribed_peer_ids()),
                 target.source_joined,
                 target.listen_joined,
             )
@@ -793,9 +805,7 @@ async def _resolve_pending_usernames(
             await asyncio.sleep(seconds)
             try:
                 target = await resolve_listen_target(client, raw_ref, join=True)
-                _remember_listen_target(target, listen_identities=listen_identities)
-                for peer_id in target.subscribed_peer_ids():
-                    allowed_chat_ids.add(int(peer_id))
+                allowed_chat_ids.add(int(target.listen_peer_id))
                 if cache_key:
                     set_cached_chat_id(cache_key, int(target.listen_peer_id))
                 log.info(
@@ -834,7 +844,6 @@ async def run_session_listener(
     pending_refs: list[str] | None = None,
     client: Optional[telethon.TelegramClient] = None,
     on_event: Optional[Any] = None,
-    listen_identities: Optional[dict[int, dict[str, Any]]] = None,
 ) -> None:
     """
     Один listener на session_name: handler + resolve pending + run_until_disconnected.
@@ -846,8 +855,9 @@ async def run_session_listener(
     from discovery_api.session_registry import get_or_create_client
 
     queue = _ensure_message_queue()
-    _ensure_sender(webhook_url)
-    _ensure_dispatch_workers()
+    if get_telegram_ingress_mode() != "redis":
+        _ensure_sender(webhook_url)
+        _ensure_dispatch_workers()
 
     tg_client = client or await get_or_create_client(session_name)
     params: dict[str, Any] = {
@@ -857,7 +867,6 @@ async def run_session_listener(
         "client": tg_client,
         "queue": queue,
         "on_event": on_event,
-        "listen_identities": listen_identities if listen_identities is not None else {},
     }
 
     handler = listen_for_events(params)
@@ -867,12 +876,7 @@ async def run_session_listener(
     try:
         if refs:
             resolve_task = asyncio.create_task(
-                _resolve_pending_usernames(
-                    tg_client,
-                    refs,
-                    allowed_chat_ids,
-                    listen_identities,
-                ),
+                _resolve_pending_usernames(tg_client, refs, allowed_chat_ids),
                 name="telegram-entity-resolve",
             )
         await tg_client.run_until_disconnected()

@@ -106,3 +106,5 @@ docs/deploy_roadmap.md    # ops: prod deploy (Tailscale, G max)
 
 Подробнее: [`docs/deploy_roadmap.md`](docs/deploy_roadmap.md) (prod),
 `docs(plan)/db-access-via-tailscale.md` (сеть и ACL).
+
+[Синхронизация с VPS от 28.10.2026](docs/runtime-sync-2026-10-28.md)
