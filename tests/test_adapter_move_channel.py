@@ -716,3 +716,9 @@ async def test_dispatch_move_channel_adapter_error_persists_retry(
     assert source_busy is None
     assert target_busy is None
     assert usage_count > 0
+
+
+@pytest.fixture(autouse=True)
+def _isolate_unit_dual_write(monkeypatch, request):
+    if request.node.get_closest_marker("integration") is None:
+        monkeypatch.delenv("QUEUE_DATABASE_URL", raising=False)

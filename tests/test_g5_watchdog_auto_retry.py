@@ -199,7 +199,8 @@ async def _force_timed_out(task_id: int, account_id: int) -> None:
         await conn.execute(
             """
             UPDATE task_queue
-            SET locked_at = now() - interval '10 seconds',
+            SET locked_until = now() - interval '1 second',
+                locked_at = now() - interval '10 seconds',
                 account_id = $2
             WHERE id = $1
             """,

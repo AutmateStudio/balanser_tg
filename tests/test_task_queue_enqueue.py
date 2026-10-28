@@ -177,7 +177,7 @@ async def test_enqueue_unknown_task_type_raises(clean_queue) -> None:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_enqueue_skips_after_fatal_failure(clean_queue) -> None:
-    """B12: канал, terminal failed с постоянной причиной (banned), не re-enqueue."""
+    """B12: канал, terminal failed с постоянной причиной (channel_private), не re-enqueue."""
     repo = TaskQueueRepo()
     key = _unique_key()
 
@@ -186,7 +186,7 @@ async def test_enqueue_skips_after_fatal_failure(clean_queue) -> None:
     )
     async with db.acquire() as conn:
         await conn.execute(
-            "UPDATE task_queue SET status = 'failed', last_error = 'banned:test' "
+            "UPDATE task_queue SET status = 'failed', last_error = 'channel_private:test' "
             "WHERE id = $1",
             first.task_id,
         )
@@ -197,7 +197,7 @@ async def test_enqueue_skips_after_fatal_failure(clean_queue) -> None:
 
     assert second.created is False
     assert second.skipped_reason == "fatal_history"
-    assert second.fatal_error_code == "banned"
+    assert second.fatal_error_code == "channel_private"
     assert second.existing_task_id == first.task_id
 
     async with db.acquire() as conn:
@@ -423,6 +423,9 @@ async def dedup_channel_row(pg_pool):
         )
     yield channel_id
     async with db.acquire() as conn:
+        await conn.execute("DELETE FROM account_resource_usage WHERE task_id IN (SELECT id FROM task_queue WHERE channel_id = $1)", channel_id)
+        await conn.execute("DELETE FROM task_attempts WHERE task_id IN (SELECT id FROM task_queue WHERE channel_id = $1)", channel_id)
+        await conn.execute("DELETE FROM task_queue WHERE channel_id = $1", channel_id)
         await conn.execute("DELETE FROM source_channels WHERE id = $1", channel_id)
         await conn.execute("DELETE FROM platforms WHERE id = $1", platform_id)
 

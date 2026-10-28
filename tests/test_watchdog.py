@@ -200,7 +200,8 @@ async def test_mark_stuck_timed_out_releases_account(clean_queue) -> None:
         await conn.execute(
             """
             UPDATE task_queue
-            SET locked_at = now() - interval '10 seconds',
+            SET locked_until = now() - interval '1 second',
+                locked_at = now() - interval '10 seconds',
                 account_id = $2
             WHERE id = $1
             """,
@@ -247,7 +248,7 @@ async def test_watchdog_tick_once_integration(clean_queue, caplog) -> None:
             "WHERE code = 'parser_add_channel'"
         )
         await conn.execute(
-            "UPDATE task_queue SET locked_at = now() - interval '5 seconds' "
+            "UPDATE task_queue SET locked_until = now() - interval '1 second', locked_at = now() - interval '5 seconds' "
             "WHERE id = $1",
             task_id,
         )
@@ -282,7 +283,7 @@ async def test_release_orphan_account_locks(clean_queue) -> None:
     assert await accounts.reserve(account_id, task_id)
 
     # Завершаем задачу без accounts.release → orphan lock
-    assert await repo.complete(task_id) == "done"
+    assert await repo.complete(task_id) is True
     async with db.acquire() as conn:
         cur = await conn.fetchval(
             "SELECT current_task_id FROM accounts WHERE id = $1", account_id
@@ -321,7 +322,8 @@ async def test_mark_stuck_uses_started_at_when_locked_at_null(clean_queue) -> No
         await conn.execute(
             """
             UPDATE task_queue
-            SET locked_at = NULL,
+            SET locked_until = now() - interval '1 second',
+                locked_at = NULL,
                 started_at = now() - interval '10 seconds',
                 account_id = $2
             WHERE id = $1
@@ -356,7 +358,7 @@ async def test_watchdog_tick_clears_orphans(clean_queue) -> None:
     claimed = await repo.claim_next(locked_by="tick-orphan", task_type_codes=_CODES)
     assert claimed is not None
     assert await accounts.reserve(account_id, task_id)
-    assert await repo.complete(task_id) == "done"
+    assert await repo.complete(task_id) is True
 
     stop = asyncio.Event()
     watchdog = StuckTaskWatchdog(repo, interval_seconds=30.0, stop=stop)
@@ -383,7 +385,7 @@ async def test_complete_does_not_overwrite_stuck(clean_queue) -> None:
             "WHERE code = 'parser_add_channel'"
         )
         await conn.execute(
-            "UPDATE task_queue SET locked_at = now() - interval '5 seconds' "
+            "UPDATE task_queue SET locked_until = now() - interval '1 second', locked_at = now() - interval '5 seconds' "
             "WHERE id = $1",
             task_id,
         )

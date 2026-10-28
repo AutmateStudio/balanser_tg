@@ -200,7 +200,7 @@ async def test_busy_fixed_account_postpones_second_task_done(clean_queue) -> Non
     assert task1["postpone_count"] == 1
     assert task1["attempt_count"] == task1_attempt
     assert "account_reserve_failed" in (task1["last_error"] or "")
-    assert task1["account_id"] is None  # unassign → auto-pick на следующий claim
+    assert task1["account_id"] == busy_account_id  # Временная занятость не меняет назначение канала.
     assert task1["run_after"] > datetime.now(timezone.utc)
     assert task1["locked_by"] is None
     assert task1["locked_until"] is None
@@ -270,3 +270,8 @@ async def _wait_task_scheduled(task_id: int, *, timeout: float) -> None:
             return
         await asyncio.sleep(0.02)
     raise TimeoutError(f"task {task_id} not scheduled within {timeout}s")
+
+
+@pytest.fixture(autouse=True)
+def _mock_telegram_for_queue_tests(monkeypatch):
+    monkeypatch.setenv("WORKER_TASK_ADAPTER", "mock")

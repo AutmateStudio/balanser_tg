@@ -36,9 +36,9 @@ class ParserClientTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "discovery_api.parser_functions.resolve_channel_to_chat_id",
             new_callable=AsyncMock,
-            return_value=(-100555, None),
+            return_value=(-100555, None, None),
         ), patch.object(pc, "start", new_callable=AsyncMock):
-            chat_id, err = await pc.add_channel(
+            chat_id, err, error_code = await pc.add_channel(
                 "@chan", webhook_url="http://hook.example/h"
             )
 
@@ -82,7 +82,7 @@ class ParserClientTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "discovery_api.parser_functions.resolve_channel_to_chat_id",
             new_callable=AsyncMock,
-            return_value=(-1001, None),
+            return_value=(-1001, None, None),
         ):
             ok = await pc.remove_channel("@x")
 

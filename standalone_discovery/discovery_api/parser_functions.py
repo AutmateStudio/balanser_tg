@@ -530,7 +530,8 @@ async def resolve_sender_info(
 
 
 def _telegram_message_payload(
-    msg: Any, event: Any, *, sender_info: Optional[dict[str, Any]] = None
+    msg: Any, event: Any, *, sender_info: Optional[dict[str, Any]] = None,
+    identity: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": msg.id,
@@ -543,6 +544,11 @@ def _telegram_message_payload(
         "is_group": event.is_group,
         "is_channel": event.is_channel,
     }
+    if identity:
+        for key in ("source_peer_id", "listen_peer_id", "linked_chat_id",
+                    "linked_peer_id", "listen_mode", "entity_kind"):
+            if key in identity:
+                data[key] = identity[key]
     if msg.reply_to:
         data["reply_to_msg_id"] = msg.reply_to.reply_to_msg_id
     if sender_info is not None:

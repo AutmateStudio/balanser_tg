@@ -245,7 +245,7 @@ async def test_missing_availability_fails() -> None:
 
 
 @pytest.fixture
-async def resource_check_ctx(pg_pool):
+async def resource_check_ctx(pg_pool, monkeypatch):
     """Аккаунт + op/task_type из seed A9 для integration-тестов C5."""
     session_name = f"{_PREFIX}{uuid.uuid4().hex}"
     dedup_key = f"{_PREFIX}{uuid.uuid4().hex}"
@@ -257,6 +257,7 @@ async def resource_check_ctx(pg_pool):
         )
 
     await _cleanup()
+    monkeypatch.setenv("RESOURCE_MIN_AVAILABLE_PERCENT", "80")
 
     async with db.acquire() as conn:
         account_id = await conn.fetchval(
@@ -270,6 +271,10 @@ async def resource_check_ctx(pg_pool):
         op_type_id = await conn.fetchval(
             "SELECT id FROM resource_op_types WHERE code = 'get_entity'"
         )
+
+    async with db.acquire() as conn:
+        original_rph = await conn.fetchval("SELECT rph_limit FROM resource_op_types WHERE id = $1", op_type_id)
+        await conn.execute("UPDATE resource_op_types SET rph_limit = 2 WHERE id = $1", op_type_id)
 
     enqueue = await TaskQueueRepo().enqueue(
         EnqueueInput(task_type_code="parser_add_channel", dedup_key=dedup_key)
@@ -286,6 +291,8 @@ async def resource_check_ctx(pg_pool):
         "op_type_id": op_type_id,
         "task_type": task_type,
     }
+    async with db.acquire() as conn:
+        await conn.execute("UPDATE resource_op_types SET rph_limit = $2 WHERE id = $1", op_type_id, original_rph)
     await _cleanup()
 
 
@@ -631,3 +638,8 @@ async def test_dispatch_all_auto_pick_accounts_depleted_postpones(
         assert usage_count == 0
     finally:
         await _unlock_accounts(locked)
+
+
+@pytest.fixture(autouse=True)
+def _mock_telegram_for_queue_tests(monkeypatch):
+    monkeypatch.setenv("WORKER_TASK_ADAPTER", "mock")

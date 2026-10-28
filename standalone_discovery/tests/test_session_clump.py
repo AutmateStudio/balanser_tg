@@ -45,7 +45,7 @@ class SessionClumpTests(unittest.IsolatedAsyncioTestCase):
             cid = -2000 - counter["n"]
             self.allowed_chat_ids.add(cid)
             self.ref_to_chat_id[raw] = cid
-            return cid, None
+            return cid, None, None
 
         with patch(
             "discovery_api.session_registry.Parser_client.add_channel",
@@ -124,7 +124,7 @@ class SessionClumpTests(unittest.IsolatedAsyncioTestCase):
             cid = -9001
             self.allowed_chat_ids.add(cid)
             self.ref_to_chat_id[raw] = cid
-            return cid, None
+            return cid, None, None
 
         with patch(
             "discovery_api.session_registry.Parser_client.add_channel",
@@ -146,7 +146,7 @@ class SessionClumpTests(unittest.IsolatedAsyncioTestCase):
 
         async def _fake_add(self, raw, *, webhook_url=None):
             seen_wh.append(webhook_url)
-            return -1, None
+            return -1, None, None
 
         with patch(
             "discovery_api.session_registry.Parser_client.add_channel",
@@ -251,7 +251,7 @@ class SessionClumpTests(unittest.IsolatedAsyncioTestCase):
             cid = -3002
             self.allowed_chat_ids.add(cid)
             self.ref_to_chat_id[raw] = cid
-            return cid, None
+            return cid, None, None
 
         with patch(
             "discovery_api.session_registry.Parser_client.add_channel",

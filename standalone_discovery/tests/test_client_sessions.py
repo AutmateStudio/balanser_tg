@@ -302,5 +302,10 @@ def test_client_api_does_not_enroll_parser() -> None:
     root = Path(__file__).resolve().parents[1] / "discovery_api" / "client_sessions"
     text = "\n".join(path.read_text(encoding="utf-8") for path in root.glob("*.py"))
     assert "register_account_after_qr" not in text
-    main = (Path(__file__).resolve().parents[1] / "discovery_api" / "main.py").read_text(encoding="utf-8")
-    assert "client_router" in main
+    from discovery_api.main import app
+    from unittest.mock import patch
+
+    with patch.dict(os.environ, {"API_KEY": "client-router-test"}):
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/discovery-api/client-sessions/qr", json={"remote_account_id": ACCOUNT})
+    assert response.status_code == 401  # Mounted and protected by the API-key dependency.

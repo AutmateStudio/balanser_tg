@@ -22,6 +22,7 @@ from discovery_api.config import (
 )
 from discovery_api.parser_router import parser_router, restore_persisted_parsers, setup_parser_services
 from discovery_api.router import router
+from discovery_api.client_sessions.router import router as client_router
 from discovery_api.lead_intent.router import router as lead_intent_router
 from discovery_api.session_registry import (
     release_all,
@@ -306,6 +307,7 @@ async def _debug_request_ingest_middleware(request: Request, call_next):
 app.include_router(router, dependencies=[Depends(require_api_key)])
 app.include_router(lead_intent_router, dependencies=[Depends(require_api_key)])
 app.include_router(parser_router, dependencies=[Depends(require_api_key)])
+app.include_router(client_router, dependencies=[Depends(require_api_key)])
 
 
 async def _start_inactive_remove_loop() -> None:

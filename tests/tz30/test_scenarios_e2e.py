@@ -670,9 +670,9 @@ async def test_tz30_19_stuck_in_progress_becomes_stuck(tz30_clean) -> None:
         await conn.execute(
             """
             UPDATE task_queue
-            SET locked_at = now() - interval '10 seconds',
-                started_at = now() - interval '1 hour',
-                locked_until = now() + interval '1 hour'
+            SET locked_until = now() - interval '1 second',
+                locked_at = now() - interval '10 seconds',
+                started_at = now() - interval '1 hour'
             WHERE id = $1
             """,
             task_id,
