@@ -643,3 +643,8 @@ async def test_queue_prot_reexport() -> None:
     assert ExportedAdapter is ClumpTaskAdapter
     assert exported_execute is execute_task
 
+
+
+@pytest.fixture(autouse=True)
+def _isolate_unit_dual_write(monkeypatch):
+    monkeypatch.delenv("QUEUE_DATABASE_URL", raising=False)

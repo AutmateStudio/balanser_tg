@@ -42,7 +42,7 @@ class ParserStoreTests(unittest.TestCase):
             self.assertEqual(len(jobs), 1)
             self.assertEqual(jobs[0]["parser_id"], "a1")
             self.assertEqual(jobs[0]["allowed_chat_ids"], [-1001])
-            self.assertEqual(jobs[0]["schema_version"], 2)
+            self.assertEqual(jobs[0]["schema_version"], 3)
 
             parser_store.upsert_job(
                 {
@@ -98,7 +98,7 @@ class ParserStoreTests(unittest.TestCase):
         }
         norm = parser_store.normalize_persisted_record(legacy)
         self.assertEqual(norm["session_name_list"], ["/legacy"])
-        self.assertEqual(norm["schema_version"], 2)
+        self.assertEqual(norm["schema_version"], 3)
 
     def test_clump_to_record(self) -> None:
         from discovery_api.session_registry import SessionClump
@@ -107,12 +107,14 @@ class ParserStoreTests(unittest.TestCase):
         clump.assignments = {"@a": "/s1"}
         clump.parser_client_list[0].channels = ["@a"]
         clump.parser_client_list[0].allowed_chat_ids = {-1001}
+        clump.parser_client_list[0].ref_to_chat_id = {"@a": -1001}
 
         rec = parser_store.clump_to_record(clump, parser_id="pid-1")
         self.assertEqual(rec["parser_id"], "pid-1")
         self.assertEqual(rec["session_name_list"], ["/s1", "/s2"])
         self.assertEqual(rec["assignments"], {"@a": "/s1"})
-        self.assertEqual(rec["schema_version"], 2)
+        self.assertEqual(rec["schema_version"], 3)
+        self.assertEqual(rec["ref_to_chat_id"], {"@a": -1001})
 
 
 class ParserRestoreTests(unittest.TestCase):

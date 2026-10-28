@@ -7,6 +7,7 @@ SQL-слой реализован в DB/BD_schema.sql и DB/A8_integrate_main_db
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -480,3 +481,32 @@ async def test_v_channel_capacity_usage_assigned_channels(queue_ctx) -> None:
         await conn.execute("DELETE FROM platforms WHERE id = $1", platform_id)
 
     assert int(after["assigned_channels_total"]) == int(before["assigned_channels_total"]) + 1
+
+
+@pytest.mark.asyncio
+async def test_a12_preserves_current_bootstrap_columns_and_dependent_view(pg_pool) -> None:
+    """A12 must not drop A21 columns already present in the greenfield schema."""
+    sql_dir = Path(__file__).resolve().parents[1] / "DB"
+    async with db.acquire() as conn:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            await conn.execute('CREATE SCHEMA test_a12_bootstrap')
+            await conn.execute('SET LOCAL search_path TO test_a12_bootstrap')
+            await conn.execute((sql_dir / "BD_schema.sql").read_text())
+            await conn.execute(
+                'CREATE VIEW dependent_overview AS '
+                'SELECT pickable_accounts_count, busy_accounts_count, orphan_account_locks '
+                'FROM v_accounts_overview'
+            )
+            migration = (sql_dir / "A12_g7_monitoring_views.sql").read_text()
+            await conn.execute(migration)
+            await conn.execute(migration)
+            row = await conn.fetchrow('SELECT * FROM dependent_overview')
+            assert dict(row) == {
+                "pickable_accounts_count": 0,
+                "busy_accounts_count": 0,
+                "orphan_account_locks": 0,
+            }
+        finally:
+            await tx.rollback()

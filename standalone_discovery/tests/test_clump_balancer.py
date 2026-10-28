@@ -127,7 +127,7 @@ class MigrateChannelsTests(unittest.IsolatedAsyncioTestCase):
             self.channels.append(raw)
             self.allowed_chat_ids.add(cid)
             self.ref_to_chat_id[raw] = cid
-            return cid, None
+            return cid, None, None
 
         with patch(
             "discovery_api.session_registry.Parser_client.add_channel", _fake_add
@@ -171,7 +171,7 @@ class MigrateChannelsTests(unittest.IsolatedAsyncioTestCase):
             self.channels.append(raw)
             self.ref_to_chat_id[raw] = -1
             self.allowed_chat_ids.add(-1)
-            return -1, None
+            return -1, None, None
 
         with patch(
             "discovery_api.session_registry.Parser_client.add_channel", _fake_add
@@ -232,8 +232,8 @@ class BatchResilienceTests(unittest.IsolatedAsyncioTestCase):
         pc = clump.parser_client_list[0]
         pc.health.mark_connected()
 
-        async def _flood_resolve(client, raw):
-            return None, f"FloodWait 60s при resolve '{raw}'"
+        async def _flood_resolve(client, raw, *, join=True):
+            return None, f"FloodWait 60s при resolve '{raw}'", "flood_wait"
 
         with patch(
             "discovery_api.session_registry.get_or_create_client",
@@ -687,7 +687,7 @@ class RebalanceIdleTests(unittest.IsolatedAsyncioTestCase):
             s2.allowed_chat_ids.add(777)
             s2.ref_to_chat_id[raw] = 777
             s2.channels.append(raw)
-            return 777, None
+            return 777, None, None
 
         with patch.object(clump, "_in_idle_window", return_value=True), patch.object(
             s2, "add_channel", side_effect=_fake_add

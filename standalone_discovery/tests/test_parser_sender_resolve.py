@@ -101,10 +101,12 @@ class ResolveSenderInfoTests(unittest.TestCase):
     def setUp(self) -> None:
         pf.reset_sender_cache()
         os.environ["PARSER_RESOLVE_FULL_USER"] = "0"
+        os.environ["PARSER_INLINE_SENDER_RESOLVE"] = "1"
 
     def tearDown(self) -> None:
         pf.reset_sender_cache()
         os.environ.pop("PARSER_RESOLVE_FULL_USER", None)
+        os.environ.pop("PARSER_INLINE_SENDER_RESOLVE", None)
 
     def test_returns_unknown_for_missing_sender_id(self) -> None:
         event = SimpleNamespace(sender_id=None)
@@ -148,10 +150,12 @@ class HandlerIncludesSenderTests(unittest.TestCase):
     def setUp(self) -> None:
         pf.reset_sender_cache()
         os.environ["PARSER_RESOLVE_FULL_USER"] = "0"
+        os.environ["PARSER_INLINE_SENDER_RESOLVE"] = "1"
 
     def tearDown(self) -> None:
         pf.reset_sender_cache()
         os.environ.pop("PARSER_RESOLVE_FULL_USER", None)
+        os.environ.pop("PARSER_INLINE_SENDER_RESOLVE", None)
 
     def test_envelope_includes_sender(self) -> None:
         async def _run_handler() -> dict:

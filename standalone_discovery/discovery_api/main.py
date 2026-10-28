@@ -22,9 +22,8 @@ from discovery_api.config import (
 )
 from discovery_api.parser_router import parser_router, restore_persisted_parsers, setup_parser_services
 from discovery_api.router import router
-from discovery_api.lead_intent.router import router as lead_intent_router
 from discovery_api.client_sessions.router import router as client_router
-from discovery_api.client_sessions.service import resume_client_listeners, stop_client_listeners
+from discovery_api.lead_intent.router import router as lead_intent_router
 from discovery_api.session_registry import (
     release_all,
     start_accounts_pg_resync,
@@ -385,7 +384,6 @@ async def on_startup() -> None:
                 "(отдельный контейнер producer-balancer несовместим с co-located)"
             )
         await _start_inactive_remove_loop()
-    await resume_client_listeners()
 
 
 @app.on_event("shutdown")
@@ -393,7 +391,6 @@ async def on_shutdown() -> None:
     from discovery_api.action_queue import stop_action_worker
 
     stop_bot_polling()
-    await stop_client_listeners()
     await stop_action_worker()
     await _stop_inactive_remove_loop()
     await _stop_inprocess_worker()

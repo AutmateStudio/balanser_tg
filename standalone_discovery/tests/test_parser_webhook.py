@@ -11,6 +11,7 @@ import aiohttp
 
 class _Resp:
     def __init__(self):
+        self.status = 200
         self.headers = {"Content-Type": "text/plain"}
 
     async def __aenter__(self):

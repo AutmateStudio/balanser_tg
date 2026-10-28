@@ -287,9 +287,9 @@ async def test_discover_async_e2e_enqueue_worker_persist(
         result = poll_body["payload"].get("result") or {}
         persist = result.get("persist") or {}
         assert result.get("query") == _QUERY
-        assert persist.get("inserted") == 3
-        assert persist.get("skipped_no_discussion") == 0
-        assert len(persist.get("channel_ids") or []) == 3
+        assert persist.get("inserted") == 2
+        assert persist.get("skipped_no_discussion") == 1
+        assert len(persist.get("channel_ids") or []) == 2
         assert len(result.get("channels") or []) == 2
         assert len(result.get("groups") or []) == 1
 
@@ -309,12 +309,7 @@ async def test_discover_async_e2e_enqueue_worker_persist(
         ext_ids = {r["external_channel_id"] for r in rows}
         assert str(_PEER_BC_OK) in ext_ids
         assert str(_PEER_GROUP) in ext_ids
-        assert str(_PEER_BC_SKIP) in ext_ids
-        skip_row = next(r for r in rows if r["external_channel_id"] == str(_PEER_BC_SKIP))
-        skip_meta = skip_row["metadata"]
-        if isinstance(skip_meta, str):
-            skip_meta = json.loads(skip_meta)
-        assert skip_meta.get("listen_mode") == "posts"
+        assert str(_PEER_BC_SKIP) not in ext_ids
 
         bc_row = next(r for r in rows if r["external_channel_id"] == str(_PEER_BC_OK))
         assert bc_row["name"] == "E2E Broadcast OK"
