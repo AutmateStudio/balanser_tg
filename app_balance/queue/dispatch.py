@@ -932,20 +932,32 @@ class TaskDispatcher:
         elif code == ErrorCode.ACCOUNT_UNAUTHORIZED:
             message = getattr(exc, "message", None) or str(exc)
             try:
-                from discovery_api.session_registry import notify_session_unauthorized
+                from discovery_api.session_health import is_conflicting_auth_key_error
+                from discovery_api.session_registry import (
+                    notify_session_banned,
+                    notify_session_unauthorized,
+                )
 
-                await notify_session_unauthorized(account.session_name, message)
+                if is_conflicting_auth_key_error(message):
+                    await notify_session_banned(account.session_name, message)
+                else:
+                    await notify_session_unauthorized(account.session_name, message)
             except Exception:  # noqa: BLE001
                 logger.warning(
-                    "dispatch: notify_session_unauthorized недоступен для %s, fallback PG",
+                    "dispatch: notify_session_* недоступен для %s, fallback PG",
                     account.session_name,
                     exc_info=True,
                 )
                 try:
-                    await self._accounts.set_account_error(
-                        account.session_name,
-                        reason=message,
-                    )
+                    from discovery_api.session_health import is_conflicting_auth_key_error
+
+                    if is_conflicting_auth_key_error(message):
+                        await self._accounts.set_banned(account.session_name, reason=message)
+                    else:
+                        await self._accounts.set_account_error(
+                            account.session_name,
+                            reason=message,
+                        )
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "dispatch: не удалось set_account_error для %s",

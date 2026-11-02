@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import pytest
 
+from app_balance.queue import db
 from app_balance.queue.ops_catalog import COLLECT_EXTRA_DATA, TASK_TYPE_OPS
 from app_balance.queue.per_op_pipeline import (
     get_last_completed_step,
@@ -335,7 +336,10 @@ async def test_set_last_completed_step_persists_in_payload_jsonb(pg_pool) -> Non
     )
     assert res.created and res.task_id is not None
     try:
-        await repo.set_last_completed_step(res.task_id, "get_entity")
+        # Progress writes are fenced to an in-progress task and its owner.
+        async with db.acquire() as conn:
+            await conn.execute("UPDATE task_queue SET status = 'in_progress', locked_by = 'e6-test' WHERE id = $1", res.task_id)
+        await repo.set_last_completed_step(res.task_id, "get_entity", locked_by="e6-test")
 
         snapshot = await repo.get_by_id(res.task_id)
         assert snapshot is not None

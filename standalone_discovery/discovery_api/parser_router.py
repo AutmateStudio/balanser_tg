@@ -53,6 +53,8 @@ from discovery_api.config import (
     get_use_pg_queue,
 )
 from discovery_api.parser_functions import get_runtime_queue_size, get_runtime_stats
+from discovery_api.redis_ingress import enabled as redis_ingress_enabled
+from discovery_api.redis_ingress import publish as publish_to_redis
 from discovery_api.queue.producer import (
     enqueue_parser_add_channels,
     enqueue_parser_remove_channels,
@@ -479,6 +481,98 @@ class _ClumpJob:
 
 
 _jobs: dict[str, _ClumpJob] = {}
+
+
+class ParserBackfillChannel(BaseModel):
+    chat_id: int
+    since: datetime
+    limit: int = Field(default=200, ge=1, le=500)
+    offset_id: int = Field(default=0, ge=0)
+
+
+class ParserBackfillRequest(BaseModel):
+    channels: list[ParserBackfillChannel] = Field(min_length=1, max_length=20)
+
+
+@parser_router.post("/backfill")
+async def backfill_messages(request: ParserBackfillRequest) -> dict[str, Any]:
+    """Дочитывает историю через уже подключённые listener-сессии в durable ingress."""
+    if not redis_ingress_enabled():
+        raise HTTPException(status_code=503, detail="Redis ingress не включён")
+
+    results: list[dict[str, Any]] = []
+    for item in request.channels:
+        if item.since.tzinfo is None:
+            raise HTTPException(status_code=422, detail="since должен содержать часовой пояс")
+        owner = next(
+            (
+                pc
+                for job in _jobs.values()
+                if _clump_is_running(job.clump)
+                for pc in job.clump.parser_client_list
+                if pc.is_running() and item.chat_id in pc.allowed_chat_ids
+            ),
+            None,
+        )
+        if owner is None:
+            results.append({"chat_id": item.chat_id, "error": "активный listener не найден"})
+            continue
+
+        ref = next(
+            (name for name, chat_id in owner.ref_to_chat_id.items() if chat_id == item.chat_id),
+            item.chat_id,
+        )
+        published = 0
+        skipped_empty = 0
+        scanned = 0
+        oldest_id: int | None = None
+        oldest_date: datetime | None = None
+        try:
+            client = await owner.get_client()
+            async for message in client.iter_messages(
+                ref, limit=item.limit, offset_id=item.offset_id
+            ):
+                if message.date is None or message.date < item.since:
+                    break
+                scanned += 1
+                oldest_id = int(message.id)
+                oldest_date = message.date
+                if not (message.message or "").strip():
+                    skipped_empty += 1
+                    continue
+                await publish_to_redis(
+                    {
+                        "telegram_message": {
+                            "id": message.id,
+                            "text": message.message,
+                            "date": message.date.isoformat(),
+                            "sender_id": message.sender_id,
+                            "chat_id": item.chat_id,
+                        }
+                    }
+                )
+                published += 1
+            results.append(
+                {
+                    "chat_id": item.chat_id,
+                    "scanned": scanned,
+                    "published": published,
+                    "skipped_empty": skipped_empty,
+                    "next_offset_id": oldest_id if scanned == item.limit else None,
+                    "oldest_date": oldest_date.isoformat() if oldest_date else None,
+                }
+            )
+        except Exception as exc:
+            log.exception("Не удалось дочитать историю chat_id=%s", item.chat_id)
+            results.append(
+                {
+                    "chat_id": item.chat_id,
+                    "scanned": scanned,
+                    "published": published,
+                    "error": type(exc).__name__,
+                }
+            )
+    return {"results": results}
 
 
 def _dt_iso(value: datetime | None) -> Optional[str]:

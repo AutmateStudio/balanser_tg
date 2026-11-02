@@ -82,6 +82,7 @@ SELECT "account_id", "session_name", "account_status",
 FROM "v_account_op_usage_last_hour"
 GROUP BY "account_id", "session_name", "account_status";
 
+-- Keep the appended A21 columns when the current bootstrap schema is used.
 CREATE OR REPLACE VIEW "v_accounts_overview" AS
 SELECT
   count(*) FILTER (WHERE "status" = 'active' AND "is_enabled" = true) AS "active_accounts_count",
@@ -89,7 +90,24 @@ SELECT
   count(*) FILTER (WHERE "status" = 'banned')    AS "banned_accounts_count",
   count(*) FILTER (WHERE "status" = 'disabled')  AS "disabled_accounts_count",
   count(*) FILTER (WHERE "status" = 'error')     AS "error_accounts_count",
-  (SELECT count(*) FROM "v_account_resource_summary" WHERE "any_op_exhausted" = true) AS "accounts_without_resource"
+  (SELECT count(*) FROM "v_account_resource_summary" WHERE "any_op_exhausted" = true)
+    AS "accounts_without_resource",
+  count(*) FILTER (
+    WHERE "is_enabled" = true
+      AND "status" IN ('active', 'cooldown')
+      AND "current_task_id" IS NULL
+      AND ("cooldown_until" IS NULL OR "cooldown_until" <= now())
+  ) AS "pickable_accounts_count",
+  count(*) FILTER (WHERE "current_task_id" IS NOT NULL) AS "busy_accounts_count",
+  count(*) FILTER (
+    WHERE "current_task_id" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "task_queue" "t"
+        WHERE "t"."id" = "accounts"."current_task_id"
+          AND "t"."status" = 'in_progress'
+      )
+  ) AS "orphan_account_locks"
 FROM "accounts";
 
 CREATE OR REPLACE VIEW "v_channel_capacity_usage" AS

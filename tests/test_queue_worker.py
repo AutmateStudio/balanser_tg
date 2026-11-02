@@ -447,3 +447,8 @@ async def _wait_until(predicate, *, timeout: float, interval: float = 0.02) -> N
             return
         await asyncio.sleep(interval)
     raise TimeoutError("condition not met")
+
+
+@pytest.fixture(autouse=True)
+def _mock_telegram_for_queue_tests(monkeypatch):
+    monkeypatch.setenv("WORKER_TASK_ADAPTER", "mock")

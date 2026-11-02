@@ -233,7 +233,7 @@ class PhaseOrchestrator:
     async def phase_sync_off(self) -> None:
         n8n_result = disable_external_sync(
             n8n_base_url=self.cfg.n8n_base_url,
-            n8n_api_key=self.cfg.n8n_api_key or "",
+            n8n_api_key=replace_me or "",
             skip_n8n=self.cfg.skip_n8n,
             dry_run=self.cfg.dry_run,
         )
@@ -561,7 +561,7 @@ class PhaseOrchestrator:
 
         n8n = enable_external_sync(
             n8n_base_url=self.cfg.n8n_base_url,
-            n8n_api_key=self.cfg.n8n_api_key or "",
+            n8n_api_key=replace_me or "",
             workflows=self.state.n8n_deactivated,
             skip_n8n=self.cfg.skip_n8n,
             dry_run=self.cfg.dry_run,

@@ -294,6 +294,7 @@ async def test_sync_add_persists_clump_record(
             return {}
 
     class ClumpWithAssignments:
+        parser_client_list = []
         clump_name = "test"
         session_name_list = ["/s1"]
         webhook_url = ""

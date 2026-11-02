@@ -168,10 +168,15 @@ async def test_d9_dispatch_parser_remove_completes_task(d9_clean) -> None:
     clump.session_name_list = [session_name]
     clump.has_session = MagicMock(return_value=True)
 
-    adapter = ClumpTaskAdapter(clump_getter=lambda _pid: clump)
+    adapter = ClumpTaskAdapter(
+        clump_getter=lambda _pid: clump,
+        client_getter=AsyncMock(return_value=MagicMock()),
+        sync_after_remove=AsyncMock(),
+    )
     with patch(
-        "app_balance.queue.channel_assignment_sync.sync_after_parser_remove_channel",
+        "app_balance.queue.adapter.leave_tracked_channel",
         new_callable=AsyncMock,
+        return_value=MagicMock(left_count=1, soft_ok=False),
     ):
         result = await _build_dispatcher(adapter).dispatch(
             await load_in_progress_claimed(task_id)

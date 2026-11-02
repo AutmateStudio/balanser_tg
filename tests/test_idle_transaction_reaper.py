@@ -35,7 +35,7 @@ def test_config_from_env_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
 @requires_pg
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_reap_ignores_fresh_idle_transaction() -> None:
+async def test_reap_ignores_fresh_idle_transaction(pg_pool) -> None:
     """Свежая (только что открытая) idle-in-transaction сессия НЕ трогается —
 
     порог по возрасту защищает от убийства легитимной активной работы."""
@@ -64,7 +64,7 @@ async def test_reap_ignores_fresh_idle_transaction() -> None:
 @requires_pg
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_reap_terminates_old_idle_transaction() -> None:
+async def test_reap_terminates_old_idle_transaction(pg_pool) -> None:
     """Зависшая транзакция (BEGIN без COMMIT), возраст >= порога (0) — reaper
 
     её находит и завершает через pg_terminate_backend, снимая блокировку."""

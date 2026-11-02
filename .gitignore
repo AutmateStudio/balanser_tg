@@ -31,3 +31,13 @@ standalone_discovery/discovery_api/data/
 .idea/
 .vscode/
 .DS_Store
+
+# Runtime-артефакты не должны возвращаться в новые коммиты
+**/env.d12
+**/client-sessions/
+**/client_sessions/
+**/parser_jobs.json
+*.db
+*.sqlite
+*.sqlite3
+.venv*/

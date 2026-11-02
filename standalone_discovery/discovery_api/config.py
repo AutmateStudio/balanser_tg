@@ -113,6 +113,10 @@ def get_queue_maxsize() -> int:
     return _get_int_env("PARSER_QUEUE_MAXSIZE", 100_000)
 
 
+def get_telegram_ingress_mode() -> str:
+    return (os.getenv("TELEGRAM_INGRESS_MODE") or "direct").strip().lower()
+
+
 def get_entity_resolve_delay_seconds() -> float:
     return _get_float_env("ENTITY_RESOLVE_DELAY_SECONDS", 0.4)
 
@@ -357,10 +361,11 @@ def get_lidgen_discovery_concurrency() -> int:
 
 
 def get_lidgen_min_score_total() -> int:
-    """Минимальный score для фильтрации каналов в discovery.
+    """Исторический порог score (0..100). Выдача `/discover` его не применяет.
 
-    Приоритет: `LIDGEN_MIN_SCORE_TOTAL`, иначе `DISCOVERY_MIN_CHANNEL_SCORE_RATIO`×100,
-    иначе 40.
+    Приоритет значения: `LIDGEN_MIN_SCORE_TOTAL`, иначе `DISCOVERY_MIN_CHANNEL_SCORE_RATIO`×100,
+    иначе 40. С 2026-10-14 `/discover` возвращает всех оценённых кандидатов
+    и сортирует их по `score_total`.
     """
     _ensure_env_loaded()
     raw = (os.getenv("LIDGEN_MIN_SCORE_TOTAL") or "").strip()

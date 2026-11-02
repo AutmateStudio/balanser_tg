@@ -1,9 +1,4 @@
-"""Определение цели прослушивания.
-
-Broadcast-канал слушается как посты исходного чата. Если есть discussion,
-комментарии слушаются отдельно, а webhook несёт оба peer id.
-Группа и супергруппа слушаются как сам чат.
-"""
+"""Определение цели прослушивания: канал → чат обсуждений, группа → сам чат."""
 
 from __future__ import annotations
 
@@ -30,7 +25,7 @@ from telethon.tl import functions, types
 log = logging.getLogger(__name__)
 
 EntityKind = Literal["channel", "supergroup", "group", "user", "unknown"]
-ListenMode = Literal["discussion", "group_chat", "posts"]
+ListenMode = Literal["discussion", "group_chat"]
 
 # Стабильные коды причин отказа join / доступа (совпадают с ErrorCode очереди).
 JOIN_FAIL_JOIN_PENDING = "join_pending"
@@ -67,19 +62,8 @@ async def _stagger_after_join(*, raw_ref: str, role: str) -> None:
     await asyncio.sleep(delay)
 
 
-def marked_channel_peer_id(raw_id: int) -> int:
-    """Полный Telethon peer id канала: `-100` + сырой id.
-
-    Отрицательное значение считается уже помеченным и не переписывается.
-    """
-    value = int(raw_id)
-    if value < 0:
-        return value
-    return int(f"-100{value}")
-
-
 class ChannelHasNoDiscussionError(ValueError):
-    """Совместимость: broadcast без discussion больше не блокирует посты."""
+    """Broadcast-канал без привязанного чата обсуждений."""
 
     code: str = JOIN_FAIL_NO_DISCUSSION
 
@@ -114,42 +98,6 @@ class ListenTarget:
     listen_joined: bool = False
     has_listen_access: bool = False
     access_note: str = ""
-
-    def subscribed_peer_ids(self) -> tuple[int, ...]:
-        """Peer id, которые надо добавить в listener.
-
-        Для discussion это чат комментариев и исходный канал (посты).
-        Для posts и group_chat — один listen peer.
-        """
-        primary = int(self.listen_peer_id)
-        if self.listen_mode != "discussion":
-            return (primary,)
-        source = int(self.source_peer_id)
-        if source == primary:
-            return (primary,)
-        return (primary, source)
-
-    def webhook_identity(self, chat_id: int) -> dict[str, Any]:
-        """Поля webhook, по которым n8n находит исходный source_channels."""
-        chat = int(chat_id)
-        source = int(self.source_peer_id)
-        if self.entity_kind == "channel" and chat == source and chat != int(self.listen_peer_id):
-            mode: ListenMode = "posts"
-        else:
-            mode = self.listen_mode
-        linked_peer = (
-            marked_channel_peer_id(self.linked_chat_id)
-            if self.linked_chat_id is not None
-            else None
-        )
-        return {
-            "source_peer_id": source,
-            "listen_peer_id": chat,
-            "linked_chat_id": self.linked_chat_id,
-            "linked_peer_id": linked_peer,
-            "listen_mode": mode,
-            "entity_kind": self.entity_kind,
-        }
 
 
 def normalize_chat_ref(raw: str) -> Union[str, int]:
@@ -434,8 +382,7 @@ async def resolve_listen_target(
     """
     Резолвит ссылку/username и возвращает сущность для прослушивания.
 
-    - broadcast с discussion → комментарии discussion и посты source
-    - broadcast без discussion → посты source (`listen_mode=posts`)
+    - broadcast-канал → linked discussion chat (ошибка, если обсуждений нет)
     - supergroup / group → сам чат
     """
     log.info("resolve start ref=%s join=%s", raw_ref, join)
@@ -482,27 +429,22 @@ async def resolve_listen_target(
         full_chat = getattr(full_info, "full_chat", None)
         linked_chat_id = getattr(full_chat, "linked_chat_id", None) if full_chat else None
         if not linked_chat_id:
-            listen_entity = entity
-            listen_mode = "posts"
-            listen_joined = source_joined
-            listen_join_fail = source_join_fail
-            log.info(
-                "resolve ref=%s: у канала нет discussion, слушаем посты source",
-                raw_ref,
+            title = getattr(entity, "title", None) or str(raw_ref)
+            raise ChannelHasNoDiscussionError(
+                f"У канала «{title}» нет чата обсуждений — прослушивание невозможно"
             )
-        else:
-            listen_entity = await client.get_entity(linked_chat_id)
-            listen_mode = "discussion"
-            log.info(
-                "resolve ref=%s: чат обсуждений %s (linked_chat_id=%s)",
-                raw_ref,
-                _entity_label(listen_entity),
-                linked_chat_id,
+        listen_entity = await client.get_entity(linked_chat_id)
+        listen_mode = "discussion"
+        log.info(
+            "resolve ref=%s: чат обсуждений %s (linked_chat_id=%s)",
+            raw_ref,
+            _entity_label(listen_entity),
+            linked_chat_id,
+        )
+        if join and isinstance(listen_entity, types.Channel):
+            listen_joined, listen_join_fail = await _join_channel_entity(
+                client, listen_entity, raw_ref=raw_ref, role="discussion"
             )
-            if join and isinstance(listen_entity, types.Channel):
-                listen_joined, listen_join_fail = await _join_channel_entity(
-                    client, listen_entity, raw_ref=raw_ref, role="discussion"
-                )
     elif join and kind == "supergroup":
         listen_joined = source_joined
         listen_join_fail = source_join_fail

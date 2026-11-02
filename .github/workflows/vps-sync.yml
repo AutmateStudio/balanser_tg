@@ -1,0 +1,51 @@
+name: VPS sync
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Полный SHA с успешным CI; пусто — SHA выбранной ветки
+        required: false
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: vps-source-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    name: Обновить отдельный checkout на VPS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      INPUT_SHA: ${{ inputs.commit }}
+      GH_TOKEN: ${{ github.token }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+    steps:
+      - name: Проверить успешный CI для выбранного commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_sha="${INPUT_SHA:-$GITHUB_SHA}"
+          [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'Требуется полный SHA commit'; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$target_sha&per_page=100" \
+            --jq '[.workflow_runs[] | select(.name == "CI")] | sort_by(.created_at) | last | .conclusion' \
+            > "$RUNNER_TEMP/ci-result"
+          grep -qx success "$RUNNER_TEMP/ci-result" || { echo 'У выбранного commit нет успешного CI'; exit 1; }
+          printf 'TARGET_SHA=%s\n' "$target_sha" >> "$GITHUB_ENV"
+      - name: Синхронизировать исходники без изменения production
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/lidogen_ci"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/lidogen_known_hosts"
+          ssh -T -i "$HOME/.ssh/lidogen_ci" -p "$VPS_PORT" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/lidogen_known_hosts" \
+            "$VPS_USER@$VPS_HOST" "sync $TARGET_SHA"

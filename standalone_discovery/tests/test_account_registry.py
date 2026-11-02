@@ -233,7 +233,7 @@ class RemoveSessionForceTests(unittest.IsolatedAsyncioTestCase):
             self.channels.append(raw)
             self.ref_to_chat_id[raw] = -100
             self.allowed_chat_ids.add(-100)
-            return -100, None
+            return -100, None, None
 
         with patch(
             "discovery_api.session_registry.Parser_client.add_channel", _fake_add

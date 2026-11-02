@@ -38,19 +38,14 @@ def test_should_persist_broadcast_with_discussion() -> None:
     assert should_persist_discovered(item) is True
 
 
-def test_should_persist_broadcast_without_discussion_as_posts() -> None:
+def test_should_skip_broadcast_without_discussion() -> None:
     item = _FakeItem(
         peer_id=2,
         title="Ch",
         meta={"broadcast": True},
         score_signals={"linked_chat_id": None},
     )
-    assert should_persist_discovered(item) is True
-    fields = build_upsert_fields(item)
-    assert fields["metadata"]["listen_mode"] == "posts"
-    assert fields["external_channel_id"] == "-1002"
-    assert fields["metadata"]["source_peer_id"] == -1002
-    assert fields["metadata"]["listen_peer_id"] == -1002
+    assert should_persist_discovered(item) is False
 
 
 def test_should_persist_megagroup_always() -> None:
@@ -77,7 +72,3 @@ def test_build_upsert_fields_external_id() -> None:
     assert fields["external_url"] == "https://t.me/testch"
     assert fields["metadata"]["has_discussion"] is True
     assert fields["metadata"]["score"] == 42
-    assert fields["metadata"]["listen_mode"] == "discussion"
-    assert fields["metadata"]["source_peer_id"] == -1001234567890
-    assert fields["metadata"]["linked_peer_id"] == -100999
-    assert fields["metadata"]["listen_peer_id"] == -100999

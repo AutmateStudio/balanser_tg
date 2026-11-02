@@ -1,0 +1,71 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source-check:
+    name: Исходники и секреты
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: python3 ops/ci/check_source.py
+      - run: bash ops/ci/scan_secrets.sh
+
+  test:
+    name: Тесты и миграции PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: lidogen-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: docker compose -f compose.ci.yml up --build --abort-on-container-exit --exit-code-from test
+      - if: always()
+        run: docker compose -f compose.ci.yml down --volumes --remove-orphans
+
+  build:
+    name: Сборка runtime-образа
+    needs: source-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: docker build --file standalone_discovery/Dockerfile.pg-queue --tag lidogen-telegram-balancer:ci .
+
+  vps-check:
+    name: Связь с VPS
+    if: ${{ vars.VPS_LINK_ENABLED == 'true' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+    steps:
+      - name: Проверить ограниченный доступ к checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/lidogen_ci"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/lidogen_known_hosts"
+          ssh -T -i "$HOME/.ssh/lidogen_ci" -p "$VPS_PORT" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/lidogen_known_hosts" \
+            "$VPS_USER@$VPS_HOST" check
