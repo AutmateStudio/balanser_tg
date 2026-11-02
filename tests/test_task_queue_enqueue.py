@@ -29,6 +29,8 @@ def test_account_unauthorized_not_in_fatal_dedup_codes() -> None:
     assert ErrorCode.CHANNEL_PRIVATE in FATAL_ERROR_CODES
     assert ErrorCode.CHANNEL_HAS_NO_DISCUSSION in FATAL_ERROR_CODES
     assert ErrorCode.USERNAME_NOT_FOUND in FATAL_ERROR_CODES
+    assert ErrorCode.CHANNEL_ON_UNEXPECTED_SESSION in FATAL_ERROR_CODES
+    assert ErrorCode.ENTITY_NOT_FOUND in FATAL_ERROR_CODES
     assert "fatal" not in FATAL_ERROR_CODES
 
 

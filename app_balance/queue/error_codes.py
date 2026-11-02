@@ -33,6 +33,10 @@ class ErrorCode(StrEnum):
     USERNAME_NOT_FOUND = "username_not_found"
     CHANNEL_HAS_NO_DISCUSSION = "channel_has_no_discussion"
     BANNED_IN_CHANNEL = "banned_in_channel"
+    # Канал в clump висит на третьей сессии: повтор move_channel ту же пару не сдвинет.
+    CHANNEL_ON_UNEXPECTED_SESSION = "channel_on_unexpected_session"
+    # get_entity не резолвит ссылку (типично t.me/c/<id> без peer в кэше сессии).
+    ENTITY_NOT_FOUND = "entity_not_found"
 
     # --- resource / postpone ---
     INSUFFICIENT_RESOURCE = "insufficient_resource"

@@ -170,6 +170,15 @@ def map_clump_error_message(err: str) -> QueueTaskError:
     if "no user has" in lowered and "as username" in lowered:
         return PermanentError(ErrorCode.USERNAME_NOT_FOUND, text)
 
+    # move_channel: канал в clump уже на третьей сессии. Повтор той же пары
+    # source/target даёт тот же ответ, пока PG-назначение не совпадёт с clump.
+    if "неожиданной сессии" in lowered:
+        return PermanentError(ErrorCode.CHANNEL_ON_UNEXPECTED_SESSION, text)
+
+    # Telethon get_entity: ссылка не резолвится (t.me/c/<id> без access_hash).
+    if "cannot find any entity corresponding to" in lowered:
+        return PermanentError(ErrorCode.ENTITY_NOT_FOUND, text)
+
     if "channel_private" in lowered or "приватн" in lowered:
         return PermanentError(ErrorCode.CHANNEL_PRIVATE, text)
 
@@ -226,6 +235,11 @@ def map_telethon_exception(exc: BaseException) -> QueueTaskError:
     # См. telethon/client/users.py: 'No user has "{}" as username'.
     if "no user has" in msg_lower and "as username" in msg_lower:
         return PermanentError(ErrorCode.USERNAME_NOT_FOUND, str(exc))
+
+    # ValueError из telethon.utils.get_entity / get_input_entity.
+    # Для https://t.me/c/<id> повтор на той же сессии стабильно бесполезен.
+    if "cannot find any entity corresponding to" in msg_lower:
+        return PermanentError(ErrorCode.ENTITY_NOT_FOUND, str(exc))
 
     try:
         from discovery_api.session_health import (

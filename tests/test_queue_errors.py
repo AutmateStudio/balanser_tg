@@ -66,6 +66,20 @@ def test_map_clump_error_no_discussion_is_permanent() -> None:
     assert mapped.code == "channel_has_no_discussion"
 
 
+def test_map_clump_error_unexpected_session_is_permanent() -> None:
+    msg = "Канал на неожиданной сессии: 715-1510"
+    mapped = map_clump_error_message(msg)
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "channel_on_unexpected_session"
+
+
+def test_map_clump_error_entity_not_found_is_permanent() -> None:
+    msg = 'Cannot find any entity corresponding to "https://t.me/c/1879797430"'
+    mapped = map_clump_error_message(msg)
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "entity_not_found"
+
+
 def test_map_clump_error_username_not_found_is_permanent() -> None:
     msg = 'No user has "grtetlidog" as username'
     mapped = map_clump_error_message(msg)
@@ -149,6 +163,16 @@ def test_map_telethon_exception_channels_too_much_is_retryable() -> None:
     assert isinstance(mapped, RetryableError)
     assert mapped.code == "channels_too_much"
     assert mapped.retry_after_seconds == 1800
+
+
+def test_map_telethon_exception_missing_entity_is_permanent() -> None:
+    """t.me/c/<id> без access_hash: ValueError, повтор collect не поможет."""
+    exc = ValueError(
+        'Cannot find any entity corresponding to "https://t.me/c/1879797430"'
+    )
+    mapped = map_telethon_exception(exc)
+    assert isinstance(mapped, PermanentError)
+    assert mapped.code == "entity_not_found"
 
 
 def test_map_telethon_exception_username_not_found_is_permanent() -> None:

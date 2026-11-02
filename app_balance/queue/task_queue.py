@@ -51,6 +51,8 @@ FATAL_ERROR_CODES = frozenset(
         ErrorCode.CHANNEL_PRIVATE,
         ErrorCode.CHANNEL_HAS_NO_DISCUSSION,
         ErrorCode.USERNAME_NOT_FOUND,
+        ErrorCode.CHANNEL_ON_UNEXPECTED_SESSION,
+        ErrorCode.ENTITY_NOT_FOUND,
     }
 )
 

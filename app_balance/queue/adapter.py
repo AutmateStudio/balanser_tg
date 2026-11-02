@@ -229,6 +229,8 @@ def _raise_clump_result_error(result: dict[str, Any]) -> None:
             ErrorCode.INVALID_PAYLOAD,
             ErrorCode.BANNED_IN_CHANNEL,
             ErrorCode.BANNED,
+            ErrorCode.CHANNEL_ON_UNEXPECTED_SESSION,
+            ErrorCode.ENTITY_NOT_FOUND,
         ):
             raise PermanentError(code, str(error))
         if code == ErrorCode.JOIN_PENDING:
