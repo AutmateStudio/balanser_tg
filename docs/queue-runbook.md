@@ -40,6 +40,8 @@
 |-----|---------|-----------------|----------------------|
 | `invalid_payload` | Невалидный payload задачи | failed | Исправить payload / пересоздать задачу |
 | `username_not_found` | Telethon `No user has "X" as username` — юзернейм не занят (удалён/сменён), `ResolveUsernameRequest` стабильно вернёт то же | failed | Не пытаться повторно этот канал; удалить/актуализировать ссылку в источнике |
+| `channel_on_unexpected_session` | `move_channel`: канал в clump уже на третьей сессии, не на source и не на target | failed, без повторной постановки той же пары (B12) | Сверить назначение канала в Postgres с владельцем в clump |
+| `entity_not_found` | `get_entity` не нашёл сущность, типично `https://t.me/c/<id>` без peer в кэше сессии | failed, без повторной постановки того же канала (B12) | Не крутить collect по этой ссылке; нужен username или сессия, которая уже состоит в канале |
 | `account_not_found` | Аккаунт отсутствует в PG | failed | Синхронизировать аккаунты |
 | `unsupported_task_type` | Adapter не поддерживает тип | failed | Дождаться реализации adapter-ветки |
 | `channel_has_no_discussion` | У канала нет группы обсуждения | failed | Не ставить задачу, которой нужен discussion |
