@@ -327,12 +327,16 @@ class ClientSessionService:
             remote_account_id = str(meta["remote_account_id"])
             if meta.get("status") != "active":
                 continue
-            async with self._lock(remote_account_id):
-                fresh = self.store.get(remote_account_id) or meta
-                cursors = dict(fresh.get("cursors") or {})
-                sources = fresh.get("peer_sources") or {}
-                source_usernames = fresh.get("peer_source_usernames") or {}
-                for peer in list(fresh.get("watched_peers") or []):
+            for peer in meta.get("watched_peers") or []:
+                async with self._lock(remote_account_id):
+                    fresh = self.store.get(remote_account_id)
+                    if not fresh or fresh.get("status") != "active":
+                        break
+                    if peer not in (fresh.get("watched_peers") or []):
+                        continue
+                    cursors = dict(fresh.get("cursors") or {})
+                    sources = fresh.get("peer_sources") or {}
+                    source_usernames = fresh.get("peer_source_usernames") or {}
                     username = peer.removeprefix("username:") if peer.startswith("username:") else None
                     peer_id = None if username else peer
                     cursor = str(cursors.get(peer) or "0")
@@ -375,9 +379,10 @@ class ClientSessionService:
                             break
                         last_ok = str(item.telegram_message_id)
                         delivered.append(payload)
-                    cursors[peer] = last_ok
-                fresh["cursors"] = cursors
-                self.store.save(fresh)
+                    if last_ok != cursor:
+                        cursors[peer] = last_ok
+                        fresh["cursors"] = cursors
+                        self.store.save(fresh)
         return delivered
 
     def ensure_listener(self) -> None:
