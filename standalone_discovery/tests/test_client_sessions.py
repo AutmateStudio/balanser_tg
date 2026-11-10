@@ -381,6 +381,46 @@ def test_api_preserves_source_context_for_listener_restart(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_history_can_read_between_background_peers(tmp_path: Path) -> None:
+    service, gateway, _webhook = _service(tmp_path)
+    meta = service.store.ensure(ACCOUNT)
+    service.store.save({
+        **meta,
+        "status": "active",
+        "watched_peers": ["555", "556"],
+        "cursors": {"555": "0", "556": "0"},
+    })
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    release_second = asyncio.Event()
+    history_started = asyncio.Event()
+
+    async def get_history(_path, peer, _username, _cursor, _limit, newer, _source):
+        if not newer:
+            history_started.set()
+        elif peer == "555":
+            first_started.set()
+            await release_first.wait()
+        else:
+            await release_second.wait()
+        return [], None
+
+    gateway.get_history = get_history
+    poll = asyncio.create_task(service.poll_once())
+    await asyncio.wait_for(first_started.wait(), timeout=1)
+    history = asyncio.create_task(service.history(ACCOUNT, "555", None, None, 50))
+    try:
+        await asyncio.sleep(0)
+        release_first.set()
+        await asyncio.wait_for(history_started.wait(), timeout=1)
+    finally:
+        release_first.set()
+        release_second.set()
+        await asyncio.gather(poll, history)
+        set_service(None)
+
+
+@pytest.mark.asyncio
 async def test_listener_forwards_only_new_incoming(tmp_path: Path) -> None:
     service, gateway, webhook = _service(tmp_path)
     now = datetime.now(timezone.utc)
