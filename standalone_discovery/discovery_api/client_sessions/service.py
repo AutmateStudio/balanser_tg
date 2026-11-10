@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -256,12 +257,16 @@ class ClientSessionService:
         cursor: str | None,
         limit: int,
         source: SourceMessageContext | None = None,
+        resolve_author_username: bool = False,
     ) -> dict[str, Any]:
         self._require_active(remote_account_id)
+        started_at = time.monotonic()
+        author: dict[str, str | None] = {}
+        session_path = self.store.session_path(remote_account_id)
         async with self._lock(remote_account_id):
             try:
                 items, next_cursor = await self.gateway.get_history(
-                    self.store.session_path(remote_account_id),
+                    session_path,
                     peer_id,
                     username,
                     cursor,
@@ -278,6 +283,13 @@ class ClientSessionService:
                         "error_text": str(exc),
                     }
                 )
+            if resolve_author_username and peer_id and not username and time.monotonic() - started_at < 10:
+                try:
+                    author["author_username"] = await asyncio.wait_for(
+                        self.gateway.get_author_username(session_path, peer_id, source), timeout=2,
+                    )
+                except Exception as exc:
+                    log.info("client sessions: профиль автора не обновлён: %s", type(exc).__name__)
         peer = peer_id or (f"username:{username}" if username else None)
         if peer:
             await self.watch(remote_account_id, peer, username, source)
@@ -287,6 +299,7 @@ class ClientSessionService:
                 "next_cursor": next_cursor,
                 "error_code": None,
                 "error_text": None,
+                **author,
             }
         )
 

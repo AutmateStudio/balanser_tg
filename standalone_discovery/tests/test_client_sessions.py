@@ -67,6 +67,7 @@ class FakeGateway:
         self.history: list[HistoryItem] = []
         self.history_sources: list[SourceMessageContext | None] = []
         self.send_sources: list[SourceMessageContext | None] = []
+        self.get_author_username = AsyncMock(return_value="resolved_author")
         self.handles: list[FakeHandle] = []
         self.revoked = False
 
@@ -274,6 +275,33 @@ def test_history_pagination(tmp_path: Path) -> None:
     assert [item["text"] for item in older.json()["messages"]] == ["старое"]
     assert older.json()["next_cursor"] is None
     set_service(None)
+
+
+def test_history_includes_author_username_only_on_request(tmp_path: Path) -> None:
+    service, gateway, _webhook = _service(tmp_path)
+    service.store.save({**service.store.ensure(ACCOUNT), "status": "active"})
+    client = _client()
+    url = f"/discovery-api/client-sessions/{ACCOUNT}/history"
+    assert "author_username" not in client.get(url, params={"peer_id": "555"}).json()
+    params = {"peer_id": "555", "resolve_author_username": "true"}
+    assert client.get(url, params=params).json()["author_username"] == "resolved_author"
+    gateway.get_author_username.side_effect = TimeoutError()
+    failed_lookup = client.get(url, params=params).json()
+    assert failed_lookup["error_code"] is None
+    assert "author_username" not in failed_lookup
+    set_service(None)
+
+
+@pytest.mark.asyncio
+async def test_author_username_belongs_to_requested_user(tmp_path: Path) -> None:
+    telegram = Mock(get_entity=AsyncMock(side_effect=[
+        types.User(id=555, username="resolved_author"),
+        types.User(id=999, username="another_author"),
+    ]))
+    gateway = TelethonGateway()
+    gateway._client = AsyncMock(return_value=telegram)
+    assert await gateway.get_author_username(tmp_path / ACCOUNT, "555", None) == "resolved_author"
+    assert await gateway.get_author_username(tmp_path / ACCOUNT, "555", None) is None
 
 
 @pytest.mark.asyncio
