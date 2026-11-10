@@ -30,6 +30,7 @@ class SendRequest(BaseModel):
     username: str | None = None
     source_chat_id: int | None = None
     source_message_id: int | None = None
+    source_chat_username: str | None = None
     text: str = Field(..., min_length=1, max_length=4096)
     idempotency_key: str
 
@@ -61,16 +62,18 @@ def _source_context(
     peer_id: str | None,
     chat_id: int | None,
     message_id: int | None,
+    chat_username: str | None,
 ) -> SourceMessageContext | None:
-    if chat_id is None and message_id is None:
+    if chat_id is None and message_id is None and chat_username is None:
         return None
     if (
         not peer_id or not 0 < int(peer_id) < 2**63
         or chat_id is None or not 0 < abs(chat_id) < 2**63
         or message_id is None or not 0 < message_id < 2**31
+        or (chat_username is not None and not USERNAME_RE.fullmatch(chat_username))
     ):
         raise HTTPException(status_code=422, detail="Некорректный контекст сообщения")
-    return SourceMessageContext(chat_id, message_id)
+    return SourceMessageContext(chat_id, message_id, chat_username)
 
 
 @router.post("/qr")
@@ -125,7 +128,9 @@ async def send_message(remote_account_id: str, body: SendRequest) -> dict:
     if not IDEMPOTENCY_RE.fullmatch(body.idempotency_key):
         raise HTTPException(status_code=422, detail="Некорректный ключ идемпотентности")
     peer_id, username = _peer(body.peer_id, body.username)
-    source = _source_context(peer_id, body.source_chat_id, body.source_message_id)
+    source = _source_context(
+        peer_id, body.source_chat_id, body.source_message_id, body.source_chat_username,
+    )
     try:
         return await get_service().send_dm(
             remote_account_id,
@@ -151,10 +156,11 @@ async def history(
     limit: int = 50,
     source_chat_id: int | None = None,
     source_message_id: int | None = None,
+    source_chat_username: str | None = None,
 ) -> dict:
     _account_or_422(remote_account_id)
     peer, name = _peer(peer_id, username)
-    source = _source_context(peer, source_chat_id, source_message_id)
+    source = _source_context(peer, source_chat_id, source_message_id, source_chat_username)
     safe_limit = min(max(limit, 1), 100)
     if cursor and not cursor.isdigit():
         raise HTTPException(status_code=422, detail="Некорректный курсор")

@@ -300,6 +300,28 @@ async def test_history_and_send_can_open_author_from_source_message(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_cold_session_resolves_public_source_by_username(tmp_path: Path) -> None:
+    chat = types.InputPeerChannel(12345, 9876)
+    telegram = Mock(
+        get_input_entity=AsyncMock(side_effect=[ValueError(), ValueError(), chat]),
+        get_messages=AsyncMock(return_value=[]),
+    )
+    gateway = TelethonGateway()
+    gateway._client = AsyncMock(return_value=telegram)
+
+    history = await gateway.get_history(
+        tmp_path / ACCOUNT, "555", None, None, 50, False,
+        SourceMessageContext(-1000000012345, 42, "public_group"),
+    )
+    assert history == ([], None)
+    assert telegram.get_input_entity.await_args.args == ("public_group",)
+    telegram.get_dialogs.assert_not_called()
+    telegram.get_messages.assert_awaited_once_with(
+        types.InputPeerUserFromMessage(chat, 42, 555), limit=50,
+    )
+
+
+@pytest.mark.asyncio
 async def test_cold_session_finds_legacy_source_group_in_its_dialogs(tmp_path: Path) -> None:
     chat = types.InputPeerChannel(12345, 9876)
     telegram = Mock(
@@ -330,8 +352,13 @@ def test_api_preserves_source_context_for_listener_restart(tmp_path: Path) -> No
     service.store.save({**meta, "status": "active"})
     client = _client()
     history_url = f"/discovery-api/client-sessions/{ACCOUNT}/history"
-    source = SourceMessageContext(-1000000012345, 42)
-    params = {"peer_id": "555", "source_chat_id": str(source.chat_id), "source_message_id": str(source.message_id)}
+    source = SourceMessageContext(-1000000012345, 42, "public_group")
+    params = {
+        "peer_id": "555",
+        "source_chat_id": str(source.chat_id),
+        "source_message_id": str(source.message_id),
+        "source_chat_username": source.chat_username,
+    }
     assert client.get(history_url, params={"peer_id": "555", "source_message_id": "42"}).status_code == 422
     assert client.get(history_url, params=params).json()["error_code"] is None
     assert gateway.history_sources == [source, source]
