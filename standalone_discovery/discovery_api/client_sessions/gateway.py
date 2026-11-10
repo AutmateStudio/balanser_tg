@@ -21,6 +21,12 @@ class HistoryItem:
     outgoing: bool
 
 
+@dataclass(frozen=True)
+class SourceMessageContext:
+    chat_id: int
+    message_id: int
+
+
 class QrHandle(Protocol):
     qr_url: str
 
@@ -40,6 +46,7 @@ class ClientGateway(Protocol):
         peer_id: str | None,
         username: str | None,
         text: str,
+        source: SourceMessageContext | None = None,
     ) -> int: ...
 
     async def get_history(
@@ -50,6 +57,7 @@ class ClientGateway(Protocol):
         cursor: str | None,
         limit: int,
         newer: bool,
+        source: SourceMessageContext | None = None,
     ) -> tuple[list[HistoryItem], str | None]: ...
 
     async def revoke(self, session_path: Path) -> None: ...
