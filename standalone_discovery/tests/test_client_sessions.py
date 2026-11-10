@@ -5,18 +5,22 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from telethon import types, utils
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from discovery_api.client_sessions.errors import FloodWaitError, PeerUnavailableError, PrivacyRestrictedError
-from discovery_api.client_sessions.gateway import AuthProfile, HistoryItem
+from discovery_api.client_sessions.gateway import AuthProfile, HistoryItem, SourceMessageContext
 from discovery_api.client_sessions.router import router
 from discovery_api.client_sessions.service import ClientSessionService, set_service
 from discovery_api.client_sessions.store import FileSessionStore
+from discovery_api.client_sessions.telethon_gateway import TelethonGateway
 
 
 ACCOUNT = "account01"
@@ -61,6 +65,8 @@ class FakeGateway:
         self.sent: list[str] = []
         self.send_error: Exception | None = None
         self.history: list[HistoryItem] = []
+        self.history_sources: list[SourceMessageContext | None] = []
+        self.send_sources: list[SourceMessageContext | None] = []
         self.handles: list[FakeHandle] = []
         self.revoked = False
 
@@ -69,10 +75,14 @@ class FakeGateway:
         self.handles.append(handle)
         return handle
 
-    async def send_dm(self, session_path: Path, peer_id: str | None, username: str | None, text: str) -> int:
+    async def send_dm(
+        self, session_path: Path, peer_id: str | None, username: str | None, text: str,
+        source: SourceMessageContext | None = None,
+    ) -> int:
         if self.send_error:
             raise self.send_error
         self.sent.append(text)
+        self.send_sources.append(source)
         return 100 + len(self.sent)
 
     async def get_history(
@@ -83,7 +93,9 @@ class FakeGateway:
         cursor: str | None,
         limit: int,
         newer: bool,
+        source: SourceMessageContext | None = None,
     ) -> tuple[list[HistoryItem], str | None]:
+        self.history_sources.append(source)
         items = list(self.history)
         if cursor and cursor.isdigit():
             border = int(cursor)
@@ -261,6 +273,80 @@ def test_history_pagination(tmp_path: Path) -> None:
     )
     assert [item["text"] for item in older.json()["messages"]] == ["старое"]
     assert older.json()["next_cursor"] is None
+    set_service(None)
+
+
+@pytest.mark.asyncio
+async def test_history_and_send_can_open_author_from_source_message(tmp_path: Path) -> None:
+    chat = types.InputPeerChannel(12345, 9876)
+    telegram = SimpleNamespace(
+        get_input_entity=AsyncMock(side_effect=[ValueError(), chat, ValueError(), chat]),
+        get_messages=AsyncMock(return_value=[
+            SimpleNamespace(id=88, message="Сохранённый ответ", date=datetime.now(timezone.utc), out=False)
+        ]),
+        send_message=AsyncMock(return_value=SimpleNamespace(id=89)),
+    )
+    gateway = TelethonGateway()
+    gateway._client = AsyncMock(return_value=telegram)
+    source = SourceMessageContext(-1000000012345, 42)
+    target = types.InputPeerUserFromMessage(chat, 42, 555)
+
+    items, _cursor = await gateway.get_history(tmp_path / ACCOUNT, "555", None, None, 50, False, source)
+    assert [item.text for item in items] == ["Сохранённый ответ"]
+    telegram.get_messages.assert_awaited_once_with(target, limit=50)
+    assert utils.get_input_peer(target) == target
+    assert await gateway.send_dm(tmp_path / ACCOUNT, "555", None, "Ответ", source) == 89
+    telegram.send_message.assert_awaited_once_with(target, "Ответ")
+
+
+@pytest.mark.asyncio
+async def test_cold_session_finds_legacy_source_group_in_its_dialogs(tmp_path: Path) -> None:
+    chat = types.InputPeerChannel(12345, 9876)
+    telegram = Mock(
+        get_input_entity=AsyncMock(side_effect=ValueError()),
+        get_dialogs=AsyncMock(return_value=[
+            SimpleNamespace(id=-1000000012345, input_entity=chat),
+        ]),
+        get_messages=AsyncMock(return_value=[]),
+    )
+    gateway = TelethonGateway()
+    gateway._client = AsyncMock(return_value=telegram)
+
+    history = await gateway.get_history(
+        tmp_path / ACCOUNT, "555", None, None, 50, False, SourceMessageContext(12345, 42),
+    )
+    assert history == ([], None)
+    telegram.get_dialogs.assert_awaited_once()
+    telegram.get_messages.assert_awaited_once_with(
+        types.InputPeerUserFromMessage(chat, 42, 555), limit=50,
+    )
+
+
+def test_api_preserves_source_context_for_listener_restart(tmp_path: Path) -> None:
+    service, gateway, webhook = _service(tmp_path)
+    service.store.ensure(ACCOUNT)
+    meta = service.store.get(ACCOUNT)
+    assert meta is not None
+    service.store.save({**meta, "status": "active"})
+    client = _client()
+    history_url = f"/discovery-api/client-sessions/{ACCOUNT}/history"
+    source = SourceMessageContext(-1000000012345, 42)
+    params = {"peer_id": "555", "source_chat_id": str(source.chat_id), "source_message_id": str(source.message_id)}
+    assert client.get(history_url, params={"peer_id": "555", "source_message_id": "42"}).status_code == 422
+    assert client.get(history_url, params=params).json()["error_code"] is None
+    assert gateway.history_sources == [source, source]
+    sent = client.post(
+        f"/discovery-api/client-sessions/{ACCOUNT}/messages",
+        json={**params, "text": "Ответ", "idempotency_key": "idem-source-1"},
+    )
+    assert sent.json()["status"] == "sent"
+    assert gateway.send_sources == [source]
+
+    gateway.history.append(HistoryItem(200, "Входящее", datetime.now(timezone.utc), False))
+    restarted = ClientSessionService(service.store, gateway, webhook, auto_listen=False)
+    delivered = asyncio.run(restarted.poll_once())
+    assert gateway.history_sources[-1] == source
+    assert [item["text"] for item in delivered] == ["Входящее"]
     set_service(None)
 
 

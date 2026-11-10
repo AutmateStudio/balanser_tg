@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -12,7 +13,7 @@ from discovery_api.client_sessions.errors import (
     PasswordRequired,
     SessionRevokedError,
 )
-from discovery_api.client_sessions.gateway import ClientGateway, HistoryItem, QrHandle
+from discovery_api.client_sessions.gateway import ClientGateway, HistoryItem, QrHandle, SourceMessageContext
 from discovery_api.client_sessions.store import FileSessionStore, resolve_sessions_dir
 from discovery_api.client_sessions.telethon_gateway import TelethonGateway
 from discovery_api.client_sessions.webhook import WebhookNotifier
@@ -190,6 +191,7 @@ class ClientSessionService:
             await self.gateway.revoke(self.store.session_path(remote_account_id))
             meta["status"] = "revoked"
             meta["watched_peers"] = []
+            meta.pop("peer_sources", None)
             self.store.save(meta)
         return public_payload({"remote_account_id": remote_account_id, "status": "revoked"})
 
@@ -200,6 +202,7 @@ class ClientSessionService:
         username: str | None,
         text: str,
         idempotency_key: str,
+        source: SourceMessageContext | None = None,
     ) -> dict[str, Any]:
         cached = self.store.idempotency(remote_account_id, idempotency_key)
         if cached:
@@ -215,6 +218,7 @@ class ClientSessionService:
                     peer_id,
                     username,
                     text,
+                    source,
                 )
             except ClientSessionError as exc:
                 if isinstance(exc, SessionRevokedError):
@@ -239,7 +243,7 @@ class ClientSessionService:
             self.store.remember_idempotency(remote_account_id, idempotency_key, payload)
         peer = peer_id or (f"username:{username}" if username else None)
         if peer:
-            await self.watch(remote_account_id, peer, username)
+            await self.watch(remote_account_id, peer, username, source)
             async with self._lock(remote_account_id):
                 self._advance_cursor(remote_account_id, peer, str(message_id))
         return public_payload(payload)
@@ -251,6 +255,7 @@ class ClientSessionService:
         username: str | None,
         cursor: str | None,
         limit: int,
+        source: SourceMessageContext | None = None,
     ) -> dict[str, Any]:
         self._require_active(remote_account_id)
         async with self._lock(remote_account_id):
@@ -262,6 +267,7 @@ class ClientSessionService:
                     cursor,
                     limit,
                     False,
+                    source,
                 )
             except ClientSessionError as exc:
                 return public_payload(
@@ -274,7 +280,7 @@ class ClientSessionService:
                 )
         peer = peer_id or (f"username:{username}" if username else None)
         if peer:
-            await self.watch(remote_account_id, peer, username)
+            await self.watch(remote_account_id, peer, username, source)
         return public_payload(
             {
                 "messages": [_message_view(item) for item in items],
@@ -284,7 +290,13 @@ class ClientSessionService:
             }
         )
 
-    async def watch(self, remote_account_id: str, peer_id: str, username: str | None = None) -> None:
+    async def watch(
+        self,
+        remote_account_id: str,
+        peer_id: str,
+        username: str | None = None,
+        source: SourceMessageContext | None = None,
+    ) -> None:
         async with self._lock(remote_account_id):
             meta = self._require_active(remote_account_id)
             peers = list(meta.get("watched_peers") or [])
@@ -292,8 +304,10 @@ class ClientSessionService:
                 peers.append(peer_id)
                 meta["watched_peers"] = peers
             cursors = dict(meta.get("cursors") or {})
+            if source is not None:
+                meta.setdefault("peer_sources", {})[peer_id] = asdict(source)
             if peer_id not in cursors:
-                cursors[peer_id] = await self._latest_cursor(remote_account_id, peer_id, username)
+                cursors[peer_id] = await self._latest_cursor(remote_account_id, peer_id, username, source)
                 meta["cursors"] = cursors
             self.store.save(meta)
             if self.auto_listen:
@@ -308,6 +322,7 @@ class ClientSessionService:
             async with self._lock(remote_account_id):
                 fresh = self.store.get(remote_account_id) or meta
                 cursors = dict(fresh.get("cursors") or {})
+                sources = fresh.get("peer_sources") or {}
                 for peer in list(fresh.get("watched_peers") or []):
                     username = peer.removeprefix("username:") if peer.startswith("username:") else None
                     peer_id = None if username else peer
@@ -320,6 +335,7 @@ class ClientSessionService:
                             cursor,
                             20,
                             True,
+                            SourceMessageContext(**sources[peer]) if peer in sources else None,
                         )
                     except ClientSessionError as exc:
                         log.info(
@@ -390,6 +406,7 @@ class ClientSessionService:
         remote_account_id: str,
         peer_id: str,
         username: str | None,
+        source: SourceMessageContext | None,
     ) -> str:
         numeric = None if peer_id.startswith("username:") else peer_id
         name = username or (peer_id.removeprefix("username:") if peer_id.startswith("username:") else None)
@@ -401,6 +418,7 @@ class ClientSessionService:
                 None,
                 1,
                 False,
+                source,
             )
         except ClientSessionError:
             return "0"

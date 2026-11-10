@@ -3,8 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from weakref import WeakKeyDictionary
+
+from telethon import errors, types, utils
 
 from discovery_api.client_sessions.errors import (
     FloodWaitError,
@@ -14,7 +18,7 @@ from discovery_api.client_sessions.errors import (
     SessionBusyError,
     SessionRevokedError,
 )
-from discovery_api.client_sessions.gateway import AuthProfile, HistoryItem
+from discovery_api.client_sessions.gateway import AuthProfile, HistoryItem, SourceMessageContext
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +73,7 @@ class TelethonGateway:
     def __init__(self) -> None:
         self._clients: dict[str, object] = {}
         self._client_locks: dict[str, asyncio.Lock] = {}
+        self._dialog_refreshes: WeakKeyDictionary[object, float] = WeakKeyDictionary()
 
     async def begin_qr(self, session_path: Path) -> TelethonQrHandle:
         client = await self._client(session_path, fresh=True)
@@ -81,10 +86,11 @@ class TelethonGateway:
         peer_id: str | None,
         username: str | None,
         text: str,
+        source: SourceMessageContext | None = None,
     ) -> int:
         try:
             client = await self._client(session_path)
-            entity = await self._resolve(client, peer_id, username)
+            entity = await self._resolve(client, peer_id, username, source)
             message = await client.send_message(entity, text)
         except Exception as exc:  # noqa: BLE001
             _reraise_send(exc)
@@ -99,10 +105,11 @@ class TelethonGateway:
         cursor: str | None,
         limit: int,
         newer: bool,
+        source: SourceMessageContext | None = None,
     ) -> tuple[list[HistoryItem], str | None]:
         try:
             client = await self._client(session_path)
-            entity = await self._resolve(client, peer_id, username)
+            entity = await self._resolve(client, peer_id, username, source)
             kwargs: dict[str, object] = {"limit": limit}
             if cursor and cursor.isdigit() and cursor != "0":
                 if newer:
@@ -178,7 +185,13 @@ class TelethonGateway:
         if disconnect:
             await disconnect()
 
-    async def _resolve(self, client: object, peer_id: str | None, username: str | None) -> object:
+    async def _resolve(
+        self,
+        client: object,
+        peer_id: str | None,
+        username: str | None,
+        source: SourceMessageContext | None,
+    ) -> object:
         if username:
             try:
                 return await client.get_entity(username)
@@ -186,11 +199,49 @@ class TelethonGateway:
                 log.info("client sessions: username не резолвится: %s", type(exc).__name__)
                 raise PeerUnavailableError() from exc
         if peer_id and peer_id.isdigit():
+            if source is not None:
+                user = types.PeerUser(int(peer_id))
+                try:
+                    target = await client.get_input_entity(user)
+                except (ValueError, errors.PeerIdInvalidError, errors.UserIdInvalidError):
+                    target = None
+                if isinstance(target, types.InputPeerSelf) or (
+                    isinstance(target, types.InputPeerUser) and target.user_id == user.user_id
+                ):
+                    return target
+                chat = await self._source_chat(client, source.chat_id)
+                return types.InputPeerUserFromMessage(chat, source.message_id, user.user_id)
             try:
                 return await client.get_entity(int(peer_id))
             except Exception as exc:  # noqa: BLE001
                 log.info("client sessions: peer id не резолвится: %s", type(exc).__name__)
                 raise PeerUnavailableError() from exc
+        raise PeerUnavailableError()
+
+    async def _source_chat(self, client: object, chat_id: int) -> object:
+        # Старые записи могут хранить ID супергруппы без префикса -100.
+        chat = types.PeerChannel(chat_id) if chat_id > 0 else utils.get_peer(chat_id)
+        marked_id = utils.get_peer_id(chat)
+        try:
+            target = await client.get_input_entity(chat)
+            if utils.get_peer_id(target) == marked_id:
+                return target
+        except (ValueError, errors.ChannelInvalidError, errors.ChannelPrivateError):
+            pass
+
+        # Новая сессия может ещё не знать группу. Обновляем список доступных
+        # диалогов ограниченно, чтобы недоступный источник не держал очередь.
+        now = time.monotonic()
+        last_refresh = self._dialog_refreshes.get(client)
+        if last_refresh is None or now - last_refresh >= 300:
+            self._dialog_refreshes[client] = now
+            try:
+                dialogs = await asyncio.wait_for(client.get_dialogs(), timeout=5)
+            except asyncio.TimeoutError:
+                raise PeerUnavailableError() from None
+            for dialog in dialogs:
+                if dialog.id == marked_id:
+                    return dialog.input_entity
         raise PeerUnavailableError()
 
 
@@ -233,6 +284,11 @@ def _reraise_send(exc: BaseException) -> None:
         "UsernameInvalidError",
         "UsernameNotOccupiedError",
         "InputUserDeactivatedError",
+        "ChannelInvalidError",
+        "ChannelPrivateError",
+        "ChatIdInvalidError",
+        "MessageIdInvalidError",
+        "MsgIdInvalidError",
     }:
         raise PeerUnavailableError() from exc
     if name in {

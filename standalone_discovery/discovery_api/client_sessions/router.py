@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from discovery_api.client_sessions.errors import ClientSessionError, SessionRevokedError
+from discovery_api.client_sessions.gateway import SourceMessageContext
 from discovery_api.client_sessions.service import get_service
 from discovery_api.client_sessions.store import ACCOUNT_ID_RE
 
@@ -27,6 +28,8 @@ class PasswordRequest(BaseModel):
 class SendRequest(BaseModel):
     peer_id: str | None = None
     username: str | None = None
+    source_chat_id: int | None = None
+    source_message_id: int | None = None
     text: str = Field(..., min_length=1, max_length=4096)
     idempotency_key: str
 
@@ -52,6 +55,22 @@ def _peer(peer_id: str | None, username: str | None) -> tuple[str | None, str | 
     if not clean_peer and not clean_username:
         raise HTTPException(status_code=422, detail="Нужен peer или username")
     return clean_peer, clean_username
+
+
+def _source_context(
+    peer_id: str | None,
+    chat_id: int | None,
+    message_id: int | None,
+) -> SourceMessageContext | None:
+    if chat_id is None and message_id is None:
+        return None
+    if (
+        not peer_id or not 0 < int(peer_id) < 2**63
+        or chat_id is None or not 0 < abs(chat_id) < 2**63
+        or message_id is None or not 0 < message_id < 2**31
+    ):
+        raise HTTPException(status_code=422, detail="Некорректный контекст сообщения")
+    return SourceMessageContext(chat_id, message_id)
 
 
 @router.post("/qr")
@@ -106,6 +125,7 @@ async def send_message(remote_account_id: str, body: SendRequest) -> dict:
     if not IDEMPOTENCY_RE.fullmatch(body.idempotency_key):
         raise HTTPException(status_code=422, detail="Некорректный ключ идемпотентности")
     peer_id, username = _peer(body.peer_id, body.username)
+    source = _source_context(peer_id, body.source_chat_id, body.source_message_id)
     try:
         return await get_service().send_dm(
             remote_account_id,
@@ -113,6 +133,7 @@ async def send_message(remote_account_id: str, body: SendRequest) -> dict:
             username,
             body.text,
             body.idempotency_key,
+            source,
         )
     except SessionRevokedError as exc:
         raise HTTPException(
@@ -128,14 +149,17 @@ async def history(
     username: str | None = None,
     cursor: str | None = None,
     limit: int = 50,
+    source_chat_id: int | None = None,
+    source_message_id: int | None = None,
 ) -> dict:
     _account_or_422(remote_account_id)
     peer, name = _peer(peer_id, username)
+    source = _source_context(peer, source_chat_id, source_message_id)
     safe_limit = min(max(limit, 1), 100)
     if cursor and not cursor.isdigit():
         raise HTTPException(status_code=422, detail="Некорректный курсор")
     try:
-        return await get_service().history(remote_account_id, peer, name, cursor, safe_limit)
+        return await get_service().history(remote_account_id, peer, name, cursor, safe_limit, source)
     except SessionRevokedError as exc:
         raise HTTPException(
             status_code=409,
