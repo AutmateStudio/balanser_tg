@@ -209,7 +209,7 @@ class TelethonGateway:
                     isinstance(target, types.InputPeerUser) and target.user_id == user.user_id
                 ):
                     return target
-                chat = await self._source_chat(client, source.chat_id)
+                chat = await self._source_chat(client, source.chat_id, source.chat_username)
                 return types.InputPeerUserFromMessage(chat, source.message_id, user.user_id)
             try:
                 return await client.get_entity(int(peer_id))
@@ -218,7 +218,7 @@ class TelethonGateway:
                 raise PeerUnavailableError() from exc
         raise PeerUnavailableError()
 
-    async def _source_chat(self, client: object, chat_id: int) -> object:
+    async def _source_chat(self, client: object, chat_id: int, username: str | None) -> object:
         # Старые записи могут хранить ID супергруппы без префикса -100.
         chat = types.PeerChannel(chat_id) if chat_id > 0 else utils.get_peer(chat_id)
         marked_id = utils.get_peer_id(chat)
@@ -228,6 +228,14 @@ class TelethonGateway:
                 return target
         except (ValueError, errors.ChannelInvalidError, errors.ChannelPrivateError):
             pass
+
+        if username:
+            try:
+                target = await client.get_input_entity(username)
+                if utils.get_peer_id(target) == marked_id:
+                    return target
+            except (ValueError, errors.UsernameInvalidError, errors.UsernameNotOccupiedError):
+                pass
 
         # Новая сессия может ещё не знать группу. Обновляем список доступных
         # диалогов ограниченно, чтобы недоступный источник не держал очередь.

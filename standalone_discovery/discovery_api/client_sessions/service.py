@@ -4,7 +4,6 @@ import asyncio
 import logging
 import os
 import uuid
-from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -192,6 +191,7 @@ class ClientSessionService:
             meta["status"] = "revoked"
             meta["watched_peers"] = []
             meta.pop("peer_sources", None)
+            meta.pop("peer_source_usernames", None)
             self.store.save(meta)
         return public_payload({"remote_account_id": remote_account_id, "status": "revoked"})
 
@@ -305,7 +305,15 @@ class ClientSessionService:
                 meta["watched_peers"] = peers
             cursors = dict(meta.get("cursors") or {})
             if source is not None:
-                meta.setdefault("peer_sources", {})[peer_id] = asdict(source)
+                meta.setdefault("peer_sources", {})[peer_id] = {
+                    "chat_id": source.chat_id,
+                    "message_id": source.message_id,
+                }
+                usernames = meta.setdefault("peer_source_usernames", {})
+                if source.chat_username is None:
+                    usernames.pop(peer_id, None)
+                else:
+                    usernames[peer_id] = source.chat_username
             if peer_id not in cursors:
                 cursors[peer_id] = await self._latest_cursor(remote_account_id, peer_id, username, source)
                 meta["cursors"] = cursors
@@ -323,6 +331,7 @@ class ClientSessionService:
                 fresh = self.store.get(remote_account_id) or meta
                 cursors = dict(fresh.get("cursors") or {})
                 sources = fresh.get("peer_sources") or {}
+                source_usernames = fresh.get("peer_source_usernames") or {}
                 for peer in list(fresh.get("watched_peers") or []):
                     username = peer.removeprefix("username:") if peer.startswith("username:") else None
                     peer_id = None if username else peer
@@ -335,7 +344,8 @@ class ClientSessionService:
                             cursor,
                             20,
                             True,
-                            SourceMessageContext(**sources[peer]) if peer in sources else None,
+                            SourceMessageContext(**sources[peer], chat_username=source_usernames.get(peer))
+                            if peer in sources else None,
                         )
                     except ClientSessionError as exc:
                         log.info(

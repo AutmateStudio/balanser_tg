@@ -25,6 +25,7 @@ class HistoryItem:
 class SourceMessageContext:
     chat_id: int
     message_id: int
+    chat_username: str | None = None
 
 
 class QrHandle(Protocol):
