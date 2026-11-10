@@ -62,3 +62,10 @@ class ClientGateway(Protocol):
     ) -> tuple[list[HistoryItem], str | None]: ...
 
     async def revoke(self, session_path: Path) -> None: ...
+
+    async def get_author_username(
+        self,
+        session_path: Path,
+        peer_id: str,
+        source: SourceMessageContext | None,
+    ) -> str | None: ...

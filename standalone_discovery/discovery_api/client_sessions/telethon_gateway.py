@@ -137,6 +137,22 @@ class TelethonGateway:
             if path.is_file():
                 path.unlink()
 
+    async def get_author_username(
+        self,
+        session_path: Path,
+        peer_id: str,
+        source: SourceMessageContext | None,
+    ) -> str | None:
+        client = await self._client(session_path)
+        entity = (
+            await self._resolve(client, peer_id, None, source)
+            if source else types.PeerUser(int(peer_id))
+        )
+        profile = await client.get_entity(entity)
+        if isinstance(profile, types.User) and profile.id == int(peer_id):
+            return profile.username
+        return None
+
     async def _client(self, session_path: Path, fresh: bool = False) -> object:
         from telethon import TelegramClient
 

@@ -157,6 +157,7 @@ async def history(
     source_chat_id: int | None = None,
     source_message_id: int | None = None,
     source_chat_username: str | None = None,
+    resolve_author_username: bool = False,
 ) -> dict:
     _account_or_422(remote_account_id)
     peer, name = _peer(peer_id, username)
@@ -165,7 +166,9 @@ async def history(
     if cursor and not cursor.isdigit():
         raise HTTPException(status_code=422, detail="Некорректный курсор")
     try:
-        return await get_service().history(remote_account_id, peer, name, cursor, safe_limit, source)
+        return await get_service().history(
+            remote_account_id, peer, name, cursor, safe_limit, source, resolve_author_username,
+        )
     except SessionRevokedError as exc:
         raise HTTPException(
             status_code=409,
