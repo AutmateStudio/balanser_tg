@@ -368,6 +368,9 @@ def test_api_preserves_source_context_for_listener_restart(tmp_path: Path) -> No
     )
     assert sent.json()["status"] == "sent"
     assert gateway.send_sources == [source]
+    stored = service.store.get(ACCOUNT)
+    assert stored is not None
+    assert stored["peer_sources"]["555"] == {"chat_id": source.chat_id, "message_id": source.message_id}
 
     gateway.history.append(HistoryItem(200, "Входящее", datetime.now(timezone.utc), False))
     restarted = ClientSessionService(service.store, gateway, webhook, auto_listen=False)
