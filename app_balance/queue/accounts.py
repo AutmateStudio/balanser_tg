@@ -21,6 +21,7 @@ class Account:
     current_task_id: int | None
     cooldown_until: datetime | None
     last_used_at: datetime | None
+    last_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +134,7 @@ UPDATE accounts
 SET current_task_id = $2, last_used_at = now()
 WHERE id = $1 AND current_task_id IS NULL
   AND (cooldown_until IS NULL OR cooldown_until <= now())
+  AND ($3 OR NOT starts_with(COALESCE(last_error, ''), 'account_frozen:'))
 RETURNING id
 """
 
@@ -163,6 +165,7 @@ SET cooldown_until = GREATEST(COALESCE(cooldown_until, $2::timestamptz), $2::tim
     END,
     updated_at = now()
 WHERE session_name = $1
+  AND NOT starts_with(COALESCE(last_error, ''), 'account_frozen:')
 RETURNING id
 """
 
@@ -202,7 +205,23 @@ SET status = 'error',
     updated_at = now()
 WHERE session_name = $1
   AND status <> 'banned'
+  AND NOT starts_with(COALESCE(last_error, ''), 'account_frozen:')
 RETURNING id
+"""
+
+_FREEZE_ACCOUNT_SQL = """
+WITH frozen AS (
+    UPDATE accounts
+    SET status = 'error', is_enabled = false, cooldown_until = NULL,
+        last_error = $2, last_error_at = now(), updated_at = now()
+    WHERE id = $1 AND status <> 'banned'
+    RETURNING id
+)
+UPDATE task_queue
+SET account_id = NULL, run_after = LEAST(run_after, now()), updated_at = now()
+WHERE account_id IN (SELECT id FROM frozen)
+  AND task_type_code = 'parser_add_channel'
+  AND status IN ('queued', 'scheduled', 'retry')
 """
 
 _REACTIVATE_FROM_ERROR_SQL = """
@@ -214,6 +233,7 @@ SET status = 'active',
     updated_at = now()
 WHERE session_name = $1
   AND status = 'error'
+  AND ($2 OR NOT starts_with(COALESCE(last_error, ''), 'account_frozen:'))
 RETURNING id
 """
 
@@ -280,6 +300,7 @@ def _row_to_account(row) -> Account:
         current_task_id=row["current_task_id"],
         cooldown_until=row["cooldown_until"],
         last_used_at=row["last_used_at"],
+        last_error=row.get("last_error"),
     )
 
 
@@ -308,7 +329,7 @@ class AccountsRepo:
         самоподдерживающийся livelock без единого успешного done.
         """
         async with acquire() as conn:
-            reserved = await conn.fetchval(_RESERVE_SQL, account_id, task_id)
+            reserved = await conn.fetchval(_RESERVE_SQL, account_id, task_id, False)
             return reserved is not None
 
     async def reserve_pair(
@@ -339,13 +360,13 @@ class AccountsRepo:
                     return None
 
                 reserved_source = await conn.fetchval(
-                    _RESERVE_SQL, source_id, task_id
+                    _RESERVE_SQL, source_id, task_id, True
                 )
                 if reserved_source is None:
                     return None
 
                 reserved_target = await conn.fetchval(
-                    _RESERVE_SQL, target_id, task_id
+                    _RESERVE_SQL, target_id, task_id, False
                 )
                 if reserved_target is None:
                     raise _ReservePairAborted()
@@ -389,7 +410,7 @@ class AccountsRepo:
             row = await conn.fetchrow(
                 """
                 SELECT id, session_name, status, is_enabled, current_task_id,
-                       cooldown_until, last_used_at
+                       cooldown_until, last_used_at, last_error
                 FROM accounts
                 WHERE id = $1
                 """,
@@ -515,13 +536,20 @@ class AccountsRepo:
             row = await conn.fetchrow(_SET_ACCOUNT_ERROR_SQL, name, reason)
             return row is not None
 
-    async def reactivate_from_unauthorized(self, session_name: str) -> bool:
+    async def freeze_account(self, account_id: int, *, reason: str) -> None:
+        """Отключает аккаунт и возвращает ожидающие подключения в auto-pick."""
+        async with acquire() as conn:
+            await conn.execute(_FREEZE_ACCOUNT_SQL, account_id, f"account_frozen: {reason}")
+
+    async def reactivate_from_unauthorized(
+        self, session_name: str, *, allow_frozen: bool = False
+    ) -> bool:
         """Снимает PG error после успешной re-auth (только status=error, не banned/cooldown)."""
         name = _normalize_session_name_for_pg(session_name)
         if not name:
             return False
         async with acquire() as conn:
-            row = await conn.fetchrow(_REACTIVATE_FROM_ERROR_SQL, name)
+            row = await conn.fetchrow(_REACTIVATE_FROM_ERROR_SQL, name, allow_frozen)
             return row is not None
 
     async def pick_and_reserve(

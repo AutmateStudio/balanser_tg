@@ -99,7 +99,9 @@ async def persist_unauthorized(session_name: str, reason: str = "") -> None:
         )
 
 
-async def persist_account_reauthorized(session_name: str) -> bool:
+async def persist_account_reauthorized(
+    session_name: str, *, allow_frozen: bool = False
+) -> bool:
     """Успешная re-auth → accounts.status=error снимается в active (D6)."""
     name = (session_name or "").strip()
     if not name:
@@ -107,7 +109,7 @@ async def persist_account_reauthorized(session_name: str) -> bool:
     if not await _ensure_pool():
         return False
     try:
-        ok = await _repo.reactivate_from_unauthorized(name)
+        ok = await _repo.reactivate_from_unauthorized(name, allow_frozen=allow_frozen)
         if not ok:
             log.debug(
                 "account_health_sync: reactivate для %s — нет строки со status=error",

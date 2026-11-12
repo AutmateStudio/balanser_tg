@@ -1,13 +1,14 @@
 """C2 — unit-тесты TaskDispatcher (без PG)."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
 
 from app_balance.queue.accounts import Account
+from app_balance.queue.adapter import _raise_clump_result_error
 from app_balance.queue.dispatch import DispatchResult, TaskDispatcher
 from app_balance.queue.error_codes import ErrorCode
 from app_balance.queue.errors import (
@@ -736,6 +737,56 @@ async def test_e2_unauthorized_notifies_session(monkeypatch) -> None:
     assert notified == [
         ("sess_99", "Сессия '/app/sessions/test4' не авторизована"),
     ]
+
+
+@pytest.mark.parametrize("raw_code", ["clump_error", "join_pending"])
+@pytest.mark.asyncio
+async def test_frozen_telegram_response_disables_account_and_retries_with_auto_pick(
+    monkeypatch, raw_code: str
+) -> None:
+    reason = "You tried to use a method that is not available for frozen accounts"
+    frozen: list[tuple[int, str]] = []
+    queue = _fake_queue()
+
+    class FreezableAccounts(FakeAccounts):
+        async def freeze_account(self, account_id: int, *, reason: str) -> None:
+            frozen.append((account_id, reason))
+
+    class FreezeOnFirstAccount(MockTaskAdapter):
+        async def execute(self, task, *, account):
+            if account.id == 99:
+                _raise_clump_result_error({"error_code": raw_code, "error": reason})
+            await super().execute(task, account=account)
+
+    accounts = FreezableAccounts(pick_result=_account(42))
+    attempts = FakeAttempts()
+    monkeypatch.setattr("discovery_api.session_registry.mark_parser_session_frozen", lambda *_: None)
+    dispatcher = _dispatcher(
+        queue, accounts, FakeTaskTypes(_task_type()), FreezeOnFirstAccount(), attempts=attempts
+    )
+
+    assert await dispatcher.dispatch(_claimed(43, account_id=99)) == DispatchResult.RETRIED
+    assert frozen == [(99, reason)]
+    assert queue.unassigned == [43]
+    assert queue.retry_delays == [0]
+    assert attempts.finished[0]["error_code"] == "account_frozen"
+    assert await dispatcher.dispatch(_claimed(43)) == DispatchResult.COMPLETED
+    assert queue.assigned == [(43, 42)]
+
+
+@pytest.mark.asyncio
+async def test_preexisting_task_detaches_from_already_frozen_account() -> None:
+    class FrozenAccounts(FakeAccounts):
+        async def get_by_id(self, account_id: int) -> Account | None:
+            return replace(_account(account_id), last_error="account_frozen: FROZEN_METHOD_INVALID")
+
+    queue = _fake_queue()
+    accounts = FrozenAccounts(reserve_ok=False)
+    dispatcher = _dispatcher(queue, accounts, FakeTaskTypes(_task_type()), MockTaskAdapter())
+
+    assert await dispatcher.dispatch(_claimed(44, account_id=99)) == DispatchResult.POSTPONED
+    assert queue.unassigned == [44]
+    assert queue.postponed[0][2] == "account_frozen"
 
 
 @pytest.mark.asyncio

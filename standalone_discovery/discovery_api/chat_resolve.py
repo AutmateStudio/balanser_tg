@@ -22,6 +22,8 @@ from telethon.errors import (
 )
 from telethon.tl import functions, types
 
+from discovery_api.session_health import is_frozen_account_error
+
 log = logging.getLogger(__name__)
 
 EntityKind = Literal["channel", "supergroup", "group", "user", "unknown"]
@@ -231,6 +233,8 @@ async def _join_channel_entity(
         )
         raise
     except Exception as e:
+        if is_frozen_account_error(e):
+            raise
         log.warning(
             "resolve ref=%s: JoinChannel FAIL role=%s chat=%s: %s",
             raw_ref,
@@ -284,6 +288,8 @@ async def _check_listen_access(
             )
             return False, "приватный канал/группа"
         except Exception as e:
+            if is_frozen_account_error(e):
+                raise
             log.debug(
                 "resolve ref=%s: проверка доступа role=%s chat=%s: %s",
                 raw_ref,

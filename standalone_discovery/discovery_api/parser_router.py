@@ -1128,7 +1128,7 @@ async def parser_account_reactivate(session_name: str) -> AccountFullSummary:
                 detail=f"Сессия {norm} не авторизована; войдите через QR перед reactivate",
             )
         raise HTTPException(status_code=409, detail=err)
-    await notify_session_reauthorized(norm)
+    await notify_session_reauthorized(norm, allow_frozen=True)
 
     from discovery_api.session_dialogs import refresh_and_persist_channel_count
     from discovery_api.session_registry import find_clump_for_session

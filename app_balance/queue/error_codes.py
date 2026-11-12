@@ -23,6 +23,7 @@ class ErrorCode(StrEnum):
     CLUMP_ERROR = "clump_error"
     CLUMP_NOT_LOADED = "clump_not_loaded"
     ACCOUNT_UNAUTHORIZED = "account_unauthorized"
+    ACCOUNT_FROZEN = "account_frozen"
     CHANNELS_TOO_MUCH = "channels_too_much"
 
     # --- permanent ---

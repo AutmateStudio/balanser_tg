@@ -91,11 +91,32 @@ def account_unauthorized_retry_seconds() -> int:
         return 1800
 
 
+class FrozenAccountError(RetryableError):
+    account_id: int | None = None
+
+    def __init__(self, message: str) -> None:
+        super().__init__(ErrorCode.ACCOUNT_FROZEN, message, retry_after_seconds=0)
+
+
+def map_frozen_account_error(error: BaseException | str) -> FrozenAccountError | None:
+    try:
+        from discovery_api.session_health import is_frozen_account_error
+    except ImportError:
+        return None
+    if is_frozen_account_error(error):
+        return FrozenAccountError(str(error))
+    return None
+
+
 def map_clump_error_message(err: str) -> QueueTaskError:
     """Маппинг строки ошибки clump → typed error (E2)."""
     text = str(err).strip()
     if not text:
         return RetryableError(ErrorCode.CLUMP_ERROR, "empty clump error")
+
+    frozen = map_frozen_account_error(text)
+    if frozen is not None:
+        return frozen
 
     lowered = text.lower()
     normalized = lowered.replace(" ", "")
@@ -209,7 +230,11 @@ def map_clump_error_message(err: str) -> QueueTaskError:
 
 def map_telethon_exception(exc: BaseException) -> QueueTaskError:
     """E2: Telethon/сеть/сессия → typed error через classify_telethon_error."""
-    # Без импорта discovery_api: TypeError от get_input_peer(None).
+    frozen = map_frozen_account_error(exc)
+    if frozen is not None:
+        return frozen
+
+    # TypeError от get_input_peer(None).
     msg_lower = str(exc).lower()
     if isinstance(exc, TypeError) and (
         "peer" in msg_lower or "nonetype" in msg_lower

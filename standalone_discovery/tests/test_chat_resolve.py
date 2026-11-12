@@ -166,6 +166,16 @@ class ResolveListenTargetTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, "join_pending")
             self.assertIn("не удалось вступить", str(ctx.exception))
 
+    def test_join_propagates_frozen_account(self) -> None:
+        channel = _make_channel(megagroup=True)
+        client = AsyncMock(side_effect=RuntimeError("FROZEN_METHOD_INVALID"))
+        client.get_entity = AsyncMock(return_value=channel)
+
+        with self.assertRaisesRegex(RuntimeError, "FROZEN_METHOD_INVALID"):
+            _run(resolve_listen_target(client, "@test"))
+
+        self.assertEqual(client.await_count, 1)
+
     def test_join_flood_wait_propagates_not_join_pending(self) -> None:
         channel = _make_channel(broadcast=True, channel_id=111)
         discussion = _make_channel(megagroup=True, channel_id=222, title="Discuss")

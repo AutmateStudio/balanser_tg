@@ -122,7 +122,7 @@ async def test_persist_account_reauthorized_calls_reactivate(
         ok = await sync.persist_account_reauthorized("/app/sessions/Client1")
 
     assert ok is True
-    mock_react.assert_awaited_once_with("/app/sessions/Client1")
+    mock_react.assert_awaited_once_with("/app/sessions/Client1", allow_frozen=False)
 
 
 @pytest.mark.asyncio

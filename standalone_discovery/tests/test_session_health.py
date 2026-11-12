@@ -180,3 +180,17 @@ class AccountAuthWatchdogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_frozen_session_requires_explicit_reactivation():
+    health = SessionHealth()
+    health.mark_connected()
+    health.mark_frozen("FROZEN_METHOD_INVALID")
+    health.mark_disconnected()
+    health.mark_connected()
+
+    assert not health.is_available()
+    assert not health.should_attempt_reauth(0)
+    assert not health.mark_reauthorized()
+    assert health.mark_reauthorized(allow_frozen=True)
+    assert health.is_available()

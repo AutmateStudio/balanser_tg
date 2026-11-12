@@ -13,12 +13,14 @@ from app_balance.queue.channel_assignment_sync import (
 )
 from app_balance.queue.error_codes import ErrorCode
 from app_balance.queue.errors import (
+    FrozenAccountError,
     PermanentError,
     QueueTaskError,
     RetryableError,
     account_unauthorized_retry_seconds,
     join_pending_retry_seconds,
     map_clump_error_message,
+    map_frozen_account_error,
     map_telethon_exception,
 )
 from app_balance.queue.channel_leave import leave_tracked_channel
@@ -219,6 +221,9 @@ def _raise_clump_result_error(result: dict[str, Any]) -> None:
     error = result.get("error")
     if not error:
         return
+    frozen = map_frozen_account_error(str(error))
+    if frozen is not None:
+        raise frozen
     error_code = result.get("error_code")
     if isinstance(error_code, str) and error_code.strip():
         code = error_code.strip()
@@ -424,10 +429,16 @@ async def _execute_move_channel(
 
     try:
         removed = await source_clump.remove_channel(channel_ref)
+    except FrozenAccountError as exc:
+        exc.account_id = source_id
+        raise
     except QueueTaskError:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise map_telethon_exception(exc) from exc
+        error = map_telethon_exception(exc)
+        if isinstance(error, FrozenAccountError):
+            error.account_id = source_id
+        raise error from exc
     if not removed:
         log.info(
             "execute_task: move_channel cross-clump — канал уже отсутствовал "

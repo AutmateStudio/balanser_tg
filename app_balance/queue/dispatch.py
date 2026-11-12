@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from app_balance.queue.error_codes import ErrorCode, classify_exception_code, normalize_error_code
 from app_balance.queue.errors import (
+    FrozenAccountError,
     PermanentError,
     QueueTaskError,
     ResourceError,
@@ -51,6 +52,7 @@ _ACCOUNT_SCOPED_RETRY_CODES = frozenset(
     {
         ErrorCode.CHANNELS_TOO_MUCH,
         ErrorCode.ACCOUNT_UNAUTHORIZED,
+        ErrorCode.ACCOUNT_FROZEN,
     }
 )
 # collect/update тоже фиксируют account_id — при unauthorized нужно
@@ -160,6 +162,7 @@ class TaskDispatcher:
         attempt_number: int | None = None
         execute_account: Account | None = None
         task_type: TaskType | None = None
+        dual: DualReserveResult | None = None
 
         try:
             task_type = await self._task_types.get_by_code(task.task_type_code)
@@ -335,7 +338,14 @@ class TaskDispatcher:
                 task_id=task.id,
                 account=account_name,
             )
-            await self._sync_account_health_on_error(execute_account, exc)
+            affected_account = execute_account
+            if (
+                isinstance(exc, FrozenAccountError)
+                and dual is not None
+                and exc.account_id == dual.source.id
+            ):
+                affected_account = dual.source
+            await self._sync_account_health_on_error(affected_account, exc)
             await self._maybe_unassign_account_on_retry(task, task_type, exc)
             delay = (
                 exc.retry_after_seconds
@@ -612,6 +622,13 @@ class TaskDispatcher:
         ok = await self._accounts.reserve(account_id, task.id)
 
         if not ok:
+            account = await self._accounts.get_by_id(account_id)
+            if account is not None and (account.last_error or "").startswith("account_frozen:"):
+                await self._maybe_unassign_account_on_retry(
+                    task, task_type, RetryableError(ErrorCode.ACCOUNT_FROZEN)
+                )
+                await self._postpone_task(task, task_type=task_type, reason=ErrorCode.ACCOUNT_FROZEN)
+                return None
 
             await self._maybe_unassign_on_reserve_fail(task, task_type)
 
@@ -929,6 +946,17 @@ class TaskDispatcher:
                     account.session_name,
                     exc_info=True,
                 )
+        elif code == ErrorCode.ACCOUNT_FROZEN:
+            message = getattr(exc, "message", None) or str(exc)
+            try:
+                await self._accounts.freeze_account(account.id, reason=message)
+            except Exception:
+                logger.exception("dispatch: не удалось отключить замороженный аккаунт %s", account.id)
+            try:
+                from discovery_api.session_registry import mark_parser_session_frozen
+            except ImportError:
+                return
+            mark_parser_session_frozen(account.session_name, message)
         elif code == ErrorCode.ACCOUNT_UNAUTHORIZED:
             message = getattr(exc, "message", None) or str(exc)
             try:

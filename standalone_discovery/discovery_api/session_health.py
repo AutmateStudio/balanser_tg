@@ -99,6 +99,17 @@ def is_session_unauthorized_error(exc: BaseException) -> bool:
     return any(marker in msg for marker in _UNAUTHORIZED_MESSAGE_MARKERS)
 
 
+def is_frozen_account_error(error: BaseException | str) -> bool:
+    """Распознаёт ограничение Telegram на операции замороженного аккаунта."""
+    message = str(error).lower()
+    return (
+        type(error).__name__ == "FrozenMethodInvalidError"
+        or "frozen account" in message
+        or "frozen_method_invalid" in message
+        or message.startswith("account_frozen:")
+    )
+
+
 def is_conflicting_auth_key_error(exc: BaseException | str) -> bool:
     """True для auth_key, одновременно использованного с двух IP.
 
@@ -150,6 +161,7 @@ class SessionHealth:
     last_error_at: Optional[float] = None
     reconnect_count: int = 0
     banned: bool = False
+    frozen: bool = False
     ban_reason: Optional[str] = None
     last_reauth_attempt_at: Optional[float] = None
     reauth_attempt_count: int = 0
@@ -167,10 +179,12 @@ class SessionHealth:
 
     def mark_disconnected(self) -> None:
         self.connected = False
-        if not self.banned:
+        if not self.banned and not self.frozen:
             self.status = SessionStatus.DISCONNECTED
 
     def mark_flood(self, seconds: int) -> None:
+        if self.frozen:
+            return
         secs = max(0, int(seconds or 0))
         self.flood_until = time.time() + secs
         self.flood_wait_count += 1
@@ -204,13 +218,20 @@ class SessionHealth:
         self.last_error_at = time.time()
         self.error_count += 1
 
-    def mark_reauthorized(self) -> bool:
-        """Снимает unauthorized-ERROR после успешной re-auth (не трогает banned/flood)."""
+    def mark_frozen(self, reason: str) -> None:
+        self.mark_unauthorized(reason)
+        self.flood_until = None
+        self.frozen = True
+
+    def mark_reauthorized(self, *, allow_frozen: bool = False) -> bool:
+        """Снимает auth-ошибку после re-auth, frozen — при явном восстановлении."""
         if self.banned:
             return False
-        unauthorized_error = (
-            self.status == SessionStatus.ERROR
-            and is_session_unauthorized_error(RuntimeError(self.last_error or ""))
+        reason = self.last_error or ""
+        if self.frozen and not allow_frozen:
+            return False
+        unauthorized_error = self.status == SessionStatus.ERROR and (
+            self.frozen or is_session_unauthorized_error(RuntimeError(reason))
         )
         recoverable_disconnected = self.status in (
             SessionStatus.STARTING,
@@ -220,6 +241,7 @@ class SessionHealth:
             return False
         self.connected = True
         self.status = SessionStatus.HEALTHY
+        self.frozen = False
         if unauthorized_error:
             self.last_error = None
             self.last_error_at = None
@@ -239,7 +261,7 @@ class SessionHealth:
         ``allow_starting=True`` — также для STARTING без Telethon-клиента
         (зачисленная сессия без каналов / после рестарта до первого listener).
         """
-        if self.banned:
+        if self.banned or self.frozen:
             return False
         if self.status == SessionStatus.ERROR:
             pass

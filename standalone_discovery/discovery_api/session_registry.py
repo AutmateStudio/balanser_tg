@@ -1018,13 +1018,17 @@ async def _persist_unauthorized_pg(session_name: str, reason: str) -> None:
     await persist_unauthorized(_canonical_key(session_name), reason)
 
 
-async def _persist_reauthorized_pg(session_name: str) -> bool:
+async def _persist_reauthorized_pg(
+    session_name: str, *, allow_frozen: bool = False
+) -> bool:
     """D6: успешная re-auth → PG accounts.status error → active."""
     try:
         from app_balance.queue.account_health_sync import persist_account_reauthorized
     except ImportError:
         return False
-    return await persist_account_reauthorized(_canonical_key(session_name))
+    return await persist_account_reauthorized(
+        _canonical_key(session_name), allow_frozen=allow_frozen
+    )
 
 
 async def notify_session_unauthorized(session_name: str, message: str) -> None:
@@ -1043,12 +1047,20 @@ async def notify_session_banned(session_name: str, message: str) -> None:
     await _persist_banned_pg(session_name, message)
 
 
-async def notify_session_reauthorized(session_name: str) -> bool:
+def mark_parser_session_frozen(session_name: str, reason: str) -> None:
+    pc = find_parser_client(session_name)
+    if pc is not None:
+        pc.health.mark_frozen(reason)
+
+
+async def notify_session_reauthorized(
+    session_name: str, *, allow_frozen: bool = False
+) -> bool:
     """In-memory health clump + PG accounts после успешной re-auth."""
     pc = find_parser_client(session_name)
     if pc is not None:
-        pc.health.mark_reauthorized()
-    return await _persist_reauthorized_pg(session_name)
+        pc.health.mark_reauthorized(allow_frozen=allow_frozen)
+    return await _persist_reauthorized_pg(session_name, allow_frozen=allow_frozen)
 
 
 class Parser_client:
