@@ -62,9 +62,9 @@ def _extract_full_channel_meta(full_chat: Any) -> Dict[str, Any]:
 
 
 async def add_channel_via_link(client: TelegramClient, link: str) -> Dict[str, Any]:
+    """Резолв и вступление. Score истории сообщений здесь не считается: его ждёт кнопка в кабинете."""
     target = await resolve_listen_target(client, link, join=True)
     source = target.source_entity
-    channel_name = normalize_chat_ref(link)
 
     full_info = target.full_info
     if full_info is None and isinstance(source, types.Channel):
@@ -73,9 +73,6 @@ async def add_channel_via_link(client: TelegramClient, link: str) -> Dict[str, A
     chat = getattr(full_info, "chats", [source])[0] if full_info is not None else source
     full_chat = getattr(full_info, "full_chat", None) if full_info is not None else None
 
-    score_payload = await calculate_score_over_added_channel(
-        client, chat, query=str(channel_name), full_info=full_info
-    )
     chat_meta = extract_channel_meta(chat)
     full_meta = _extract_full_channel_meta(full_chat)
 
@@ -96,10 +93,10 @@ async def add_channel_via_link(client: TelegramClient, link: str) -> Dict[str, A
         "depth": 0,
         "source": "search",
         "recommended_by": None,
-        "score": score_payload["score"],
-        "score_breakdown": score_payload["score_breakdown"],
-        "score_signals": score_payload["score_signals"],
-        "score_hard_flags": score_payload.get("score_hard_flags") or {},
+        "score": None,
+        "score_breakdown": None,
+        "score_signals": None,
+        "score_hard_flags": {},
     }
     payload.update(chat_meta)
     full_meta.pop("participants_count_full", None)
