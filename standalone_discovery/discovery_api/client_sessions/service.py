@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import time
 import uuid
@@ -10,6 +11,7 @@ from typing import Any
 
 from discovery_api.client_sessions.errors import (
     ClientSessionError,
+    FloodWaitError,
     PasswordRequired,
     SessionRevokedError,
 )
@@ -208,8 +210,8 @@ class ClientSessionService:
         cached = self.store.idempotency(remote_account_id, idempotency_key)
         if cached:
             return public_payload(cached)
-        meta = self._require_active(remote_account_id)
         async with self._lock(remote_account_id):
+            meta = self._require_active(remote_account_id)
             cached = self.store.idempotency(remote_account_id, idempotency_key)
             if cached:
                 return public_payload(cached)
@@ -222,6 +224,8 @@ class ClientSessionService:
                     source,
                 )
             except ClientSessionError as exc:
+                if isinstance(exc, FloodWaitError):
+                    self._pause_history(meta, exc)
                 if isinstance(exc, SessionRevokedError):
                     meta["status"] = "revoked"
                     self.store.save(meta)
@@ -244,10 +248,21 @@ class ClientSessionService:
             self.store.remember_idempotency(remote_account_id, idempotency_key, payload)
         peer = peer_id or (f"username:{username}" if username else None)
         if peer:
-            await self.watch(remote_account_id, peer, username, source)
+            await self.watch(remote_account_id, peer, username, source, initial_cursor=str(message_id))
             async with self._lock(remote_account_id):
                 self._advance_cursor(remote_account_id, peer, str(message_id))
         return public_payload(payload)
+
+    @staticmethod
+    def _remaining_history_wait(meta: dict[str, Any]) -> int:
+        return max(0, math.ceil(meta.get("history_retry_at", 0) - time.time()))
+
+    def _pause_history(self, meta: dict[str, Any], error: FloodWaitError) -> None:
+        seconds = max(1, error.retry_after_seconds or 60)
+        meta["history_retry_at"] = max(meta.get("history_retry_at", 0), time.time() + seconds)
+        self.store.save(meta)
+        log.info("client sessions: history flood_wait account=%s wait_seconds=%s",
+                 meta["remote_account_id"], seconds)
 
     async def history(
         self,
@@ -259,12 +274,15 @@ class ClientSessionService:
         source: SourceMessageContext | None = None,
         resolve_author_username: bool = False,
     ) -> dict[str, Any]:
-        self._require_active(remote_account_id)
         started_at = time.monotonic()
         author: dict[str, str | None] = {}
         session_path = self.store.session_path(remote_account_id)
         async with self._lock(remote_account_id):
+            meta = self._require_active(remote_account_id)
+            remaining = self._remaining_history_wait(meta)
             try:
+                if remaining:
+                    raise FloodWaitError(remaining)
                 items, next_cursor = await self.gateway.get_history(
                     session_path,
                     peer_id,
@@ -275,12 +293,15 @@ class ClientSessionService:
                     source,
                 )
             except ClientSessionError as exc:
+                if isinstance(exc, FloodWaitError) and not remaining:
+                    self._pause_history(meta, exc)
                 return public_payload(
                     {
                         "messages": [],
                         "next_cursor": None,
                         "error_code": exc.code,
                         "error_text": str(exc),
+                        "retry_after_seconds": exc.retry_after_seconds,
                     }
                 )
             if resolve_author_username and peer_id and not username and time.monotonic() - started_at < 10:
@@ -288,11 +309,15 @@ class ClientSessionService:
                     author["author_username"] = await asyncio.wait_for(
                         self.gateway.get_author_username(session_path, peer_id, source), timeout=2,
                     )
+                except FloodWaitError as exc:
+                    self._pause_history(meta, exc)
                 except Exception as exc:
                     log.info("client sessions: профиль автора не обновлён: %s", type(exc).__name__)
         peer = peer_id or (f"username:{username}" if username else None)
         if peer:
-            await self.watch(remote_account_id, peer, username, source)
+            # Первая страница уже содержит последнее сообщение диалога.
+            tip = str(max((item.telegram_message_id for item in items), default=0)) if not cursor else None
+            await self.watch(remote_account_id, peer, username, source, initial_cursor=tip)
         return public_payload(
             {
                 "messages": [_message_view(item) for item in items],
@@ -309,6 +334,8 @@ class ClientSessionService:
         peer_id: str,
         username: str | None = None,
         source: SourceMessageContext | None = None,
+        *,
+        initial_cursor: str | None = None,
     ) -> None:
         async with self._lock(remote_account_id):
             meta = self._require_active(remote_account_id)
@@ -328,7 +355,10 @@ class ClientSessionService:
                 else:
                     usernames[peer_id] = source.chat_username
             if peer_id not in cursors:
-                cursors[peer_id] = await self._latest_cursor(remote_account_id, peer_id, username, source)
+                baseline = initial_cursor
+                if baseline is None:
+                    baseline = await self._latest_cursor(meta, peer_id, username, source)
+                cursors[peer_id] = baseline
                 meta["cursors"] = cursors
             self.store.save(meta)
             if self.auto_listen:
@@ -343,7 +373,7 @@ class ClientSessionService:
             for peer in meta.get("watched_peers") or []:
                 async with self._lock(remote_account_id):
                     fresh = self.store.get(remote_account_id)
-                    if not fresh or fresh.get("status") != "active":
+                    if not fresh or fresh.get("status") != "active" or self._remaining_history_wait(fresh):
                         break
                     if peer not in (fresh.get("watched_peers") or []):
                         continue
@@ -352,6 +382,10 @@ class ClientSessionService:
                     source_usernames = fresh.get("peer_source_usernames") or {}
                     username = peer.removeprefix("username:") if peer.startswith("username:") else None
                     peer_id = None if username else peer
+                    source = (
+                        SourceMessageContext(**sources[peer], chat_username=source_usernames.get(peer))
+                        if peer in sources else None
+                    )
                     cursor = str(cursors.get(peer) or "0")
                     try:
                         items, _next = await self.gateway.get_history(
@@ -361,9 +395,11 @@ class ClientSessionService:
                             cursor,
                             20,
                             True,
-                            SourceMessageContext(**sources[peer], chat_username=source_usernames.get(peer))
-                            if peer in sources else None,
+                            source,
                         )
+                    except FloodWaitError as exc:
+                        self._pause_history(fresh, exc)
+                        break
                     except ClientSessionError as exc:
                         log.info(
                             "client sessions: история %s/%s: %s",
@@ -431,16 +467,18 @@ class ClientSessionService:
 
     async def _latest_cursor(
         self,
-        remote_account_id: str,
+        meta: dict[str, Any],
         peer_id: str,
         username: str | None,
         source: SourceMessageContext | None,
     ) -> str:
+        if self._remaining_history_wait(meta):
+            return "0"
         numeric = None if peer_id.startswith("username:") else peer_id
         name = username or (peer_id.removeprefix("username:") if peer_id.startswith("username:") else None)
         try:
             items, _next = await self.gateway.get_history(
-                self.store.session_path(remote_account_id),
+                self.store.session_path(meta["remote_account_id"]),
                 numeric,
                 name,
                 None,
@@ -448,6 +486,9 @@ class ClientSessionService:
                 False,
                 source,
             )
+        except FloodWaitError as exc:
+            self._pause_history(meta, exc)
+            return "0"
         except ClientSessionError:
             return "0"
         if not items:

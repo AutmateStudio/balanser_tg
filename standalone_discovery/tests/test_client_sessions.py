@@ -389,7 +389,7 @@ def test_api_preserves_source_context_for_listener_restart(tmp_path: Path) -> No
     }
     assert client.get(history_url, params={"peer_id": "555", "source_message_id": "42"}).status_code == 422
     assert client.get(history_url, params=params).json()["error_code"] is None
-    assert gateway.history_sources == [source, source]
+    assert gateway.history_sources == [source]
     sent = client.post(
         f"/discovery-api/client-sessions/{ACCOUNT}/messages",
         json={**params, "text": "Ответ", "idempotency_key": "idem-source-1"},
@@ -493,3 +493,45 @@ def test_client_api_does_not_enroll_parser() -> None:
         client = TestClient(app, raise_server_exceptions=False)
         response = client.post("/discovery-api/client-sessions/qr", json={"remote_account_id": ACCOUNT})
     assert response.status_code == 401  # Mounted and protected by the API-key dependency.
+
+
+@pytest.mark.asyncio
+async def test_history_wait_blocks_other_chats_and_listener_across_restart(tmp_path, monkeypatch):
+    from telethon import errors
+
+    service, gateway, _ = _service(tmp_path)
+    clock = Mock(return_value=1_000_000)
+    monkeypatch.setattr("discovery_api.client_sessions.service.time.time", clock)
+    for account in (ACCOUNT, "account02"):
+        service.store.save({**service.store.ensure(account), "status": "active",
+                            "watched_peers": ["123"], "cursors": {"123": "17"}})
+    failure = errors.FloodWaitError(request=None, capture=20787)
+    telegram = Mock(get_entity=AsyncMock(side_effect=failure))
+    live_gateway = TelethonGateway()
+    live_gateway._client = AsyncMock(return_value=telegram)
+    service.gateway = live_gateway
+    result = await service.history(ACCOUNT, None, "sender", None, 50)
+    assert (result["error_code"], result["retry_after_seconds"]) == ("flood_wait", 20787)
+    restarted, gateway, _ = _service(tmp_path)
+    clock.return_value += 50
+    result = await restarted.history(ACCOUNT, "888", None, None, 50)
+    assert result["retry_after_seconds"] == 20737
+    assert not gateway.history_sources
+    await restarted.poll_once()
+    assert len(gateway.history_sources) == 1
+    assert restarted.store.get(ACCOUNT)["cursors"]["123"] == "17"
+    clock.return_value += 20737
+    assert (await restarted.history(ACCOUNT, "123", None, None, 50))["error_code"] is None
+
+
+@pytest.mark.asyncio
+async def test_listener_flood_wait_blocks_site_history_and_preserves_cursor(tmp_path):
+    service, gateway, _ = _service(tmp_path)
+    service.store.save({**service.store.ensure(ACCOUNT), "status": "active",
+                        "watched_peers": ["123", "456"], "cursors": {"123": "19", "456": "7"}})
+    gateway.get_history = AsyncMock(side_effect=FloodWaitError(300))
+    await service.poll_once()
+    response = await service.history(ACCOUNT, "789", None, None, 50)
+    assert response["error_code"] == "flood_wait" and response["retry_after_seconds"] == 300
+    gateway.get_history.assert_awaited_once()
+    assert service.store.get(ACCOUNT)["cursors"] == {"123": "19", "456": "7"}

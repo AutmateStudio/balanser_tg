@@ -11,6 +11,7 @@ from weakref import WeakKeyDictionary
 from telethon import errors, types, utils
 
 from discovery_api.client_sessions.errors import (
+    ClientSessionError,
     FloodWaitError,
     PasswordRequired,
     PeerUnavailableError,
@@ -144,11 +145,14 @@ class TelethonGateway:
         source: SourceMessageContext | None,
     ) -> str | None:
         client = await self._client(session_path)
-        entity = (
-            await self._resolve(client, peer_id, None, source)
-            if source else types.PeerUser(int(peer_id))
-        )
-        profile = await client.get_entity(entity)
+        try:
+            entity = (
+                await self._resolve(client, peer_id, None, source)
+                if source else types.PeerUser(int(peer_id))
+            )
+            profile = await client.get_entity(entity)
+        except errors.FloodWaitError as exc:
+            raise FloodWaitError(exc.seconds) from exc
         if isinstance(profile, types.User) and profile.id == int(peer_id):
             return profile.username
         return None
@@ -175,7 +179,7 @@ class TelethonGateway:
                 await self._disconnect(current)
                 self._clients.pop(key, None)
 
-            client = TelegramClient(key, get_api_id(), get_api_hash())
+            client = TelegramClient(key, get_api_id(), get_api_hash(), flood_sleep_threshold=0)
             try:
                 await client.connect()
             except Exception as exc:  # noqa: BLE001
@@ -212,6 +216,7 @@ class TelethonGateway:
             try:
                 return await client.get_entity(username)
             except Exception as exc:  # noqa: BLE001
+                _reraise_send(exc)
                 log.info("client sessions: username не резолвится: %s", type(exc).__name__)
                 raise PeerUnavailableError() from exc
         if peer_id and peer_id.isdigit():
@@ -230,6 +235,7 @@ class TelethonGateway:
             try:
                 return await client.get_entity(int(peer_id))
             except Exception as exc:  # noqa: BLE001
+                _reraise_send(exc)
                 log.info("client sessions: peer id не резолвится: %s", type(exc).__name__)
                 raise PeerUnavailableError() from exc
         raise PeerUnavailableError()
@@ -295,6 +301,8 @@ def _reraise_auth(exc: BaseException) -> None:
 
 
 def _reraise_send(exc: BaseException) -> None:
+    if isinstance(exc, ClientSessionError):
+        raise exc
     name = type(exc).__name__
     if isinstance(exc, sqlite3.OperationalError) and "database is locked" in str(exc).lower():
         raise SessionBusyError() from exc
@@ -322,11 +330,6 @@ def _reraise_send(exc: BaseException) -> None:
         "UserDeactivatedError",
     }:
         raise SessionRevokedError() from exc
-    if isinstance(
-        exc,
-        (FloodWaitError, PrivacyRestrictedError, PeerUnavailableError, SessionBusyError, SessionRevokedError),
-    ):
-        raise exc
 
 
 def _reraise_connection(exc: BaseException) -> None:
