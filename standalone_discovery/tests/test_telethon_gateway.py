@@ -16,8 +16,9 @@ class FakeTelegramClient:
     instances: list["FakeTelegramClient"] = []
     connect_error: BaseException | None = None
 
-    def __init__(self, session: str, _api_id: int, _api_hash: str) -> None:
+    def __init__(self, session: str, _api_id: int, _api_hash: str, *, flood_sleep_threshold: int = 60) -> None:
         self.session = session
+        self.flood_sleep_threshold = flood_sleep_threshold
         self.connected = False
         self.connect_calls = 0
         self.disconnect_calls = 0
@@ -60,6 +61,7 @@ async def test_concurrent_connect_uses_one_client(tmp_path: Path) -> None:
     )
 
     assert clients[0] is clients[1]
+    assert clients[0].flood_sleep_threshold == 0
     assert len(FakeTelegramClient.instances) == 1
     assert FakeTelegramClient.instances[0].connect_calls == 1
 
