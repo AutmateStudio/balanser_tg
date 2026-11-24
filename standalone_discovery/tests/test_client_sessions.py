@@ -70,6 +70,10 @@ class FakeGateway:
         self.get_author_username = AsyncMock(return_value="resolved_author")
         self.handles: list[FakeHandle] = []
         self.revoked = False
+        self.cached_peers: dict[str, str] = {}
+
+    def cached_peer_id(self, session_path: Path, username: str) -> str | None:
+        return self.cached_peers.get(username)
 
     async def begin_qr(self, session_path: Path) -> FakeHandle:
         handle = FakeHandle(self.mode, self.profile)
@@ -535,3 +539,149 @@ async def test_listener_flood_wait_blocks_site_history_and_preserves_cursor(tmp_
     assert response["error_code"] == "flood_wait" and response["retry_after_seconds"] == 300
     gateway.get_history.assert_awaited_once()
     assert service.store.get(ACCOUNT)["cursors"] == {"123": "19", "456": "7"}
+
+
+@pytest.mark.asyncio
+async def test_push_recovers_queued_reply_after_restart_without_polling(tmp_path):
+    service, gateway, webhook = _service(tmp_path)
+    service.push_updates = True
+    meta = service.store.ensure(ACCOUNT)
+    meta["status"] = "active"
+    service.store.save(meta)
+    await service.watch(ACCOUNT, "555")
+    await service.watch(ACCOUNT, "username:LeadAlias")
+    gateway.cached_peers["LeadAlias"] = "777"
+    item = HistoryItem(42, "Ответ", datetime.now(timezone.utc), False)
+    await service._receive_update(ACCOUNT, "999", "unrelated", item)
+    await service._receive_update(ACCOUNT, "555", None, item)
+    await service._receive_update(ACCOUNT, "555", None, item)
+    await service._receive_update(ACCOUNT, "777", None, item)
+    webhook.status = 503
+    assert not await service._deliver_update(ACCOUNT)
+    assert gateway.history_sources == []
+
+    restarted = ClientSessionService(service.store, gateway, webhook, auto_listen=False, push_updates=True)
+    webhook.status = 200
+    assert await restarted._deliver_update(ACCOUNT)
+    assert await restarted._deliver_update(ACCOUNT)
+    assert not await restarted._deliver_update(ACCOUNT)
+    assert [item["peer_id"] for item in webhook.payloads] == ["555", "555", "username:LeadAlias"]
+    assert gateway.history_sources == []
+
+
+@pytest.mark.asyncio
+async def test_push_stops_permanently_invalid_session_and_reports_it_once(tmp_path):
+    from discovery_api.client_sessions.errors import SessionRevokedError
+
+    service, gateway, webhook = _service(tmp_path)
+    service.push_updates = True
+    meta = service.store.ensure(ACCOUNT)
+    meta["status"] = "active"
+    service.store.save(meta)
+    await service.watch(ACCOUNT, "555")
+    gateway.listen_for_messages = AsyncMock(side_effect=SessionRevokedError())
+    await service._receive_loop(ACCOUNT)
+    await service._receive_loop(ACCOUNT)
+    assert gateway.listen_for_messages.await_count == 1
+    assert await service._deliver_update(ACCOUNT)
+    assert not await service._deliver_update(ACCOUNT)
+    assert webhook.payloads == [{"remote_account_id": ACCOUNT, "event": "session_revoked"}]
+    with pytest.raises(SessionRevokedError):
+        await service.history(ACCOUNT, "555", None, None, 50)
+
+@pytest.mark.asyncio
+async def test_telethon_installs_callback_before_connect_and_reuses_session_on_reconnect(tmp_path, monkeypatch):
+    from telethon import TelegramClient, events
+    from discovery_api import config
+    from discovery_api.client_sessions.errors import SessionBusyError
+
+    monkeypatch.setattr(config, "get_api_id", lambda: 123)
+    monkeypatch.setattr(config, "get_api_hash", lambda: "local-fixture")
+    instances = []
+    on_message = AsyncMock()
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            assert kwargs["catch_up"] and not kwargs["auto_reconnect"]
+            self.handlers = []
+            self.connected = False
+            instances.append(self)
+
+        def list_event_handlers(self):
+            return self.handlers
+
+        def add_event_handler(self, handler, builder):
+            assert isinstance(builder, events.NewMessage) and builder.incoming
+            self.handlers.append((handler, builder))
+
+        def remove_event_handler(self, handler):
+            self.handlers = [(callback, builder) for callback, builder in self.handlers if callback is not handler]
+
+        def is_connected(self):
+            return self.connected
+
+        async def connect(self):
+            assert len(self.handlers) == 1
+            self.connected = True
+
+        async def catch_up(self):
+            assert self.connected and len(self.handlers) == 1
+            handler, _ = self.handlers[0]
+            msg = SimpleNamespace(id=41, date=datetime.now(timezone.utc), message="Догнали", out=False)
+            await handler(SimpleNamespace(is_private=True, chat_id=555, sender=None, message=msg))
+            await handler(SimpleNamespace(is_private=False, chat_id=666, sender=None, message=msg))
+
+        async def run_until_disconnected(self):
+            self.connected = False
+
+        async def disconnect(self):
+            self.connected = False
+
+    # Фальшивый транспорт сохраняет настоящую подписку Telethon NewMessage.
+    monkeypatch.setattr(sys.modules[TelegramClient.__module__.split(".")[0]], "TelegramClient", Client)
+    gateway = TelethonGateway(push_updates=True)
+    other_gateway = TelethonGateway(push_updates=True)
+    path = tmp_path / ACCOUNT
+    try:
+        await gateway.listen_for_messages(path, on_message)
+        if sys.platform != "win32":
+            with pytest.raises(SessionBusyError):
+                await other_gateway.listen_for_messages(path, on_message)
+        await gateway.listen_for_messages(path, on_message)
+        assert len(instances) == 1
+        assert [call.args[0] for call in on_message.await_args_list] == ["555", "555"]
+        assert instances[0].handlers == []
+    finally:
+        await gateway.close()
+        await other_gateway.close()
+
+@pytest.mark.asyncio
+async def test_push_listener_resumes_watched_account_and_delivers_without_reading_history(tmp_path):
+    service, gateway, webhook = _service(tmp_path)
+    service.push_updates = True
+    meta = service.store.ensure(ACCOUNT)
+    meta["status"] = "active"
+    service.store.save(meta)
+    await service.watch(ACCOUNT, "555")
+    service.auto_listen = True
+    delivered = asyncio.Event()
+
+    async def receive(_path, on_message):
+        await on_message("555", None, HistoryItem(43, "После старта", datetime.now(timezone.utc), False))
+        await asyncio.Future()
+
+    async def deliver(payload):
+        assert payload["text"] == "После старта"
+        delivered.set()
+        return 200
+
+    gateway.listen_for_messages = AsyncMock(side_effect=receive)
+    webhook.send = AsyncMock(side_effect=deliver)
+    try:
+        await service.resume()
+        await asyncio.wait_for(delivered.wait(), timeout=1)
+        await service.resume()
+        assert gateway.listen_for_messages.await_count == 1
+        assert not gateway.history_sources
+    finally:
+        await service.stop()

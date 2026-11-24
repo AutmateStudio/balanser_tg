@@ -4,6 +4,7 @@ import json
 import os
 import re
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
@@ -49,7 +50,14 @@ class FileSessionStore:
     def save(self, meta: dict[str, Any]) -> None:
         remote_account_id = str(meta["remote_account_id"])
         path = self._meta_path(remote_account_id)
-        path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        with NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.root, delete=False) as temp:
+            pending = Path(temp.name)
+            try:
+                json.dump(meta, temp, ensure_ascii=False, indent=2)
+                temp.close()
+                pending.replace(path)
+            finally:
+                pending.unlink(missing_ok=True)
 
     def ensure(self, remote_account_id: str) -> dict[str, Any]:
         current = self.get(remote_account_id)
@@ -76,7 +84,7 @@ class FileSessionStore:
                 meta = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if meta.get("status") == "active" and meta.get("watched_peers"):
+            if meta.get("status") == "active" and (meta.get("watched_peers") or meta.get("pending_events")):
                 rows.append(meta)
         return rows
 

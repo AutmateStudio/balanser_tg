@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 import re
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from discovery_api.client_sessions.errors import ClientSessionError, SessionRevokedError
 from discovery_api.client_sessions.gateway import SourceMessageContext
-from discovery_api.client_sessions.service import get_service
+from discovery_api.client_sessions.service import get_service, resume_client_listeners, stop_client_listeners
 from discovery_api.client_sessions.store import ACCOUNT_ID_RE
 
-router = APIRouter(prefix="/discovery-api/client-sessions", tags=["client-sessions"])
+@asynccontextmanager
+async def client_sessions_lifespan(_app):
+    await resume_client_listeners()
+    try:
+        yield
+    finally:
+        await stop_client_listeners()
+
+
+router = APIRouter(
+    prefix="/discovery-api/client-sessions", tags=["client-sessions"], lifespan=client_sessions_lifespan,
+)
 
 PEER_RE = re.compile(r"^[0-9]{1,20}$")
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{4,32}$")
