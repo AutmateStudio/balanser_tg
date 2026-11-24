@@ -56,6 +56,7 @@ class ClientSessionService:
         qr_ttl_seconds: float = 300,
         auto_listen: bool = True,
         poll_seconds: float = 8,
+        push_updates: bool = False,
     ) -> None:
         self.store = store
         self.gateway = gateway
@@ -63,10 +64,13 @@ class ClientSessionService:
         self.qr_ttl_seconds = qr_ttl_seconds
         self.auto_listen = auto_listen
         self.poll_seconds = poll_seconds
+        self.push_updates = push_updates
         self._qr: dict[str, dict[str, Any]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._listener: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        self._push_tasks: dict[str, asyncio.Task[None]] = {}
+        self._push_signals: dict[str, asyncio.Event] = {}
 
     def _lock(self, remote_account_id: str) -> asyncio.Lock:
         lock = self._locks.get(remote_account_id)
@@ -183,6 +187,7 @@ class ClientSessionService:
         meta["telegram_user_id"] = str(telegram_user_id)
         meta["username"] = username
         meta["display_name"] = display_name
+        meta.pop("session_error", None)
         self.store.save(meta)
 
     async def revoke(self, remote_account_id: str) -> dict[str, Any]:
@@ -193,9 +198,15 @@ class ClientSessionService:
             await self.gateway.revoke(self.store.session_path(remote_account_id))
             meta["status"] = "revoked"
             meta["watched_peers"] = []
+            meta.pop("pending_events", None)
             meta.pop("peer_sources", None)
             meta.pop("peer_source_usernames", None)
             self.store.save(meta)
+        task = self._push_tasks.pop(remote_account_id, None)
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self._push_signals.pop(remote_account_id, None)
         return public_payload({"remote_account_id": remote_account_id, "status": "revoked"})
 
     async def send_dm(
@@ -210,6 +221,9 @@ class ClientSessionService:
         cached = self.store.idempotency(remote_account_id, idempotency_key)
         if cached:
             return public_payload(cached)
+        peer = peer_id or (f"username:{username}" if username else None)
+        if self.push_updates and peer:
+            await self.watch(remote_account_id, peer, username, source)
         async with self._lock(remote_account_id):
             meta = self._require_active(remote_account_id)
             cached = self.store.idempotency(remote_account_id, idempotency_key)
@@ -227,8 +241,7 @@ class ClientSessionService:
                 if isinstance(exc, FloodWaitError):
                     self._pause_history(meta, exc)
                 if isinstance(exc, SessionRevokedError):
-                    meta["status"] = "revoked"
-                    self.store.save(meta)
+                    self._mark_session_revoked(meta, exc)
                 payload = {
                     "status": "failed",
                     "telegram_message_id": None,
@@ -246,8 +259,7 @@ class ClientSessionService:
                 "retry_after_seconds": None,
             }
             self.store.remember_idempotency(remote_account_id, idempotency_key, payload)
-        peer = peer_id or (f"username:{username}" if username else None)
-        if peer:
+        if peer and not self.push_updates:
             await self.watch(remote_account_id, peer, username, source, initial_cursor=str(message_id))
             async with self._lock(remote_account_id):
                 self._advance_cursor(remote_account_id, peer, str(message_id))
@@ -295,6 +307,8 @@ class ClientSessionService:
             except ClientSessionError as exc:
                 if isinstance(exc, FloodWaitError) and not remaining:
                     self._pause_history(meta, exc)
+                if isinstance(exc, SessionRevokedError):
+                    self._mark_session_revoked(meta, exc)
                 return public_payload(
                     {
                         "messages": [],
@@ -311,6 +325,8 @@ class ClientSessionService:
                     )
                 except FloodWaitError as exc:
                     self._pause_history(meta, exc)
+                except SessionRevokedError as exc:
+                    self._mark_session_revoked(meta, exc)
                 except Exception as exc:
                     log.info("client sessions: профиль автора не обновлён: %s", type(exc).__name__)
         peer = peer_id or (f"username:{username}" if username else None)
@@ -354,7 +370,7 @@ class ClientSessionService:
                     usernames.pop(peer_id, None)
                 else:
                     usernames[peer_id] = source.chat_username
-            if peer_id not in cursors:
+            if not self.push_updates and peer_id not in cursors:
                 baseline = initial_cursor
                 if baseline is None:
                     baseline = await self._latest_cursor(meta, peer_id, username, source)
@@ -362,7 +378,149 @@ class ClientSessionService:
                 meta["cursors"] = cursors
             self.store.save(meta)
             if self.auto_listen:
-                self.ensure_listener()
+                if self.push_updates:
+                    self._ensure_push(remote_account_id)
+                else:
+                    self.ensure_listener()
+
+    def _mark_session_revoked(self, meta: dict[str, Any], error: SessionRevokedError) -> None:
+        if meta.get("session_error"):
+            return
+        remote_account_id = str(meta["remote_account_id"])
+        meta["session_error"] = error.code
+        if self.push_updates:
+            meta.setdefault("pending_events", {})[error.code] = {
+                "event": error.code, "remote_account_id": remote_account_id,
+            }
+        self.store.save(meta)
+        log.warning("client sessions: вход недействителен account=%s cause=%s",
+                    remote_account_id, type(error.__cause__ or error).__name__)
+        if self.auto_listen and self.push_updates:
+            self._ensure_push(remote_account_id)
+            self._push_signals[remote_account_id].set()
+
+    def _ensure_push(self, remote_account_id: str) -> None:
+        current = self._push_tasks.get(remote_account_id)
+        if current is None or current.done():
+            self._push_signals[remote_account_id] = asyncio.Event()
+            self._push_tasks[remote_account_id] = asyncio.create_task(self._run_push(remote_account_id))
+
+    async def _receive_update(
+        self, remote_account_id: str, peer_id: str, username: str | None, item: HistoryItem,
+    ) -> None:
+        if item.outgoing:
+            return
+        async with self._lock(remote_account_id):
+            meta = self.store.get(remote_account_id)
+            if not meta or meta["status"] != "active" or meta.get("session_error"):
+                return
+            pending = meta.setdefault("pending_events", {})
+            before = len(pending)
+            for peer in meta.get("watched_peers") or []:
+                if peer != peer_id and not self._matches_alias(remote_account_id, peer, peer_id, username):
+                    continue
+                key = f"{peer}:{item.telegram_message_id}"
+                if key not in pending:
+                    pending[key] = {
+                        "remote_account_id": remote_account_id,
+                        "peer_id": peer,
+                        "telegram_message_id": str(item.telegram_message_id),
+                        "text": item.text,
+                        "occurred_at": _iso(item.occurred_at),
+                        "direction": "incoming",
+                    }
+            if len(pending) != before:
+                self.store.save(meta)
+                signal = self._push_signals.get(remote_account_id)
+                if signal is not None:
+                    signal.set()
+
+    def _matches_alias(
+        self, remote_account_id: str, peer: str, peer_id: str, event_username: str | None,
+    ) -> bool:
+        if not peer.startswith("username:"):
+            return False
+        alias = peer.removeprefix("username:")
+        if event_username:
+            return alias.casefold() == event_username.casefold()
+        return self.gateway.cached_peer_id(self.store.session_path(remote_account_id), alias) == peer_id
+
+    async def _deliver_update(self, remote_account_id: str) -> bool:
+        meta = self.store.get(remote_account_id) or {}
+        pending = meta.get("pending_events") or {}
+        if meta.get("status") != "active" or not pending:
+            return False
+        key, payload = next(iter(pending.items()))
+        try:
+            status = await self.webhook.send(payload)
+        except Exception as exc:
+            log.warning("client sessions: доставка не удалась account=%s cause=%s",
+                        remote_account_id, type(exc).__name__)
+            return False
+        if not 200 <= status < 300:
+            log.warning("client sessions: доставка не удалась account=%s status=%s", remote_account_id, status)
+            return False
+        async with self._lock(remote_account_id):
+            fresh = self.store.get(remote_account_id) or {}
+            current = fresh.get("pending_events") or {}
+            if current.get(key) == payload:
+                del current[key]
+                self.store.save(fresh)
+        log.info("client sessions: webhook подтвердил доставку account=%s event=%s",
+                 remote_account_id, payload.get("event", "incoming"))
+        return True
+
+    async def _receive_loop(self, remote_account_id: str) -> None:
+        async def receive(peer: str, username: str | None, item: HistoryItem) -> None:
+            await self._receive_update(remote_account_id, peer, username, item)
+
+        delay = 5.0
+        while True:
+            try:
+                meta = self._require_active(remote_account_id)
+            except SessionRevokedError:
+                return
+            started = time.monotonic()
+            wait = delay
+            try:
+                await self.gateway.listen_for_messages(self.store.session_path(remote_account_id), receive)
+            except SessionRevokedError as exc:
+                async with self._lock(remote_account_id):
+                    fresh = self.store.get(remote_account_id)
+                    if fresh and fresh.get("status") == "active" and fresh.get("qr_session_id") == meta.get("qr_session_id"):
+                        self._mark_session_revoked(fresh, exc)
+                return
+            except FloodWaitError as exc:
+                wait = max(delay, exc.retry_after_seconds or 0)
+            except Exception as exc:
+                log.warning("client sessions: соединение оборвалось account=%s cause=%s",
+                            remote_account_id, type(exc).__name__)
+            connected_for = time.monotonic() - started
+            await asyncio.sleep(wait)
+            delay = 5.0 if connected_for >= 60 else min(delay * 2, 120)
+
+    async def _run_push(self, remote_account_id: str) -> None:
+        signal = self._push_signals[remote_account_id]
+        receive = asyncio.create_task(self._receive_loop(remote_account_id))
+        try:
+            while True:
+                signal.clear()
+                meta = self.store.get(remote_account_id) or {}
+                if meta.get("session_error") and not receive.done():
+                    receive.cancel()
+                    await asyncio.gather(receive, return_exceptions=True)
+                if await self._deliver_update(remote_account_id):
+                    continue
+                meta = self.store.get(remote_account_id) or {}
+                if meta.get("status") != "active" or (receive.done() and not meta.get("pending_events")):
+                    return
+                try:
+                    await asyncio.wait_for(signal.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            receive.cancel()
+            await asyncio.gather(receive, return_exceptions=True)
 
     async def poll_once(self) -> list[dict[str, Any]]:
         delivered: list[dict[str, Any]] = []
@@ -373,7 +531,8 @@ class ClientSessionService:
             for peer in meta.get("watched_peers") or []:
                 async with self._lock(remote_account_id):
                     fresh = self.store.get(remote_account_id)
-                    if not fresh or fresh.get("status") != "active" or self._remaining_history_wait(fresh):
+                    if (not fresh or fresh.get("status") != "active" or fresh.get("session_error")
+                            or self._remaining_history_wait(fresh)):
                         break
                     if peer not in (fresh.get("watched_peers") or []):
                         continue
@@ -399,6 +558,9 @@ class ClientSessionService:
                         )
                     except FloodWaitError as exc:
                         self._pause_history(fresh, exc)
+                        break
+                    except SessionRevokedError as exc:
+                        self._mark_session_revoked(fresh, exc)
                         break
                     except ClientSessionError as exc:
                         log.info(
@@ -441,11 +603,22 @@ class ClientSessionService:
         self._listener = asyncio.create_task(self._loop())
 
     async def resume(self) -> None:
-        if self.store.list_watched():
+        if not self.auto_listen:
+            return
+        watched = self.store.list_watched()
+        if self.push_updates:
+            for meta in watched:
+                self._ensure_push(str(meta["remote_account_id"]))
+        elif watched:
             self.ensure_listener()
 
     async def stop(self) -> None:
         self._stop.set()
+        for task in self._push_tasks.values():
+            task.cancel()
+        await asyncio.gather(*self._push_tasks.values(), return_exceptions=True)
+        self._push_tasks.clear()
+        self._push_signals.clear()
         if self._listener:
             self._listener.cancel()
             try:
@@ -453,6 +626,8 @@ class ClientSessionService:
             except asyncio.CancelledError:
                 pass
             self._listener = None
+        if isinstance(self.gateway, TelethonGateway):
+            await self.gateway.close()
 
     async def _loop(self) -> None:
         while not self._stop.is_set():
@@ -508,7 +683,7 @@ class ClientSessionService:
 
     def _require_active(self, remote_account_id: str) -> dict[str, Any]:
         meta = self.store.get(remote_account_id)
-        if not meta or meta.get("status") != "active":
+        if not meta or meta.get("status") != "active" or meta.get("session_error"):
             raise SessionRevokedError()
         return meta
 
@@ -531,12 +706,20 @@ def build_default_service() -> ClientSessionService:
         raise RuntimeError("CLIENT_SESSIONS_DIR не задан")
     poll = float(os.getenv("CLIENT_LISTENER_POLL_SECONDS", "8"))
     ttl = float(os.getenv("CLIENT_QR_TTL_SECONDS", "300"))
+    webhook = WebhookNotifier()
+    configured = webhook.configured()
+    push_requested = os.getenv("CLIENT_SESSION_PUSH_ENABLED", "").strip().lower() == "true"
+    if push_requested and not configured:
+        log.error("client sessions: для событий Telegram нужен адрес webhook и секрет")
+    push_updates = push_requested and configured
     return ClientSessionService(
         FileSessionStore(root),
-        TelethonGateway(),
-        WebhookNotifier(),
+        TelethonGateway(push_updates=push_updates),
+        webhook,
         qr_ttl_seconds=ttl,
         poll_seconds=poll,
+        auto_listen=configured,
+        push_updates=push_updates,
     )
 
 

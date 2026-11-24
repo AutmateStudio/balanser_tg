@@ -11,13 +11,20 @@ from typing import Any
 
 
 class WebhookNotifier:
+    @staticmethod
+    def configured() -> bool:
+        return bool(os.getenv("CLIENT_WEBHOOK_URL", "").strip()) and any(
+            os.getenv(name, "").strip()
+            for name in ("CLIENT_WEBHOOK_SECRET", "CLIENT_WEBHOOK_INTERNAL_SECRET")
+        )
+
     async def send(self, payload: dict[str, Any]) -> int:
         return await asyncio.to_thread(self._send, payload)
 
     def _send(self, payload: dict[str, Any]) -> int:
         url = os.getenv("CLIENT_WEBHOOK_URL", "").strip()
-        if not url:
-            return 204
+        if not self.configured():
+            return 503
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         secret = os.getenv("CLIENT_WEBHOOK_SECRET", "").strip()

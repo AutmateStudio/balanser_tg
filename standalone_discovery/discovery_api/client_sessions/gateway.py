@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,9 @@ class HistoryItem:
     outgoing: bool
 
 
+IncomingHandler = Callable[[str, str | None, HistoryItem], Awaitable[None]]
+
+
 @dataclass(frozen=True)
 class SourceMessageContext:
     chat_id: int
@@ -39,6 +43,10 @@ class QrHandle(Protocol):
 
 
 class ClientGateway(Protocol):
+    async def listen_for_messages(self, session_path: Path, handle: IncomingHandler) -> None: ...
+
+    def cached_peer_id(self, session_path: Path, username: str) -> str | None: ...
+
     async def begin_qr(self, session_path: Path) -> QrHandle: ...
 
     async def send_dm(
