@@ -101,8 +101,11 @@ class TelethonGateway:
         self._handlers[key] = incoming
         try:
             client = await self._client(session_path)
+            if await client.get_me() is None:
+                raise SessionRevokedError()
             # Для уже подключённого QR-клиента connect() не запускает догрузку заново.
             await client.catch_up()
+            log.info("client sessions: MTProto подписка активна account=%s", session_path.name)
             await client.run_until_disconnected()
         except Exception as exc:
             _reraise_connection(exc)

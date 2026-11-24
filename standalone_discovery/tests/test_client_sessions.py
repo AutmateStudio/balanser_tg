@@ -624,6 +624,9 @@ async def test_telethon_installs_callback_before_connect_and_reuses_session_on_r
             assert len(self.handlers) == 1
             self.connected = True
 
+        async def get_me(self):
+            return SimpleNamespace(id=77)
+
         async def catch_up(self):
             assert self.connected and len(self.handlers) == 1
             handler, _ = self.handlers[0]

@@ -466,6 +466,8 @@ class ClientSessionService:
             if current.get(key) == payload:
                 del current[key]
                 self.store.save(fresh)
+        log.info("client sessions: webhook подтвердил доставку account=%s event=%s",
+                 remote_account_id, payload.get("event", "incoming"))
         return True
 
     async def _receive_loop(self, remote_account_id: str) -> None:
