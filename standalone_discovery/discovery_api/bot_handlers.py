@@ -76,6 +76,10 @@ def register_bot_handlers(bot: telebot.TeleBot) -> None:
     if _handlers_registered:
         return
 
+    from discovery_api.lead_purchase import register_purchase_callbacks
+    from discovery_api.send_bot_message import _build_inline_markup
+    register_purchase_callbacks(bot, _build_inline_markup)
+
     @bot.message_handler(commands=["start"])
     def handle_start(message: telebot.types.Message) -> None:
         try:
