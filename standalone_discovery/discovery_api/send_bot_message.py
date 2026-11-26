@@ -5,6 +5,7 @@ from typing import Any
 from telebot import types
 
 from discovery_api.bot_registry import get_bot
+from discovery_api.lead_purchase import protect_notification
 
 
 def _normalize_button_rows(buttons: Any) -> list[list[dict[str, Any]]]:
@@ -95,6 +96,8 @@ def send_bot_message(chat_id: int, message: dict[str, Any]) -> Any:
     bot = get_bot()
 
     target_chat_id = chat_id or message.get("chat_id")
+    if target_chat_id:
+        message = protect_notification(target_chat_id, message)
     text = message.get("text") or ""
     image_url = message.get("image_url")
     layout = message.get("layout")
