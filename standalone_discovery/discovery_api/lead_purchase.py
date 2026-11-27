@@ -65,12 +65,12 @@ def render(run_id, card, confirm=False):
         url = card.get("authorUrl")
         if url and urlsplit(url).scheme == "https":
             buttons.append([{"text": "Написать автору", "url": url}])
-    elif card["available"]:
+    elif card["available"] and card.get("canSpend") is True:
         price = card["price"]
         text += f"\n\nСтоимость: {price} кредитов"
         if confirm:
             text += f"\nБаланс: {card['balance']} кредитов"
-            if card["balance"] < price:
+            if card["balance"] < price and card.get("canTopUp") is True:
                 buttons.append(
                     [
                         {
@@ -81,7 +81,7 @@ def render(run_id, card, confirm=False):
                         }
                     ]
                 )
-            else:
+            elif card["balance"] >= price:
                 buttons.append(
                     [
                         {

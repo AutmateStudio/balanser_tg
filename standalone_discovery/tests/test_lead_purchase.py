@@ -30,6 +30,8 @@ class PurchaseCardTests(TestCase):
             price=10,
             balance=100,
             projectId=1,
+            canSpend=True,
+            canTopUp=True,
         )
 
     @patch("discovery_api.lead_purchase.load")
@@ -92,3 +94,12 @@ class PurchaseCardTests(TestCase):
         self.assertNotIn("lead:buy:", str(card["buttons"]))
         self.assertEqual(card["parse_mode"], "HTML")
         self.assertNotIn("<b>", card["text"])
+
+    def test_rights_apply_to_buttons_and_stale_quotes(self):
+        for confirm in (False, True):
+            buttons = render(42, dict(self.preview, canSpend=False), confirm)["buttons"]
+            self.assertNotIn("lead:buy:", str(buttons))
+            self.assertNotIn("lead:quote:", str(buttons))
+        buttons = render(42, dict(self.preview, balance=0, canTopUp=False), True)["buttons"]
+        self.assertNotIn("Пополнить баланс", str(buttons))
+        self.assertNotIn("lead:buy:", str(buttons))
